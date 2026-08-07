@@ -397,6 +397,126 @@ init_line_info_color_pair(struct line_info *info, enum line_type type,
 	tig_init_pair(COLOR_ID(info->color_pair), fg, bg);
 }
 
+/*
+ * Ephemeral syntax styles.  Pair IDs are allocated from SYNTAX_PAIR_BASE
+ * upward, far above the line-rule pair range, so both allocators can grow
+ * independently; the style count is capped both by SYNTAX_STYLE_MAX and by
+ * the terminal's pair budget.  Styles are never freed: views keep style IDs
+ * in their box cells, and the table is bounded.
+ */
+
+#define SYNTAX_PAIR_BASE	1024
+#define SYNTAX_STYLE_MAX	1024
+
+struct syntax_style {
+	int fg;			/* Color as in struct line_info (index or RGB). */
+	int attr;		/* Curses attributes decoded from SGR. */
+	enum line_type base;	/* Line type supplying the background. */
+	int color_pair;		/* Allocated curses pair ID. */
+};
+
+static struct syntax_style *syntax_style;
+static size_t syntax_styles;
+static size_t syntax_pairs;
+
+DEFINE_ALLOCATOR(realloc_syntax_style, struct syntax_style, 32)
+
+/* The background color a syntax style composes its foreground onto: the
+ * base line type's configured background, or the default background. */
+static int
+syntax_style_bg(enum line_type base)
+{
+	struct line_info *info = get_line_info(NULL, base);
+
+	if (info->bg != COLOR_DEFAULT)
+		return info->bg;
+	return get_line_info(NULL, LINE_DEFAULT)->bg;
+}
+
+int
+syntax_style_get(int fg, int attr, enum line_type base)
+{
+	size_t i;
+	struct syntax_style *style;
+	int pair = 0;
+
+#ifndef TIG_EXT_PAIR
+	/* Pair IDs above 255 cannot be expressed through COLOR_PAIR() and
+	 * need the extended attribute path; without it, do not allocate. */
+	return 0;
+#endif
+
+	for (i = 0; i < syntax_styles; i++) {
+		style = &syntax_style[i];
+		if (style->fg == fg && style->attr == attr && style->base == base)
+			return (int) i + 1;
+	}
+
+	if (syntax_styles >= SYNTAX_STYLE_MAX)
+		return 0;
+
+	/* Styles differing only in attributes share a color pair. */
+	for (i = 0; i < syntax_styles; i++) {
+		style = &syntax_style[i];
+		if (style->fg == fg && style->base == base) {
+			pair = style->color_pair;
+			break;
+		}
+	}
+
+	if (!pair) {
+		if (SYNTAX_PAIR_BASE + syntax_pairs >= COLOR_PAIRS)
+			return 0;
+		pair = SYNTAX_PAIR_BASE + syntax_pairs++;
+		tig_init_pair(pair, fg, syntax_style_bg(base));
+	}
+
+	if (!realloc_syntax_style(&syntax_style, syntax_styles, 1))
+		die("Failed to allocate syntax style");
+
+	style = &syntax_style[syntax_styles++];
+	style->fg = fg;
+	style->attr = attr;
+	style->base = base;
+	style->color_pair = pair;
+	return (int) syntax_styles;
+}
+
+bool
+syntax_style_attr(int style, attr_t *attr, int *pair)
+{
+	if (style < 1 || (size_t) style > syntax_styles)
+		return false;
+
+	*attr = syntax_style[style - 1].attr;
+	*pair = syntax_style[style - 1].color_pair;
+	return true;
+}
+
+/* Re-initialize syntax pairs after start_color() or configuration changes;
+ * base backgrounds may have changed, pair IDs stay stable. */
+static void
+syntax_styles_reinit(void)
+{
+	size_t i;
+
+	for (i = 0; i < syntax_styles; i++) {
+		struct syntax_style *style = &syntax_style[i];
+		bool first = true;
+		size_t j;
+
+		for (j = 0; j < i; j++) {
+			if (syntax_style[j].color_pair == style->color_pair) {
+				first = false;
+				break;
+			}
+		}
+		if (first)
+			tig_init_pair(style->color_pair, style->fg,
+				      syntax_style_bg(style->base));
+	}
+}
+
 void
 init_colors(void)
 {
@@ -441,6 +561,8 @@ init_colors(void)
 			init_line_info_color_pair(info, type, default_bg, default_fg);
 		}
 	}
+
+	syntax_styles_reinit();
 }
 
 /* vim: set ts=8 sw=8 noexpandtab: */

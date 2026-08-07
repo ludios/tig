@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -28,6 +30,11 @@ struct view_ops;
 struct box_cell {
 	enum line_type type;
 	size_t length;
+	/* 0 for none, else a 1-based ephemeral syntax style ID resolved via
+	 * syntax_style_attr().  Kept separate from `type` so line-type lookups
+	 * never see style IDs; `type` still supplies background/selection
+	 * semantics for the cell. */
+	int syntax_style;
 };
 
 struct box {
@@ -145,6 +152,7 @@ struct view {
 	/* Drawing */
 	struct line *curline;	/* Line currently being drawn. */
 	enum line_type curtype;	/* Attribute currently used for drawing. */
+	int cursyntax;		/* Syntax style currently used for drawing, 0 = none. */
 	unsigned long col;	/* Column when drawing. */
 	bool force_redraw;	/* Whether to force a redraw after reading. */
 

@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -92,6 +94,56 @@ app_diff_highlight_path_search(char *dest, size_t destlen, const char *query)
 		return false;
 
 	return true;
+}
+
+/*
+ * diff-syntax-filter
+ */
+
+/*
+ * Resolve the diff-syntax-filter option value to an executable.  The value
+ * is a plain name looked up in $PATH, or a path (with ~ expansion); it is
+ * never parsed as a shell command.  Returns an app whose argv[0] is NULL
+ * when the filter cannot be resolved to an executable file, in which case
+ * the caller renders the plain diff.  The result is cached per value so a
+ * :set to a different filter re-resolves.
+ */
+struct app_external *
+app_syntax_filter_load(const char *query)
+{
+	static struct app_external filter_app = { { NULL }, { NULL } };
+	static char cached_query[SIZEOF_STR];
+	static char filter_path[SIZEOF_STR];
+	const char *env_path = getenv("PATH");
+
+	if (!query || !*query) {
+		filter_app.argv[0] = NULL;
+		return &filter_app;
+	}
+
+	if (!strcmp(cached_query, query))
+		return &filter_app;
+
+	string_ncopy(cached_query, query, strlen(query));
+	filter_app.argv[0] = NULL;
+	filter_path[0] = 0;
+
+	if (strchr(query, '~')) {
+		if (!path_expand(filter_path, sizeof(filter_path), query))
+			filter_path[0] = 0;
+	} else if (strchr(query, '/')) {
+		string_ncopy(filter_path, query, strlen(query));
+	} else {
+		if (!env_path || !*env_path)
+			env_path = _PATH_DEFPATH;
+		if (!path_search(filter_path, sizeof(filter_path), query, env_path, X_OK))
+			filter_path[0] = 0;
+	}
+
+	if (*filter_path && access(filter_path, X_OK) == 0)
+		filter_app.argv[0] = filter_path;
+
+	return &filter_app;
 }
 
 struct app_external

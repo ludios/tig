@@ -42,6 +42,7 @@ typedef struct view_column *view_settings;
 	_(diff_noprefix,		bool,			VIEW_NO_FLAGS) \
 	_(diff_options,			const char **,		VIEW_DIFF_LIKE) \
 	_(diff_highlight,		const char *,		VIEW_DIFF_LIKE) \
+	_(diff_syntax_filter,		const char *,		VIEW_DIFF_LIKE) \
 	_(word_diff,			bool,			VIEW_DIFF_LIKE) \
 	_(diff_view,			view_settings,		VIEW_NO_FLAGS) \
 	_(editor_line_number,		bool,			VIEW_NO_FLAGS) \

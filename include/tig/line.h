@@ -140,6 +140,23 @@ struct line_info *add_line_rule(const char *prefix, struct line_rule *rule);
 void init_colors(void);
 void tig_init_pair(int id, int fg, int bg);
 
+/*
+ * Ephemeral syntax styles: (foreground, attributes) pairs decoded from a
+ * diff-syntax-filter's SGR output, composed with the background of a base
+ * line type (e.g. diff-add).  They live in their own table so that they are
+ * invisible to line-type classification and configuration serialization,
+ * and they are capped, so callers must handle a 0 (= none) result.
+ */
+
+/* Returns a 1-based style ID, or 0 when the table or pair budget is full.
+ * `fg` is a color as in struct line_info (COLOR_DEFAULT, index, or RGB);
+ * `attr` holds curses attributes; `base` supplies the background. */
+int syntax_style_get(int fg, int attr, enum line_type base);
+
+/* Fetches the curses attributes and color pair for a style ID; returns
+ * false for 0 or out-of-range IDs. */
+bool syntax_style_attr(int style, attr_t *attr, int *pair);
+
 typedef bool (*line_rule_visitor_fn)(void *data, const struct line_rule *rule);
 bool foreach_line_rule(line_rule_visitor_fn fn, void *data);
 

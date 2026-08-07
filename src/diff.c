@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -46,27 +48,52 @@ diff_open(struct view *view, enum open_flags flags)
 enum status_code
 diff_init_highlight(struct view *view, struct diff_state *state)
 {
-	if (!opt_diff_highlight || !*opt_diff_highlight || opt_word_diff)
+	struct app_external *app;
+	struct io io;
+	bool syntax = false;
+
+	if (opt_word_diff)
 		return SUCCESS;
 
-	struct app_external *app = app_diff_highlight_load(opt_diff_highlight);
-	struct io io;
+	if (opt_diff_syntax_filter && *opt_diff_syntax_filter) {
+		static bool reported_missing;
 
-	/* XXX This empty string keeps valgrind happy while preserving earlier
-	 * behavior of test diff/diff-highlight-test:diff-highlight-misconfigured.
-	 * Simpler would be to return error when user misconfigured, though we
-	 * don't want tig to fail when diff-highlight isn't present.  io_exec
-	 * below does not return error when app->argv[0] is empty or null as the
-	 * conditional might suggest. */
-	if (!*app->argv)
-		app->argv[0] = "";
+		app = app_syntax_filter_load(opt_diff_syntax_filter);
+		if (!*app->argv) {
+			/* Unlike diff-highlight below, a missing filter must
+			 * not leave the view empty: render the plain diff. */
+			if (!reported_missing) {
+				reported_missing = true;
+				report("diff-syntax-filter %s not found; showing plain diff",
+				       opt_diff_syntax_filter);
+			}
+			return SUCCESS;
+		}
+		syntax = true;
+
+	} else if (opt_diff_highlight && *opt_diff_highlight) {
+		app = app_diff_highlight_load(opt_diff_highlight);
+
+		/* XXX This empty string keeps valgrind happy while preserving earlier
+		 * behavior of test diff/diff-highlight-test:diff-highlight-misconfigured.
+		 * Simpler would be to return error when user misconfigured, though we
+		 * don't want tig to fail when diff-highlight isn't present.  io_exec
+		 * below does not return error when app->argv[0] is empty or null as the
+		 * conditional might suggest. */
+		if (!*app->argv)
+			app->argv[0] = "";
+
+	} else {
+		return SUCCESS;
+	}
 
 	if (!io_exec(&io, IO_RP, view->dir, app->env, app->argv, view->io.pipe))
-		return error("Failed to run %s", opt_diff_highlight);
+		return error("Failed to run %s", syntax ? opt_diff_syntax_filter : opt_diff_highlight);
 
 	state->view_io = view->io;
 	view->io = io;
 	state->highlight = true;
+	state->syntax = syntax;
 
 	return SUCCESS;
 }
@@ -84,6 +111,7 @@ struct diff_stat_context {
 	const char *text;
 	enum line_type type;
 	bool skip;
+	int syntax_style;
 	size_t cells;
 	const char **cell_text;
 	struct box_cell cell[8192];
@@ -102,6 +130,7 @@ diff_common_add_cell(struct diff_stat_context *context, size_t length, bool allo
 		return false;
 	context->cell[context->cells].length = length;
 	context->cell[context->cells].type = context->type;
+	context->cell[context->cells].syntax_style = context->syntax_style;
 	context->cells++;
 	return true;
 }
@@ -285,6 +314,150 @@ diff_common_read_diff_wdiff(struct view *view, const char *text)
 	return diff_common_add_line(view, text, LINE_DEFAULT, &context);
 }
 
+/* SGR parameter marking a literal ESC byte in the original diff content;
+ * see the diff-syntax-filter wire protocol in doc/slop/. */
+#define SGR_LITERAL_ESC 999
+
+/*
+ * Decode one escape sequence starting at `esc` (which points at an ESC
+ * byte).  Only "CSI <params> m" sequences are interpreted; anything else is
+ * stripped.  Parameters update the (fg, attr) SGR state; the private
+ * SGR_LITERAL_ESC parameter sets *literal_esc, telling the caller to store
+ * a real ESC byte as content.  Returns a pointer just past the sequence.
+ */
+static const char *
+diff_syntax_decode_sgr(const char *esc, int *fg, int *attr, bool *literal_esc)
+{
+	int params[16];
+	int nparams = 0;
+	int value = 0;
+	bool have_value = false;
+	const char *p = esc + 1;
+	int i;
+
+	if (*p != '[')
+		return p;
+
+	for (p++; isdigit((unsigned char) *p) || *p == ';' || *p == ':'; p++) {
+		if (isdigit((unsigned char) *p)) {
+			if (value < 100000)
+				value = value * 10 + (*p - '0');
+			have_value = true;
+		} else {
+			if (nparams < ARRAY_SIZE(params))
+				params[nparams++] = have_value ? value : 0;
+			value = 0;
+			have_value = false;
+		}
+	}
+	if (*p != 'm')
+		return *p ? p + 1 : p;
+	if (have_value || nparams == 0) {
+		if (nparams < ARRAY_SIZE(params))
+			params[nparams++] = have_value ? value : 0;
+	}
+
+	for (i = 0; i < nparams; i++) {
+		switch (params[i]) {
+		case 0:
+			*fg = COLOR_DEFAULT;
+			*attr = 0;
+			break;
+		case 1:
+			*attr |= A_BOLD;
+			break;
+		case 3:
+#ifdef A_ITALIC
+			*attr |= A_ITALIC;
+#endif
+			break;
+		case 4:
+			*attr |= A_UNDERLINE;
+			break;
+		case 22:
+			*attr &= ~(A_BOLD | A_DIM);
+			break;
+		case 23:
+#ifdef A_ITALIC
+			*attr &= ~A_ITALIC;
+#endif
+			break;
+		case 24:
+			*attr &= ~A_UNDERLINE;
+			break;
+		case 38:
+			if (i + 4 < nparams && params[i + 1] == 2) {
+				*fg = COLOR_RGB_FLAG
+				    | ((params[i + 2] & 0xff) << 16)
+				    | ((params[i + 3] & 0xff) << 8)
+				    |  (params[i + 4] & 0xff);
+				i += 4;
+			} else if (i + 2 < nparams && params[i + 1] == 5) {
+				*fg = params[i + 2] & 0xff;
+				i += 2;
+			}
+			break;
+		case 39:
+			*fg = COLOR_DEFAULT;
+			break;
+		case SGR_LITERAL_ESC:
+			*literal_esc = true;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return p + 1;
+}
+
+/* Append a literal ESC byte as a 1-byte cell carrying the current style.
+ * diff_common_add_cell() copies from context->text, so point it at a
+ * static ESC for the duration of the call. */
+static bool
+diff_common_add_literal_esc(struct diff_stat_context *context)
+{
+	const char *saved = context->text;
+	bool ok;
+
+	context->text = "\x1b";
+	ok = diff_common_add_cell(context, 1, false);
+	context->text = saved;
+	return ok;
+}
+
+/*
+ * Turn a diff line containing SGR sequences from a diff-syntax-filter into
+ * a line whose cells carry ephemeral syntax styles.  The stored text has
+ * all escape sequences stripped (and literal-ESC markers restored), so
+ * search and export operate on the original content.
+ */
+static bool
+diff_common_syntax(struct view *view, const char *text, enum line_type type)
+{
+	struct diff_stat_context context = { text, type, true };
+	int fg = COLOR_DEFAULT;
+	int attr = 0;
+
+	while (true) {
+		const char *esc = strchr(context.text, 0x1b);
+		bool literal_esc = false;
+
+		if (!esc)
+			break;
+		if (!diff_common_add_cell(&context, esc - context.text, false))
+			break;
+		context.text = diff_syntax_decode_sgr(esc, &fg, &attr, &literal_esc);
+		context.syntax_style = (fg == COLOR_DEFAULT && !attr)
+					? 0 : syntax_style_get(fg, attr, type);
+		if (literal_esc && !diff_common_add_literal_esc(&context))
+			break;
+	}
+
+	diff_common_add_cell(&context, strlen(context.text), true);
+	return diff_common_add_line(view, text, type, &context) != NULL;
+}
+
 static bool
 diff_common_highlight(struct view *view, const char *text, enum line_type type)
 {
@@ -382,6 +555,9 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 	if (!opt_diff_indicator && state->reading_diff_chunk &&
 	    !state->stage)
 		data += state->parents;
+
+	if (state->syntax && strchr(data, 0x1b))
+		return diff_common_syntax(view, data, type);
 
 	if (state->highlight && strchr(data, 0x1b))
 		return diff_common_highlight(view, data, type);

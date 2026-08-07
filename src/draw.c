@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -39,16 +41,40 @@ static const enum line_type palette_colors[] = {
  * View drawing.
  */
 
+/* Ephemeral syntax style applied to text drawn by the current draw_*()
+ * call; 0 when drawing with plain line-type attributes.  Set around cell
+ * drawing in draw_view_line_box() and consulted by set_view_attr(). */
+static int draw_syntax_style;
+
 static inline void
 set_view_attr(struct view *view, enum line_type type)
 {
-	if (!view->curline->selected && view->curtype != type) {
+	if (view->curline->selected)
+		return;
+
+	if (draw_syntax_style) {
+		attr_t attr;
+		int pair;
+
+		if (view->cursyntax != draw_syntax_style &&
+		    syntax_style_attr(draw_syntax_style, &attr, &pair)) {
+			(void) wattr_set(view->win, attr,
+					 (short) (pair > SHRT_MAX ? 0 : pair), &pair);
+			wchgat(view->win, -1, 0, (short) (pair > SHRT_MAX ? 0 : pair), &pair);
+			view->cursyntax = draw_syntax_style;
+			view->curtype = LINE_NONE;
+		}
+		return;
+	}
+
+	if (view->curtype != type || view->cursyntax) {
 		(void) wattrset(view->win, get_view_attr(view, type));
 		wchgat(view->win, -1, 0, get_view_color(view, type), NULL);
 #if defined(NCURSES_VERSION_PATCH) && NCURSES_VERSION_PATCH < 20061217
 		touchwin(view->win);
 #endif
 		view->curtype = type;
+		view->cursyntax = 0;
 	}
 }
 
@@ -83,8 +109,12 @@ draw_chars(struct view *view, enum line_type type, const char *string, int lengt
 		waddnstr(view->win, string, len);
 
 	if (trimmed && use_tilde) {
+		int saved_style = draw_syntax_style;
+
+		draw_syntax_style = 0;
 		set_view_attr(view, LINE_DELIMITER);
 		waddstr(view->win, opt_truncation_delimiter ? opt_truncation_delimiter : "~");
+		draw_syntax_style = saved_style;
 		col++;
 	}
 
@@ -593,6 +623,7 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 				for (i = 0; i < box->cells; i++) {
 					const struct box_cell *cell = &box->cell[i];
 					int length = cell->length;
+					bool eol;
 
 					if (indent) {
 						text += indent;
@@ -600,7 +631,10 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 						indent = 0;
 					}
 
-					if (draw_textn(view, cell->type, text, length))
+					draw_syntax_style = cell->syntax_style;
+					eol = draw_textn(view, cell->type, text, length);
+					draw_syntax_style = 0;
+					if (eol)
 						return true;
 
 					text += length;
@@ -682,6 +716,7 @@ draw_view_line(struct view *view, unsigned int lineno)
 	view->col = 0;
 	view->curline = line;
 	view->curtype = LINE_NONE;
+	view->cursyntax = 0;
 	line->selected = false;
 	line->dirty = line->cleareol = 0;
 

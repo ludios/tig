@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -32,6 +34,12 @@ struct app_external {
  */
 
 struct app_external *app_diff_highlight_load(const char *query);
+
+/*
+ * diff-syntax-filter
+ */
+
+struct app_external *app_syntax_filter_load(const char *query);
 
 #endif
 
