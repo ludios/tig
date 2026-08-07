@@ -179,6 +179,9 @@ Notes:
 - For oversights that are true and interesting, fix them and make another commit (using the
   usual commit template). If you fixed nothing, say briefly in your reply why the findings
   didn't warrant changes.
+- Do NOT send that follow-up fix commit through another Codex review — the review cycle for
+  a change ends after one round of findings and fixes. (Exception: the follow-up grew into
+  something substantial beyond addressing the findings.)
 - If you made several commits in a row, make sure the reviews cover all of them: either review
   each commit, or run one ranged review of the whole batch with
   `codex review --base <sha before your first commit>` plus the same `-c` options.
