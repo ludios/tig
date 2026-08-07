@@ -161,6 +161,23 @@ Automatically commit your changes with this commit template:
 
 Commit often; okay to commit more than once per turn!
 
+# Codex code review after each commit
+
+After each commit you make, get it reviewed by Codex (GPT-5.6-Sol at xhigh reasoning):
+
+	codex review --commit <sha> -c model="gpt-5.6-sol" -c model_reasoning_effort="xhigh"
+
+Notes:
+
+- A review can take several minutes; run it in the background and continue if you have other work.
+- Sol often nitpicks, or cares about bizarre, irrelevant edge cases. Ignore those findings;
+  they should not stop you from making progress.
+- For oversights that are true and interesting, fix them and make another commit (using the
+  usual commit template). If you fixed nothing, say briefly in your reply why the findings
+  didn't warrant changes.
+- If you made several commits in a row, reviewing just the last one (or one review per logical
+  change) is fine.
+
 # Thank you for your hard work on this project
 
 <3
