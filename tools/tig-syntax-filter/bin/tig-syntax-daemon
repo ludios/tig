@@ -1,0 +1,6 @@
+#!/bin/sh
+# Model-output: Claude Fable 5
+# Launch the tig-syntax highlight daemon.  Node >= 23.6 runs TypeScript
+# directly (type stripping); the daemon lives next to this script.
+dir=$(dirname "$(readlink -f "$0")")
+exec node "$dir/../src/daemon.ts"

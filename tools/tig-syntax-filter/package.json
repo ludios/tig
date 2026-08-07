@@ -1,0 +1,30 @@
+{
+	"name": "tig-syntax-filter",
+	"version": "0.1.0",
+	"description": "Syntax-highlighting diff filter daemon for tig (shiki / vscode-textmate)",
+	"type": "module",
+	"private": true,
+	"license": "GPL-2.0-or-later",
+	"scripts": {
+		"test": "vitest run",
+		"check": "tsc --noEmit"
+	},
+	"devEngines": {
+		"packageManager": {
+			"name": "pnpm",
+			"version": "^11.18.0",
+			"onFail": "download"
+		}
+	},
+	"dependencies": {
+		"@logtape/file": "2.3.0",
+		"@logtape/logtape": "2.3.0",
+		"ayy": "4.1.0",
+		"shiki": "4.4.2"
+	},
+	"devDependencies": {
+		"fast-check": "4.9.0",
+		"typescript": "7.0.2",
+		"vitest": "4.1.10"
+	}
+}
