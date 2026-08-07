@@ -4,24 +4,135 @@
  * Git plumbing used by the daemon.  Every operation takes the requesting
  * client's working directory explicitly (`git -C`): the daemon serves many
  * repositories and its own cwd is meaningless.
+ *
+ * Blob reads go through a persistent `git cat-file --batch` child per
+ * repository plus an in-memory LRU, so that revisiting commits while
+ * navigating in tig costs no process spawns.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
 
 const execfile_p = promisify(execFile);
 const logger = getLogger(["tig-syntax", "git"]);
 
 const MAX_BLOB_BYTES = 8 * 1024 * 1024;
+const MAX_BATCHERS = 8;
+const BLOB_CACHE_ENTRIES = 128;
 
 /** Cache of `cwd` -> worktree top-level directory (or null outside a repo). */
 const toplevel_cache = new Map<string, string | null>();
 
 /** Cache of `cwd\0path` -> whether a textconv diff driver applies. */
 const textconv_cache = new Map<string, boolean>();
+
+/** LRU of `cwd\0oid` -> blob content. */
+const blob_cache = new Map<string, Buffer>();
+
+/**
+ * A persistent `git cat-file --batch` child for one repository.  Requests
+ * are answered strictly in order, so a FIFO of pending resolvers plus an
+ * incremental buffer parser is sufficient.
+ */
+class blob_batcher {
+	private child: ChildProcessByStdio<Writable, Readable, null>;
+	private pending: { resolve: (blob: Buffer | null) => void }[] = [];
+	private buffer: Buffer = Buffer.alloc(0);
+	private expecting: number | null = null;
+	broken = false;
+
+	constructor(cwd: string) {
+		this.child = spawn("git", ["-C", cwd, "cat-file", "--batch"], {
+			stdio: ["pipe", "pipe", "ignore"],
+		});
+		this.child.on("error", () => {
+			this.fail();
+		});
+		this.child.on("exit", () => {
+			this.fail();
+		});
+		this.child.stdout.on("data", (chunk: Buffer) => {
+			this.buffer = Buffer.concat([this.buffer, chunk]);
+			this.drain();
+		});
+	}
+
+	private fail(): void {
+		this.broken = true;
+		for (const entry of this.pending) {
+			entry.resolve(null);
+		}
+		this.pending = [];
+	}
+
+	/** Parse complete responses out of the buffer, resolving in order. */
+	private drain(): void {
+		while (this.pending.length > 0) {
+			if (this.expecting === null) {
+				const nl = this.buffer.indexOf(0x0a);
+				if (nl === -1) {
+					return;
+				}
+				const header = this.buffer.subarray(0, nl).toString("utf8");
+				this.buffer = this.buffer.subarray(nl + 1);
+				const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
+				if (m === null || m[1] !== "blob") {
+					// "<oid> missing" or a non-blob object.
+					this.pending.shift()?.resolve(null);
+					continue;
+				}
+				this.expecting = parseInt(m[2], 10);
+			}
+			// Content plus the trailing newline git appends.
+			if (this.buffer.length < this.expecting + 1) {
+				return;
+			}
+			const content = this.buffer.subarray(0, this.expecting);
+			this.buffer = this.buffer.subarray(this.expecting + 1);
+			this.expecting = null;
+			this.pending.shift()?.resolve(Buffer.from(content));
+		}
+	}
+
+	request(oid: string): Promise<Buffer | null> {
+		if (this.broken) {
+			return Promise.resolve(null);
+		}
+		return new Promise((resolve) => {
+			this.pending.push({ resolve });
+			this.child.stdin.write(oid + "\n");
+		});
+	}
+
+	kill(): void {
+		this.child.kill();
+	}
+}
+
+/** LRU of `cwd` -> live batcher. */
+const batchers = new Map<string, blob_batcher>();
+
+function get_batcher(cwd: string): blob_batcher {
+	let batcher = batchers.get(cwd);
+	if (batcher !== undefined && !batcher.broken) {
+		batchers.delete(cwd);
+		batchers.set(cwd, batcher);
+		return batcher;
+	}
+	batcher = new blob_batcher(cwd);
+	batchers.set(cwd, batcher);
+	while (batchers.size > MAX_BATCHERS) {
+		const oldest = batchers.keys().next().value as string;
+		batchers.get(oldest)?.kill();
+		batchers.delete(oldest);
+	}
+	return batcher;
+}
 
 /**
  * The worktree top-level directory for a repository at `cwd`, or null when
@@ -45,17 +156,30 @@ export async function get_toplevel(cwd: string): Promise<string | null> {
 
 /**
  * The full content of blob `oid` in the repository at `cwd`, or null when
- * the object is missing or exceeds the size limit.
+ * the object is missing, not a blob, or exceeds the size limit.
  */
 export async function cat_blob(cwd: string, oid: string): Promise<Buffer | null> {
-	try {
-		const { stdout } = await execfile_p("git", ["-C", cwd, "cat-file", "blob", oid],
-			{ encoding: "buffer", maxBuffer: MAX_BLOB_BYTES });
-		return stdout;
-	} catch (err) {
-		logger.debug("cat-file failed for {oid} in {cwd}: {err}", { oid, cwd, err: String(err) });
+	const key = cwd + "\0" + oid;
+	const cached = blob_cache.get(key);
+	if (cached !== undefined) {
+		blob_cache.delete(key);
+		blob_cache.set(key, cached);
+		return cached;
+	}
+	const blob = await get_batcher(cwd).request(oid);
+	if (blob === null) {
+		logger.debug("no blob {oid} in {cwd}", { oid, cwd });
 		return null;
 	}
+	if (blob.length > MAX_BLOB_BYTES) {
+		return null;
+	}
+	blob_cache.set(key, blob);
+	while (blob_cache.size > BLOB_CACHE_ENTRIES) {
+		const oldest = blob_cache.keys().next().value as string;
+		blob_cache.delete(oldest);
+	}
+	return blob;
 }
 
 /**
@@ -107,5 +231,6 @@ export async function has_textconv(cwd: string, path: string): Promise<boolean> 
 		result = false;
 	}
 	textconv_cache.set(key, result);
+	A(textconv_cache.size < 100000, "textconv cache unbounded");
 	return result;
 }
