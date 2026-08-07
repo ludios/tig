@@ -28,6 +28,31 @@ Windows, word-diff + syntax at the same time.
 | Truecolor | **Core requirement, done early** (Step 2), so all later steps render exact RGB. 256-color quantization remains as automatic fallback. |
 | Diff line coloring | Token fg from theme + line bg tint from tig's own `diff-add`/`diff-del` colors, expressed through existing tigrc `color` commands once they accept `#rrggbb`. |
 
+### Why the daemon is TypeScript (not C or Rust)
+
+The language is dictated by the fidelity goal, not preference. "Matches VS Code" means
+running VS Code's actual tokenizer: `vscode-textmate` (the grammar interpreter) and
+`vscode-oniguruma` (the Oniguruma regex engine compiled to WASM), both JavaScript/npm
+packages — shiki is a thin wrapper around exactly these. Every non-JS route gives up
+something essential:
+
+- **Rust**: the mature option is syntect (what bat/delta use), but it interprets
+  *Sublime* syntax definitions, not VS Code's grammar files, and needs themes converted
+  out of VS Code JSON — token boundaries and colors drift from what VS Code shows.
+  There is no maintained Rust port of vscode-textmate.
+- **C**: would mean hand-porting the TextMate grammar engine + embedding Oniguruma and
+  a JSON grammar loader — months of work to reimplement, then permanently chase, a
+  well-maintained upstream. Rejected on maintenance cost.
+- **Embedding a JS runtime in a C/Rust daemon** (quickjs/deno_core) just re-creates
+  Node with extra steps, and quickjs can't run the WASM Oniguruma build well.
+
+The performance-sensitive parts are already native: Oniguruma runs as WASM, and the
+daemon amortizes Node startup + grammar compilation across its lifetime. TypeScript is
+only orchestration glue (~a few hundred lines). tig itself gains no runtime dependency —
+it only ever sees an external filter command, and the protocol boundary means the daemon
+could later be swapped for a native syntect-based one at reduced fidelity if the Node
+dependency ever becomes a problem.
+
 ## Architecture
 
 ```
