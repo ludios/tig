@@ -149,9 +149,10 @@ void tig_init_pair(int id, int fg, int bg);
  */
 
 /* Returns a 1-based style ID, or 0 when the table or pair budget is full.
- * `fg` is a color as in struct line_info (COLOR_DEFAULT, index, or RGB);
- * `attr` holds curses attributes; `base` supplies the background. */
-int syntax_style_get(int fg, int attr, enum line_type base);
+ * `prefix` scopes background lookup to a view (interned keymap name, may
+ * be NULL); `fg` is a color as in struct line_info (COLOR_DEFAULT, index,
+ * or RGB); `attr` holds curses attributes; `base` supplies the background. */
+int syntax_style_get(const char *prefix, int fg, int attr, enum line_type base);
 
 /* Fetches the curses attributes and color pair for a style ID; returns
  * false for 0 or out-of-range IDs. */

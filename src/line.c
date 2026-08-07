@@ -438,6 +438,7 @@ init_line_info_color_pair(struct line_info *info, enum line_type type,
 #define SYNTAX_STYLE_MAX	1024
 
 struct syntax_style {
+	const char *prefix;	/* View prefix (interned keymap name) or NULL. */
 	int fg;			/* Color as in struct line_info (index or RGB). */
 	int attr;		/* Curses attributes decoded from SGR. */
 	enum line_type base;	/* Line type supplying the background. */
@@ -451,19 +452,20 @@ static size_t syntax_pairs;
 DEFINE_ALLOCATOR(realloc_syntax_style, struct syntax_style, 32)
 
 /* The background color a syntax style composes its foreground onto: the
- * base line type's configured background, or the default background. */
+ * base line type's configured background (view-specific when defined),
+ * or the default background. */
 static int
-syntax_style_bg(enum line_type base)
+syntax_style_bg(const char *prefix, enum line_type base)
 {
-	struct line_info *info = get_line_info(NULL, base);
+	struct line_info *info = get_line_info(prefix, base);
 
 	if (info->bg != COLOR_DEFAULT)
 		return info->bg;
-	return get_line_info(NULL, LINE_DEFAULT)->bg;
+	return get_line_info(prefix, LINE_DEFAULT)->bg;
 }
 
 int
-syntax_style_get(int fg, int attr, enum line_type base)
+syntax_style_get(const char *prefix, int fg, int attr, enum line_type base)
 {
 	size_t i;
 	struct syntax_style *style;
@@ -477,17 +479,23 @@ syntax_style_get(int fg, int attr, enum line_type base)
 
 	for (i = 0; i < syntax_styles; i++) {
 		style = &syntax_style[i];
-		if (style->fg == fg && style->attr == attr && style->base == base)
+		if (style->prefix == prefix && style->fg == fg &&
+		    style->attr == attr && style->base == base)
 			return (int) i + 1;
 	}
 
 	if (syntax_styles >= SYNTAX_STYLE_MAX)
 		return 0;
 
+	/* Keep the palette allocator away from indexed colors a filter uses
+	 * directly (38;5;n), so palette slots never shadow them. */
+	if (!COLOR_IS_RGB(fg) && fg >= 0 && fg <= 255)
+		palette_slot_reserved[fg] = true;
+
 	/* Styles differing only in attributes share a color pair. */
 	for (i = 0; i < syntax_styles; i++) {
 		style = &syntax_style[i];
-		if (style->fg == fg && style->base == base) {
+		if (style->prefix == prefix && style->fg == fg && style->base == base) {
 			pair = style->color_pair;
 			break;
 		}
@@ -497,13 +505,14 @@ syntax_style_get(int fg, int attr, enum line_type base)
 		if (SYNTAX_PAIR_BASE + syntax_pairs >= COLOR_PAIRS)
 			return 0;
 		pair = SYNTAX_PAIR_BASE + syntax_pairs++;
-		tig_init_pair(pair, fg, syntax_style_bg(base));
+		tig_init_pair(pair, fg, syntax_style_bg(prefix, base));
 	}
 
 	if (!realloc_syntax_style(&syntax_style, syntax_styles, 1))
 		die("Failed to allocate syntax style");
 
 	style = &syntax_style[syntax_styles++];
+	style->prefix = prefix;
 	style->fg = fg;
 	style->attr = attr;
 	style->base = base;
@@ -542,7 +551,7 @@ syntax_styles_reinit(void)
 		}
 		if (first)
 			tig_init_pair(style->color_pair, style->fg,
-				      syntax_style_bg(style->base));
+				      syntax_style_bg(style->prefix, style->base));
 	}
 }
 

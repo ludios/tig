@@ -317,6 +317,45 @@ diff_common_read_diff_wdiff(struct view *view, const char *text)
 /* SGR parameter marking a literal ESC byte in the original diff content;
  * see the diff-syntax-filter wire protocol in doc/slop/. */
 #define SGR_LITERAL_ESC 999
+#define SGR_LITERAL_ESC_MARKER "\x1b[999m"
+
+/* True when every ESC in `text` only begins the literal-ESC marker. */
+static bool
+diff_syntax_only_markers(const char *text)
+{
+	const char *esc;
+
+	for (esc = strchr(text, 0x1b); esc; esc = strchr(esc + 1, 0x1b)) {
+		if (prefixcmp(esc, SGR_LITERAL_ESC_MARKER)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+ * Restore literal ESC bytes on a line whose only escapes are framing
+ * markers.  Non-hunk lines (commit message, diff stat, hunk headers) take
+ * early returns in diff_common_read() that never reach the SGR decoder,
+ * so they are unframed up front to keep stored text lossless.
+ */
+static const char *
+diff_syntax_unframe(const char *data)
+{
+	static char buf[SIZEOF_MED_STR];
+	size_t out = 0;
+
+	while (*data && out < sizeof(buf) - 1) {
+		if (*data == 0x1b && !prefixcmp(data, SGR_LITERAL_ESC_MARKER)) {
+			buf[out++] = 0x1b;
+			data += STRING_SIZE(SGR_LITERAL_ESC_MARKER);
+		} else {
+			buf[out++] = *data++;
+		}
+	}
+	buf[out] = 0;
+	return buf;
+}
 
 /*
  * Decode one escape sequence starting at `esc` (which points at an ESC
@@ -449,7 +488,7 @@ diff_common_syntax(struct view *view, const char *text, enum line_type type)
 			break;
 		context.text = diff_syntax_decode_sgr(esc, &fg, &attr, &literal_esc);
 		context.syntax_style = (fg == COLOR_DEFAULT && !attr)
-					? 0 : syntax_style_get(fg, attr, type);
+					? 0 : syntax_style_get(view->keymap->name, fg, attr, type);
 		if (literal_esc && !diff_common_add_literal_esc(&context))
 			break;
 	}
@@ -478,7 +517,13 @@ diff_common_highlight(struct view *view, const char *text, enum line_type type)
 bool
 diff_common_read(struct view *view, const char *data, struct diff_state *state)
 {
-	enum line_type type = get_line_type(data);
+	enum line_type type;
+
+	if (state->syntax && strchr(data, 0x1b) && diff_syntax_only_markers(data)) {
+		data = diff_syntax_unframe(data);
+	}
+
+	type = get_line_type(data);
 
 	/* ADD2 and DEL2 are only valid in combined diff hunks */
 	if (!state->combined_diff && (type == LINE_DIFF_ADD2 || type == LINE_DIFF_DEL2))
