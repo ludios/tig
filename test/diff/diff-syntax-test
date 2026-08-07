@@ -1,0 +1,142 @@
+#!/bin/sh
+# Model-output: Claude Fable 5
+
+. libtest.sh
+. libgit.sh
+
+in_work_dir create_repo_from_tgz "$base_dir/files/scala-js-benchmarks.tgz"
+
+# Injects truecolor SGR around a token and the literal-ESC framing marker
+# at the end of one line; tig must strip all of it from stored text.
+file bin/color-filter <<EOF
+#!/bin/sh
+# Per the wire contract, only hunk body lines are colored.
+exec awk -v esc="\$(printf '\033')" '
+/^diff --git/ { in_hunk = 0 }
+/^@@/ { in_hunk = 1; print; next }
+in_hunk && /^[-+ ]/ {
+	gsub(/js\.Dynamic/, esc "[38;2;198;120;221m&" esc "[0m");
+	gsub(/runScalaJSBenchmarks/, esc "[38;2;152;195;121;1;3m&" esc "[39;22;23m");
+}
+{ print }
+'
+EOF
+
+chmod +x bin/color-filter
+
+# A filter that copies input untouched must render like no filter at all.
+file bin/cat-filter <<EOF
+#!/bin/sh
+exec cat
+EOF
+
+chmod +x bin/cat-filter
+
+test_case diff-syntax-injected \
+	--tigrc="set diff-syntax-filter = $PWD/bin/color-filter" \
+	--args='show master^' \
+	<<EOF
+commit a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff
+Author:     Jonas Fonseca <jonas.fonseca@gmail.com>
+AuthorDate: Sat Mar 1 15:59:02 2014 -0500
+Commit:     Jonas Fonseca <jonas.fonseca@gmail.com>
+CommitDate: Sat Mar 1 15:59:02 2014 -0500
+ 
+    Add type parameter for js.Dynamic
+---
+ common/src/main/scala/org/scalajs/benchmark/Benchmark.scala | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+ 
+diff --git a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala b/commo
+index 65f914a..3aa4320 100644
+--- a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
++++ b/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
+@@ -15,7 +15,7 @@ object Benchmark {
+   val benchmarks = js.Array[Benchmark]()
+   val benchmarkApps = js.Array[BenchmarkApp]()
+ 
+-  val global = js.Dynamic.global.asInstanceOf[js.Dictionary]
++  val global = js.Dynamic.global.asInstanceOf[js.Dictionary[js.Any]]
+   global("runScalaJSBenchmarks") = runBenchmarks _
+   global("initScalaJSBenchmarkApps") = initBenchmarkApps _
+ 
+ 
+ 
+ 
+ 
+[diff] a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff - line 1 of 24              100%
+EOF
+
+test_case diff-syntax-passthrough \
+	--tigrc="set diff-syntax-filter = $PWD/bin/cat-filter" \
+	--args='show master^' \
+	<<EOF
+commit a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff
+Author:     Jonas Fonseca <jonas.fonseca@gmail.com>
+AuthorDate: Sat Mar 1 15:59:02 2014 -0500
+Commit:     Jonas Fonseca <jonas.fonseca@gmail.com>
+CommitDate: Sat Mar 1 15:59:02 2014 -0500
+ 
+    Add type parameter for js.Dynamic
+---
+ common/src/main/scala/org/scalajs/benchmark/Benchmark.scala | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+ 
+diff --git a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala b/commo
+index 65f914a..3aa4320 100644
+--- a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
++++ b/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
+@@ -15,7 +15,7 @@ object Benchmark {
+   val benchmarks = js.Array[Benchmark]()
+   val benchmarkApps = js.Array[BenchmarkApp]()
+ 
+-  val global = js.Dynamic.global.asInstanceOf[js.Dictionary]
++  val global = js.Dynamic.global.asInstanceOf[js.Dictionary[js.Any]]
+   global("runScalaJSBenchmarks") = runBenchmarks _
+   global("initScalaJSBenchmarkApps") = initBenchmarkApps _
+ 
+ 
+ 
+ 
+ 
+[diff] a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff - line 1 of 24              100%
+EOF
+
+# A missing filter must render the plain diff, not an empty view
+# (unlike the historical diff-highlight behavior).
+test_case diff-syntax-missing \
+	--tigrc='set diff-syntax-filter = program-that-does-not-exist' \
+	--args='show master^' \
+	<<EOF
+commit a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff
+Author:     Jonas Fonseca <jonas.fonseca@gmail.com>
+AuthorDate: Sat Mar 1 15:59:02 2014 -0500
+Commit:     Jonas Fonseca <jonas.fonseca@gmail.com>
+CommitDate: Sat Mar 1 15:59:02 2014 -0500
+ 
+    Add type parameter for js.Dynamic
+---
+ common/src/main/scala/org/scalajs/benchmark/Benchmark.scala | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+ 
+diff --git a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala b/commo
+index 65f914a..3aa4320 100644
+--- a/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
++++ b/common/src/main/scala/org/scalajs/benchmark/Benchmark.scala
+@@ -15,7 +15,7 @@ object Benchmark {
+   val benchmarks = js.Array[Benchmark]()
+   val benchmarkApps = js.Array[BenchmarkApp]()
+ 
+-  val global = js.Dynamic.global.asInstanceOf[js.Dictionary]
++  val global = js.Dynamic.global.asInstanceOf[js.Dictionary[js.Any]]
+   global("runScalaJSBenchmarks") = runBenchmarks _
+   global("initScalaJSBenchmarkApps") = initBenchmarkApps _
+ 
+ 
+ 
+ 
+ 
+[diff] a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff - line 1 of 24              100%
+EOF
+
+run_test_cases

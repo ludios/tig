@@ -188,7 +188,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	const started = performance.now();
 	const token_lines = highlighter.codeToTokensBase(slice.join("\n"), {
 		lang: lang as never,
-		theme: theme_name,
+		theme: theme_name as never,
 	});
 	const elapsed = performance.now() - started;
 	if (elapsed > 200) {

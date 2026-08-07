@@ -61,8 +61,10 @@ diff_init_highlight(struct view *view, struct diff_state *state)
 		app = app_syntax_filter_load(opt_diff_syntax_filter);
 		if (!*app->argv) {
 			/* Unlike diff-highlight below, a missing filter must
-			 * not leave the view empty: render the plain diff. */
-			if (!reported_missing) {
+			 * not leave the view empty: render the plain diff.
+			 * report() dies when no view is displayed yet, so the
+			 * very first load stays silent. */
+			if (!reported_missing && display[current_view]) {
 				reported_missing = true;
 				report("diff-syntax-filter %s not found; showing plain diff",
 				       opt_diff_syntax_filter);
