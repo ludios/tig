@@ -175,8 +175,9 @@ Notes:
 - For oversights that are true and interesting, fix them and make another commit (using the
   usual commit template). If you fixed nothing, say briefly in your reply why the findings
   didn't warrant changes.
-- If you made several commits in a row, reviewing just the last one (or one review per logical
-  change) is fine.
+- If you made several commits in a row, make sure the reviews cover all of them: either review
+  each commit, or run one ranged review of the whole batch with
+  `codex review --base <sha before your first commit>` plus the same `-c` options.
 
 # Thank you for your hard work on this project
 
