@@ -42,8 +42,11 @@ const blob_cache = new Map<string, Buffer>();
 class blob_batcher {
 	private child: ChildProcessByStdio<Writable, Readable, null>;
 	private pending: { resolve: (blob: Buffer | null) => void }[] = [];
-	private buffer: Buffer = Buffer.alloc(0);
-	private expecting: number | null = null;
+	/** Unparsed stdout, as a chunk list to avoid per-chunk concatenation. */
+	private chunks: Buffer[] = [];
+	private buffered = 0;
+	/** Size and blobness of the payload the last header announced. */
+	private expecting: { size: number, is_blob: boolean } | null = null;
 	broken = false;
 
 	constructor(cwd: string) {
@@ -57,7 +60,8 @@ class blob_batcher {
 			this.fail();
 		});
 		this.child.stdout.on("data", (chunk: Buffer) => {
-			this.buffer = Buffer.concat([this.buffer, chunk]);
+			this.chunks.push(chunk);
+			this.buffered += chunk.length;
 			this.drain();
 		});
 	}
@@ -70,32 +74,59 @@ class blob_batcher {
 		this.pending = [];
 	}
 
-	/** Parse complete responses out of the buffer, resolving in order. */
+	/** All buffered bytes as one Buffer (at most one concat per call). */
+	private contiguous(): Buffer {
+		if (this.chunks.length !== 1) {
+			this.chunks = [Buffer.concat(this.chunks)];
+		}
+		return this.chunks[0];
+	}
+
+	private consume(bytes: number): void {
+		this.chunks = [this.contiguous().subarray(bytes)];
+		this.buffered -= bytes;
+	}
+
+	/**
+	 * Parse complete responses, resolving strictly in request order.  Every
+	 * announced payload is consumed even for non-blob objects (commits and
+	 * trees, e.g. submodule OIDs), since leaving it would desynchronize the
+	 * FIFO.  A payload above the blob limit kills the child instead: memory
+	 * stays bounded and all pending requests degrade to null.
+	 */
 	private drain(): void {
 		while (this.pending.length > 0) {
 			if (this.expecting === null) {
-				const nl = this.buffer.indexOf(0x0a);
+				const data = this.contiguous();
+				const nl = data.indexOf(0x0a);
 				if (nl === -1) {
 					return;
 				}
-				const header = this.buffer.subarray(0, nl).toString("utf8");
-				this.buffer = this.buffer.subarray(nl + 1);
+				const header = data.subarray(0, nl).toString("utf8");
+				this.consume(nl + 1);
 				const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
-				if (m === null || m[1] !== "blob") {
-					// "<oid> missing" or a non-blob object.
+				if (m === null) {
+					// "<oid> missing": no payload follows.
 					this.pending.shift()?.resolve(null);
 					continue;
 				}
-				this.expecting = parseInt(m[2], 10);
+				const size = parseInt(m[2], 10);
+				if (size > MAX_BLOB_BYTES) {
+					this.kill();
+					this.fail();
+					return;
+				}
+				this.expecting = { size, is_blob: m[1] === "blob" };
 			}
-			// Content plus the trailing newline git appends.
-			if (this.buffer.length < this.expecting + 1) {
+			// Payload plus the trailing newline git appends.
+			if (this.buffered < this.expecting.size + 1) {
 				return;
 			}
-			const content = this.buffer.subarray(0, this.expecting);
-			this.buffer = this.buffer.subarray(this.expecting + 1);
+			const content = this.contiguous().subarray(0, this.expecting.size);
+			const is_blob = this.expecting.is_blob;
+			this.consume(this.expecting.size + 1);
 			this.expecting = null;
-			this.pending.shift()?.resolve(Buffer.from(content));
+			this.pending.shift()?.resolve(is_blob ? Buffer.from(content) : null);
 		}
 	}
 

@@ -10,6 +10,7 @@
  * literal-ESC marker yields the section's input bytes exactly.
  */
 
+import { createHash } from "node:crypto";
 import { getLogger } from "@logtape/logtape";
 import { parse_file_section, type diff_section, type file_info } from "./diff_parser.ts";
 import { ensure_lang, highlight_lines, frame_content, content_identity } from "./highlight.ts";
@@ -54,12 +55,27 @@ interface side_doc {
 	lines: string[];
 }
 
+/** Whether `content` hashes to the (possibly abbreviated) blob `oid`,
+ * under either of git's hash algorithms. */
+function content_matches_oid(content: Buffer, oid: string): boolean {
+	const header = Buffer.from(`blob ${content.length}\0`);
+	for (const algorithm of ["sha1", "sha256"]) {
+		const hex = createHash(algorithm).update(header).update(content).digest("hex");
+		if (hex.startsWith(oid)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /**
  * Fetch and prepare one side's source document, or null when the side
  * cannot be highlighted (no source, binary/invalid UTF-8, no grammar).
  * `worktree_fallback` reads the file itself when no object is available:
  * git can print computed post-image OIDs for worktree content that is in
- * no object database (correspondence validation guards a racing edit).
+ * no object database.  Worktree content must still hash to a printed OID
+ * (the file may have changed since git emitted the diff) and is cached by
+ * its own content hash, never under the OID.
  */
 async function load_side(cwd: string, path: string | null, oid: string | null,
 			 worktree_fallback: boolean): Promise<side_doc | null> {
@@ -67,11 +83,16 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 		return null;
 	}
 	let content: Buffer | null = null;
+	let from_worktree = false;
 	if (oid !== null) {
 		content = await cat_blob(cwd, oid);
 	}
 	if (content === null && worktree_fallback) {
-		content = await read_worktree_file(cwd, path);
+		const file = await read_worktree_file(cwd, path);
+		if (file !== null && (oid === null || content_matches_oid(file, oid))) {
+			content = file;
+			from_worktree = true;
+		}
 	}
 	if (content === null || content.includes(0)) {
 		return null;
@@ -86,7 +107,8 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 	if (lang === null || !(await ensure_lang(lang))) {
 		return null;
 	}
-	const identity = oid !== null ? content_identity(cwd, oid) : content_identity(cwd, content);
+	const identity = (oid !== null && !from_worktree)
+		? content_identity(cwd, oid) : content_identity(cwd, content);
 	return { identity, lang, text, lines: text.split("\n") };
 }
 
