@@ -13,7 +13,6 @@ AC_PROG_CC
 
 AC_CHECK_HEADERS([execinfo.h paths.h stdint.h stdlib.h string.h sys/time.h unistd.h wordexp.h])
 AC_CHECK_FUNCS([gettimeofday])
-AC_CHECK_FUNCS([init_extended_pair])
 AC_CHECK_DECLS([environ])
 AC_CHECK_DECLS([errno], [], [], [#include <errno.h>])
 
@@ -32,6 +31,13 @@ case "$ax_cv_ncursesw" in "no")
 	AC_MSG_WARN([This means that tig will not correctly render UTF-8.])
 esac
 AC_SUBST(CURSES_LIBS)
+
+dnl Extended color pairs (for 24-bit color) must be probed with the
+dnl discovered curses library linked in.
+tig_save_LIBS="$LIBS"
+LIBS="$LIBS $CURSES_LIBS"
+AC_CHECK_FUNCS([init_extended_pair])
+LIBS="$tig_save_LIBS"
 
 AX_LIB_READLINE(6.3)
 

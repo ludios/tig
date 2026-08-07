@@ -233,7 +233,8 @@ rgb_to_256(int rgb)
 		  + (long) (g - levels[gi]) * (g - levels[gi])
 		  + (long) (b - levels[bi]) * (b - levels[bi]);
 
-	gray_index = ((r + g + b) / 3 - 8) / 10;
+	/* Ramp entries hold 8 + 10i, so round to the nearest multiple of 10. */
+	gray_index = ((r + g + b) / 3 - 3) / 10;
 	gray_index = gray_index < 0 ? 0 : gray_index > 23 ? 23 : gray_index;
 	gray_value = 8 + gray_index * 10;
 	gray_dist = (long) (r - gray_value) * (r - gray_value)
@@ -270,8 +271,10 @@ palette_program_slot(int slot, int rgb)
 {
 	int r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
 
-	init_color(slot, (r * 1000 + 127) / 255, (g * 1000 + 127) / 255,
-		   (b * 1000 + 127) / 255);
+	/* Ceiling the 0..1000 scale keeps the value exact after the terminal
+	 * converts back with a truncating v * 255 / 1000 (xterm's initc). */
+	init_color(slot, (r * 1000 + 254) / 255, (g * 1000 + 254) / 255,
+		   (b * 1000 + 254) / 255);
 }
 
 /*
@@ -332,10 +335,29 @@ palette_alloc(int rgb)
 	return rgb_to_256(rgb);
 }
 
+/* The RGB value a given xterm-256 palette index stands for. */
+static int
+xterm256_to_rgb(int index)
+{
+	static const int levels[6] = { 0, 95, 135, 175, 215, 255 };
+
+	if (index >= 232) {
+		int v = 8 + 10 * (index - 232);
+
+		return (v << 16) | (v << 8) | v;
+	}
+	index -= 16;
+	return (levels[index / 36] << 16)
+	     | (levels[(index / 6) % 6] << 8)
+	     |  levels[index % 6];
+}
+
 /*
  * Translate a configured color to the value passed to curses pair
  * initialization: indexed colors pass through, RGB colors are realized
- * according to the active color tier.
+ * according to the active color tier.  On a direct-color terminal the
+ * quantized tier still has to emit RGB values, since such terminals
+ * interpret color numbers >= 8 as packed RGB, not palette indices.
  */
 static int
 resolve_color(int color)
@@ -349,6 +371,10 @@ resolve_color(int color)
 	case COLOR_TIER_PALETTE:
 		return palette_alloc(COLOR_RGB_VALUE(color));
 	default:
+#ifdef TIG_EXT_PAIR
+		if (COLORS >= (1 << 24))
+			return xterm256_to_rgb(rgb_to_256(COLOR_RGB_VALUE(color)));
+#endif
 		return rgb_to_256(COLOR_RGB_VALUE(color));
 	}
 }
@@ -385,6 +411,9 @@ init_line_info_color_pair(struct line_info *info, enum line_type type,
 	for (i = 0; i < color_pairs; i++) {
 		if (color_pair[i]->fg == info->fg && color_pair[i]->bg == info->bg) {
 			info->color_pair = i;
+			/* Re-issue the pair: the color tier may have changed
+			 * since it was first initialized (:set truecolor). */
+			tig_init_pair(COLOR_ID(i), fg, bg);
 			return;
 		}
 	}
