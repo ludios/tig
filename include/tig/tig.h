@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -67,6 +69,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <limits.h>
 #include <termios.h>
 
 #if defined(__APPLE__)
@@ -129,6 +132,16 @@
 #ifndef newscr
 /* `newscr` is a ncurses-ism, and doesn't exist in netbsd-curses. (#790) */
 #define newscr curscr
+#endif
+
+/* Extended color pairs (ncurses ABI 6) accept int-sized color values and so
+ * can hold packed 24-bit RGB colors on direct-color terminals, which exceed
+ * the short range accepted by init_pair().  NCURSES_EXT_COLORS is defined by
+ * ncurses' curses.h when the ABI supports this; HAVE_INIT_EXTENDED_PAIR can
+ * be set by configure.  Define TIG_NO_EXT_PAIR to force this off. */
+#if !defined(TIG_NO_EXT_PAIR) && \
+    (defined(HAVE_INIT_EXTENDED_PAIR) || defined(NCURSES_EXT_COLORS))
+#define TIG_EXT_PAIR 1
 #endif
 
 #if __GNUC__ >= 3

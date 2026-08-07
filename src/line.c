@@ -11,11 +11,14 @@
  * GNU General Public License for more details.
  */
 
+/* Model-output: Claude Fable 5 */
+
 #include "tig/tig.h"
 #include "tig/types.h"
 #include "tig/refdb.h"
 #include "tig/line.h"
 #include "tig/util.h"
+#include "tig/options.h"
 
 static struct line_rule *line_rule;
 static size_t line_rules;
@@ -194,6 +197,183 @@ foreach_line_rule(line_rule_visitor_fn visitor, void *data)
 	return true;
 }
 
+/* How rgb:RRGGBB colors are realized on the terminal; chosen by
+ * init_colors() from the truecolor option and terminal capabilities. */
+enum color_tier {
+	COLOR_TIER_INDEXED,	/* quantize to the nearest xterm-256 entry */
+	COLOR_TIER_PALETTE,	/* reprogram unused palette slots to exact RGB */
+	COLOR_TIER_DIRECT,	/* pass packed 24-bit values (terminfo RGB) */
+};
+
+static enum color_tier color_tier = COLOR_TIER_INDEXED;
+
+/*
+ * Map a 24-bit RGB value to the nearest xterm-256 palette index, considering
+ * both the 6x6x6 color cube (16..231) and the grayscale ramp (232..255).
+ * Returns a palette index in the range 16..255.
+ */
+static int
+rgb_to_256(int rgb)
+{
+	static const int levels[6] = { 0, 95, 135, 175, 215, 255 };
+	int r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+	int ri, gi, bi, gray_index, gray_value, i;
+	long cube_dist, gray_dist;
+
+	for (i = 5; i > 0 && r < (levels[i - 1] + levels[i] + 1) / 2; i--)
+		;
+	ri = i;
+	for (i = 5; i > 0 && g < (levels[i - 1] + levels[i] + 1) / 2; i--)
+		;
+	gi = i;
+	for (i = 5; i > 0 && b < (levels[i - 1] + levels[i] + 1) / 2; i--)
+		;
+	bi = i;
+	cube_dist = (long) (r - levels[ri]) * (r - levels[ri])
+		  + (long) (g - levels[gi]) * (g - levels[gi])
+		  + (long) (b - levels[bi]) * (b - levels[bi]);
+
+	gray_index = ((r + g + b) / 3 - 8) / 10;
+	gray_index = gray_index < 0 ? 0 : gray_index > 23 ? 23 : gray_index;
+	gray_value = 8 + gray_index * 10;
+	gray_dist = (long) (r - gray_value) * (r - gray_value)
+		  + (long) (g - gray_value) * (g - gray_value)
+		  + (long) (b - gray_value) * (b - gray_value);
+
+	if (gray_dist < cube_dist)
+		return 232 + gray_index;
+	return 16 + 36 * ri + 6 * gi + bi;
+}
+
+/* Palette-reprogramming state: which RGB value each slot was programmed to
+ * (-1 = free), and which slots the user's indexed colors already occupy. */
+#define PALETTE_SLOT_MIN 16
+static int palette_slot_rgb[256];
+static bool palette_slot_reserved[256];
+
+static bool
+palette_mark_reserved(void *data, const struct line_rule *rule)
+{
+	const struct line_info *info;
+
+	for (info = &rule->info; info; info = info->next) {
+		if (!COLOR_IS_RGB(info->fg) && info->fg >= 0 && info->fg <= 255)
+			palette_slot_reserved[info->fg] = true;
+		if (!COLOR_IS_RGB(info->bg) && info->bg >= 0 && info->bg <= 255)
+			palette_slot_reserved[info->bg] = true;
+	}
+	return true;
+}
+
+static void
+palette_program_slot(int slot, int rgb)
+{
+	int r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+
+	init_color(slot, (r * 1000 + 127) / 255, (g * 1000 + 127) / 255,
+		   (b * 1000 + 127) / 255);
+}
+
+/*
+ * Recompute which palette slots may be reprogrammed and re-issue init_color()
+ * for mappings that survive, since start_color() resets the color table.
+ * Mappings landing on a now-reserved slot are dropped and will reallocate.
+ */
+static void
+palette_reset(void)
+{
+	static bool initialized;
+	int slot;
+
+	if (!initialized) {
+		for (slot = 0; slot < 256; slot++)
+			palette_slot_rgb[slot] = -1;
+		initialized = true;
+	}
+
+	memset(palette_slot_reserved, 0, sizeof(palette_slot_reserved));
+	foreach_line_rule(palette_mark_reserved, NULL);
+
+	for (slot = PALETTE_SLOT_MIN; slot < 256 && slot < COLORS; slot++) {
+		if (palette_slot_rgb[slot] == -1)
+			continue;
+		if (palette_slot_reserved[slot]) {
+			palette_slot_rgb[slot] = -1;
+		} else {
+			palette_program_slot(slot, palette_slot_rgb[slot]);
+		}
+	}
+}
+
+/*
+ * Program `rgb` into a free palette slot, reusing an existing mapping when
+ * one exists.  Slots are taken from the top of the palette down to keep away
+ * from commonly used low indices.  Returns the slot, or a quantized xterm-256
+ * index when no free slot remains.
+ */
+static int
+palette_alloc(int rgb)
+{
+	int limit = COLORS < 256 ? COLORS : 256;
+	int slot;
+
+	for (slot = limit - 1; slot >= PALETTE_SLOT_MIN; slot--)
+		if (palette_slot_rgb[slot] == rgb)
+			return slot;
+
+	for (slot = limit - 1; slot >= PALETTE_SLOT_MIN; slot--) {
+		if (palette_slot_rgb[slot] == -1 && !palette_slot_reserved[slot]) {
+			palette_slot_rgb[slot] = rgb;
+			palette_program_slot(slot, rgb);
+			return slot;
+		}
+	}
+
+	return rgb_to_256(rgb);
+}
+
+/*
+ * Translate a configured color to the value passed to curses pair
+ * initialization: indexed colors pass through, RGB colors are realized
+ * according to the active color tier.
+ */
+static int
+resolve_color(int color)
+{
+	if (!COLOR_IS_RGB(color))
+		return color;
+
+	switch (color_tier) {
+	case COLOR_TIER_DIRECT:
+		return COLOR_RGB_VALUE(color);
+	case COLOR_TIER_PALETTE:
+		return palette_alloc(COLOR_RGB_VALUE(color));
+	default:
+		return rgb_to_256(COLOR_RGB_VALUE(color));
+	}
+}
+
+/*
+ * Initialize a curses color pair from possibly-RGB color values.  Extended
+ * pairs are required for direct-color values, which do not fit in the short
+ * range accepted by init_pair(); the pair ID itself stays small, so pairs
+ * remain addressable through COLOR_PAIR() in the draw layer.
+ */
+void
+tig_init_pair(int id, int fg, int bg)
+{
+	int resolved_fg = resolve_color(fg);
+	int resolved_bg = resolve_color(bg);
+
+#ifdef TIG_EXT_PAIR
+	if (resolved_fg > SHRT_MAX || resolved_bg > SHRT_MAX) {
+		init_extended_pair(id, resolved_fg, resolved_bg);
+		return;
+	}
+#endif
+	init_pair(id, resolved_fg, resolved_bg);
+}
+
 static void
 init_line_info_color_pair(struct line_info *info, enum line_type type,
 	int default_bg, int default_fg)
@@ -214,7 +394,7 @@ init_line_info_color_pair(struct line_info *info, enum line_type type,
 
 	color_pair[color_pairs] = info;
 	info->color_pair = color_pairs++;
-	init_pair(COLOR_ID(info->color_pair), fg, bg);
+	tig_init_pair(COLOR_ID(info->color_pair), fg, bg);
 }
 
 void
@@ -236,7 +416,19 @@ init_colors(void)
 
 	start_color();
 
-	if (assume_default_colors(default_fg, default_bg) == ERR) {
+	color_tier = COLOR_TIER_INDEXED;
+#ifdef TIG_EXT_PAIR
+	if (opt_truecolor != TRUECOLOR_NO && COLORS >= (1 << 24))
+		color_tier = COLOR_TIER_DIRECT;
+#endif
+	if (color_tier == COLOR_TIER_INDEXED &&
+	    opt_truecolor == TRUECOLOR_PALETTE && can_change_color()) {
+		color_tier = COLOR_TIER_PALETTE;
+		palette_reset();
+	}
+
+	if (assume_default_colors(resolve_color(default_fg),
+				  resolve_color(default_bg)) == ERR) {
 		default_bg = COLOR_BLACK;
 		default_fg = COLOR_WHITE;
 	}

@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -166,6 +168,11 @@ bool map_enum_do(const struct enum_map_entry *map, size_t map_size, int *value, 
 	_(REFRESH_MODE, AFTER_COMMAND), \
 	_(REFRESH_MODE, PERIODIC),
 
+#define TRUECOLOR_ENUM(_) \
+	_(TRUECOLOR, NO), \
+	_(TRUECOLOR, AUTO), \
+	_(TRUECOLOR, PALETTE)
+
 #define ENUM_INFO(_) \
 	_(author, AUTHOR_ENUM) \
 	_(commit_order, COMMIT_ORDER_ENUM) \
@@ -181,6 +188,7 @@ bool map_enum_do(const struct enum_map_entry *map, size_t map_size, int *value, 
 	_(reference_type, REFERENCE_ENUM) \
 	_(refresh_mode, REFRESH_MODE_ENUM) \
 	_(status_label, STATUS_LABEL_ENUM) \
+	_(truecolor, TRUECOLOR_ENUM) \
 
 #define DEFINE_ENUMS(name, macro) DEFINE_ENUM(name, macro)
 ENUM_INFO(DEFINE_ENUMS)

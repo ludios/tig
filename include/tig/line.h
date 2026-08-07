@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -136,9 +138,19 @@ const char *get_line_type_name(enum line_type type);
 struct line_info *get_line_info(const char *prefix, enum line_type type);
 struct line_info *add_line_rule(const char *prefix, struct line_rule *rule);
 void init_colors(void);
+void tig_init_pair(int id, int fg, int bg);
 
 typedef bool (*line_rule_visitor_fn)(void *data, const struct line_rule *rule);
 bool foreach_line_rule(line_rule_visitor_fn fn, void *data);
+
+/* A color is either COLOR_DEFAULT (-1), a palette index (0..255), or, when
+ * COLOR_RGB_FLAG is set, a 24-bit rgb:RRGGBB value from the configuration.
+ * RGB values are resolved to terminal colors by init_colors() according to
+ * the truecolor option and the terminal's capabilities.  The >= 0 check
+ * keeps COLOR_DEFAULT (all bits set) from matching the flag. */
+#define COLOR_RGB_FLAG			0x40000000
+#define COLOR_IS_RGB(color)		((color) >= 0 && ((color) & COLOR_RGB_FLAG) != 0)
+#define COLOR_RGB_VALUE(color)		((color) & 0xffffff)
 
 /* Color IDs must be 1 or higher. [GH #15] */
 #define COLOR_ID(line_type)		((line_type) + 1)

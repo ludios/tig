@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -1117,7 +1119,8 @@ run_prompt_command(struct view *view, const char *argv[])
 			}
 		}
 
-		if (!strcmp(cmd, "color"))
+		if (!strcmp(cmd, "color") ||
+		    (!strcmp(cmd, "set") && argv[1] && !prefixcmp(argv[1], "truecolor")))
 			init_colors();
 		resize_display();
 		redraw_display(true);

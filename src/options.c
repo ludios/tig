@@ -1,3 +1,5 @@
+/* Model-output: Claude Fable 5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -338,6 +340,9 @@ static const struct enum_map_entry attr_map[] = {
 	ATTR_MAP(REVERSE),
 	ATTR_MAP(STANDOUT),
 	ATTR_MAP(UNDERLINE),
+#ifdef A_ITALIC
+	ATTR_MAP(ITALIC),
+#endif
 };
 
 #define set_attribute(attr, name)	map_enum(attr, attr_map, name)
@@ -385,6 +390,21 @@ set_color(int *color, const char *name)
 {
 	if (map_enum(color, color_map, name))
 		return true;
+	/* 24-bit colors use rgb:RRGGBB; a leading '#' cannot be used since
+	 * the configuration file parser strips it as a comment marker. */
+	if (!prefixcmp(name, "rgb:")) {
+		const char *hex = name + STRING_SIZE("rgb:");
+		char *end;
+		unsigned long value;
+
+		if (strlen(hex) != 6)
+			return false;
+		value = strtoul(hex, &end, 16);
+		if (*end)
+			return false;
+		*color = COLOR_RGB_FLAG | (int) value;
+		return true;
+	}
 	/* Git expects a plain int w/o prefix, however, color<int> is
 	 * the preferred Tig color notation.  */
 	if (!prefixcmp(name, "color"))
@@ -1363,6 +1383,9 @@ static bool
 save_option_color_name(FILE *file, int color)
 {
 	int i;
+
+	if (COLOR_IS_RGB(color))
+		return io_fprintf(file, " rgb:%06x", COLOR_RGB_VALUE(color));
 
 	for (i = 0; i < ARRAY_SIZE(color_map); i++)
 		if (color_map[i].value == color)
