@@ -1,0 +1,23 @@
+# Syntax-highlighted diffs for tig, VS Code style (One Monokai).
+#
+# Requires the tig-syntax-filter client on PATH (or use an absolute path
+# below); see tools/tig-syntax-filter/README.md for building it.
+# Best on a truecolor terminal with direct-color terminfo, e.g.
+# TERM=xterm-direct or tmux-direct; other terminals get the nearest
+# xterm-256 colors (or exact colors with `set truecolor = palette`).
+
+set diff-syntax-filter = tig-syntax-filter
+set truecolor = auto
+
+# Colors from your git config (color.diff.new etc.) would override the
+# row tints below, so keep them out.
+set git-colors = no
+
+# VS Code-style rows: token colors carry the syntax, the background
+# carries the diff state.  Tints tuned for One Monokai's #282c34 world.
+color diff-add	default	rgb:22331f
+color diff-del	default	rgb:3b2626
+
+# Optional: match the theme's editor background and foreground exactly.
+#color default	rgb:abb2bf	rgb:282c34
+#color cursor	white	rgb:3a3f4b

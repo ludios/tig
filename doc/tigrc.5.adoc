@@ -294,6 +294,34 @@ The following variables can be set:
 	regions are governed by `color diff-add-highlight` and
 	`color diff-del-highlight`.
 
+'diff-syntax-filter' (string)::
+
+	Name or path of an executable that syntax-highlights diffs, e.g. the
+	'tig-syntax-filter' program shipped in 'tools/tig-syntax-filter/'.
+	Unset by default. The whole diff is piped through the program, which
+	must preserve the diff byte-for-byte apart from inserting SGR color
+	sequences (codes 0, 1, 3, 4, 22, 23, 24, 38;2;r;g;b, 38;5;n, 39)
+	inside hunk lines; literal ESC bytes of content must be sent as the
+	private sequence `ESC[999m`. Token foreground colors are composed
+	onto each line type's configured background, so added and removed
+	rows keep their `color diff-add` / `color diff-del` backgrounds
+	(best combined with 'truecolor' and `rgb:` colors; see
+	'contrib/tig-syntax.tigrc'). The value is resolved like a program
+	name, never parsed as a shell command. If the program cannot be
+	found the plain diff is shown. Takes precedence over
+	'diff-highlight'; ignored when 'word-diff' is enabled.
+
+'truecolor' (enum) [no|auto|palette]::
+
+	How `rgb:RRGGBB` colors are realized. 'auto' (the default) passes
+	exact 24-bit values on terminals whose terminfo advertises direct
+	color (e.g. 'xterm-direct', 'tmux-direct') and otherwise quantizes
+	to the nearest of the 256 xterm colors. 'palette' additionally
+	allows tig to reprogram unused palette slots to exact values on
+	terminals that support color redefinition; this mutates the
+	terminal's palette for the session and may not be restored on exit.
+	'no' always quantizes.
+
 'diff-indicator' (bool)::
 
 	Show +/- signs in the diff view. On by default.
@@ -1057,6 +1085,11 @@ colors supported by 88-color and 256-color terminals. Note that the 'color'
 prefix is optional. If you prefer, you can specify colors directly by their
 numbers *0*, *1*, ..., *N-1* instead, just like in the configuration file of
 Git.
++
+24-bit colors are written *rgb:RRGGBB* with six hexadecimal digits, for
+example `color diff-add default rgb:2d3d2d`. How they are realized on the
+terminal is controlled by the 'truecolor' option. (A leading '#' cannot be
+used since it starts a comment in the configuration file.)
 
 Attribute names::
 
