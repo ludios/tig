@@ -169,6 +169,10 @@ After each commit you make, get it reviewed by Codex (GPT-5.6-Sol at xhigh reaso
 
 Notes:
 
+- Codex is configured globally in `~/.codex/config.toml` (`approval_policy = "never"`,
+  `sandbox_mode = "danger-full-access"`) to never ask for permission and run unsandboxed, so
+  reviews and `codex exec` runs never block on prompts. If codex ever stalls waiting for
+  approval, check that file.
 - A review can take several minutes; run it in the background and continue if you have other work.
 - Sol often nitpicks, or cares about bizarre, irrelevant edge cases. Ignore those findings;
   they should not stop you from making progress.
