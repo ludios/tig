@@ -352,20 +352,31 @@ Upgrade the filter for production:
   (repo identity, blob OID, grammar id + version, theme hash, tokenizer version);
   LRU-bounded. Worktree-side identity is a **content hash** (correctness-bearing;
   two contents can share mtime+size); (repo identity, absolute path, mtime+size)
-  serves only as a fast-path hint to skip rehashing.
+  is only a rehash-skipping hint, trusted only under git's racily-clean rule —
+  the file's mtime must be strictly older than the cache entry's creation time,
+  since a rewrite can preserve both size and mtime; otherwise rehash. Residual
+  staleness is still caught by correspondence validation below (mismatch ⇒
+  passthrough, never wrong colors).
 - **Hunk/source correspondence validation**: before injecting colors into a file's
   hunks, verify the diff's context and old/new lines byte-match the reconstructed
   sources at the mapped line numbers; on mismatch, pass that file through
-  unhighlighted. This is the general guard for textconv (git may display
-  transformed, not literal, blob content), clean/smudge filters, CRLF conversion,
-  and any transformation we failed to anticipate.
+  unhighlighted. This is the safety net for clean/smudge filters, CRLF
+  conversion, staleness races, and transformations we failed to anticipate.
+  It is *not* sufficient for textconv (below): it checks only displayed lines,
+  and a transform that alters just unshown prefix lines still poisons the
+  grammar state those lines carry.
 - **Limits**: per-line time budget and max line length (mirror VS Code's 20k-char
   cap); oversized/pathological input passes through unhighlighted. If tokenization
   of line N stops early (time budget), grammar state from that point is tainted —
   pass through the **remainder of that side's document**, not just line N, since
   later lexical state depends on it. Daemon absence, crash, or timeout ⇒ client
   falls back to passthrough; tig is unaffected.
-- Skip binary files, submodules, and invalid-UTF-8 files outright.
+- Skip binary files, submodules, invalid-UTF-8 files, and **files whose diff
+  driver configures textconv** (detected via `git check-attr diff` + config
+  lookup, cached per path): tig's stage-view diffs pass `--textconv`
+  (`include/tig/git.h:33-36`), so git may display transformed rather than
+  literal blob content, and correspondence validation cannot prove the unshown
+  transformed prefix matches the raw source we would tokenize.
 
 **Exit criteria**
 - A hunk starting inside a multiline construct highlights correctly (corpus test).
