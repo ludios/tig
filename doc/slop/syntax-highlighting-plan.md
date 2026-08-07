@@ -1,9 +1,9 @@
 # Syntax highlighting for tig diff views — finalized implementation plan
 
 Status: finalized plan, ready to implement. Supersedes `raw-proposals/1.md` and
-`raw-proposals/2.md`; revised after an external review (2026-08) that found twelve
-correctness issues — all verified against this tree and incorporated below. All
-file:line references were re-verified against this tree (2.6.1-dev fork).
+`raw-proposals/2.md`; revised after two rounds of external review (2026-08) — all
+findings verified against this tree and incorporated below. All file:line
+references were re-verified against this tree (2.6.1-dev fork).
 
 ## Goals
 
@@ -19,8 +19,11 @@ file:line references were re-verified against this tree (2.6.1-dev fork).
 
 Non-goals for v1: semantic (LSP) tokens, combined merge diffs, blame/blob/tree views,
 Windows, word-diff + syntax at the same time, **`wrap-lines` + syntax at the same
-time** (see Step 4), token background colors from the theme (One Monokai has 2 such
-rules; we emit foregrounds + attrs only).
+time** (see Step 4), **intraline diff highlighting + syntax at the same time** (the
+`diff-highlight` 7/27 protocol is absent in syntax mode and the filter has no notion
+of changed spans; supporting both later needs another marker in the wire protocol),
+token background colors from the theme (One Monokai has 2 such rules; we emit
+foregrounds + attrs only).
 
 ## Decisions (resolving the raw proposals' open questions)
 
@@ -32,7 +35,8 @@ rules; we emit foregrounds + attrs only).
 | Node/Bun dependency | Acceptable. Target platform is Linux/NixOS; package the daemon with an explicit Node/Bun store path. Windows out of scope. |
 | Tokenization state | **Full-source tokenization** (fetch pre/post-image content, thread grammar state from line 1) — always correct, cacheable. Only tokenize **up to the last line the diff needs**, not the whole file (vscode-textmate's `tokenizeLine` takes prior state + a time budget, so state can be cached incrementally). Hunk-local state only in the throwaway PoC. |
 | Truecolor | **Core requirement, done early** (Step 2), so all later steps render exact RGB. 256-color quantization is the automatic fallback; palette reprogramming is explicit opt-in, never part of `auto`. |
-| Diff line coloring | Token fg from theme + line bg tint from tig's own `diff-add`/`diff-del` colors, expressed through existing tigrc `color` commands once they accept `#rrggbb`. |
+| Diff line coloring | Token fg from theme + line bg tint from tig's own `diff-add`/`diff-del` colors, expressed through existing tigrc `color` commands once they accept RGB values. |
+| RGB spelling in tigrc | **`rgb:RRGGBB`**, not `#rrggbb`: tigrc's option reader truncates every line at the first `#` *before* argument/quote parsing (`read_option`, `src/options.c:1079-1087`), so `#`-prefixed colors cannot survive the existing grammar. `rgb:` needs only a `set_color` change, no lexer surgery. |
 
 ### Why the daemon is TypeScript (not C or Rust)
 
@@ -148,11 +152,16 @@ arbitrary Git bytes through JS strings would otherwise break byte preservation).
 
 Build `tools/tig-syntax-filter/` (TypeScript, single package):
 
-- shiki with One Monokai theme JSON, grammar set pinned by version; language
-  detection from the new-side path (extension + shebang sniffing).
+- shiki with One Monokai theme JSON, grammar set pinned by version; the Oniguruma
+  WASM engine instantiated **explicitly** (shiki supports multiple regex engines;
+  the JS engine would break the "VS Code engine lineage" fidelity contract).
+- **Per-side language detection**: old path + old content → old grammar; new path
+  + new content → new grammar (a rename can change extension). Deleted files have
+  no new side, new files no old side; shebang sniffing uses the corresponding
+  side's content. Removed lines use the old grammar, added lines the new grammar,
+  context lines advance both.
 - **Diff parsing must handle real Git output**, not just `+++ b/<path>`: quoted
-  pathnames, `--no-prefix` / custom prefixes, `/dev/null`, rename/copy headers
-  (a rename can change extension — old and new side may need *different* grammars),
+  pathnames, `--no-prefix` / custom prefixes, `/dev/null`, rename/copy headers,
   all-zero and arbitrary-width object IDs in `index` lines.
 - v0 tokenization: hunk-local, two parallel grammar-state chains per file — and
   **context lines advance both chains** (they exist in both documents), with
@@ -182,9 +191,11 @@ containing literal ESC bytes, invalid UTF-8, very long lines.
 
 Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
 
-- Accept `#rrggbb` in `set_color` (`src/options.c:384`); represent as packed RGB in
-  the existing `int fg, bg` of `struct line_info` (`include/tig/line.h:115-120`)
-  with a flag bit distinguishing RGB from indexed.
+- Accept `rgb:RRGGBB` in `set_color` (`src/options.c:384`); represent as packed RGB
+  in the existing `int fg, bg` of `struct line_info` (`include/tig/line.h:115-120`)
+  with a flag bit distinguishing RGB from indexed. (`#rrggbb` is impossible without
+  changing tigrc's comment grammar — `read_option` truncates at the first `#`
+  before any argument parsing, `src/options.c:1079-1087` — so we don't.)
 - Rendering tiers, resolved at pair-init time in `init_line_info_color_pair`
   (`src/line.c:197-218`):
   1. **Direct color** (in `auto`): terminal exposes direct RGB → `init_extended_pair`
@@ -214,7 +225,7 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
   `palette` additionally enables tier 2).
 
 **Exit criteria**
-- `color diff-add-highlight #ffffff #345634` renders exact RGB under
+- `color diff-add rgb:abb2bf rgb:2d3d2d` renders exact RGB under
   `TERM=xterm-direct`; under `xterm-256color` it quantizes by default and renders
   exactly with `set truecolor = palette`.
 - All existing tests pass; `:set`-triggered `init_colors()` re-runs are idempotent
@@ -222,9 +233,12 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
 
 ## Step 3 — General SGR decoder + `diff-syntax-filter` option in tig
 
-- New option `set diff-syntax-filter = <cmd>` reusing the `diff_init_highlight`
-  io-swap plumbing (`src/diff.c:46-72`). Mutually exclusive with `diff-highlight`
-  and `word-diff` for v1 (same pattern as `src/diff.c:49`).
+- New option `set diff-syntax-filter = <path>` reusing the `diff_init_highlight`
+  io-swap plumbing (`src/diff.c:46-72`). The value is an executable name/path
+  (resolved via PATH like `diff-highlight` is, `src/apps.c:58`), **not** a shell
+  command with arguments — that's what makes the pre-exec stat below well-defined.
+  Mutually exclusive with `diff-highlight` and `word-diff` for v1 (same pattern
+  as `src/diff.c:49`).
 - **Two decoder modes**, selected by which option is active:
   - *Legacy mode* (`diff-highlight`): exactly today's semantics — `ESC[7m`/`ESC[27m`
     switch to/from the configured `LINE_DIFF_{ADD,DEL}_HIGHLIGHT` line types.
@@ -234,16 +248,25 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
     plus the ESC-framing unescape from the wire protocol. Ignore all other codes.
   Both keep the `skip` semantics — stored text stays escape-free (and, in syntax
   mode, literal-ESC-restored) so search keeps working.
-- **Ephemeral style table, separate from line rules**: map each distinct resolved
-  (fg, attr) × *base line type's bg* to an entry in a new syntax-style table,
-  addressed from `box_cell.type` via a tag bit distinguishing "line type" from
-  "syntax style id"; the draw path resolves both. Rationale: line rules are global
-  config-visible state — `get_line_type` scans them and `:save-options` serializes
-  them (`src/options.c:1418`) — so hundreds of anonymous styles must not live
-  there. Style entries are recyclable (e.g. on `:set` / theme change). Color pairs
-  still come from the Step-2 allocator. Cap the table at runtime from
-  `COLOR_PAIRS` minus pairs already consumed by tig, with fallback-to-base-type on
-  overflow.
+- **Ephemeral style table, separate from line rules, structurally distinct in
+  `box_cell`**: map each distinct resolved (fg, attr) × *base line type's bg* to
+  an entry in a new syntax-style table. Rationale for a separate table: line rules
+  are global config-visible state — `get_line_type` scans them and `:save-options`
+  serializes them (`src/options.c:1418`) — so hundreds of anonymous styles must
+  not live there. Rationale for structural distinction rather than a tag bit
+  smuggled inside `enum line_type`: `box_cell.type` values flow into
+  `get_line_info`, which asserts they index the line-rule table
+  (`src/line.c:90`); a sometimes-invalid line type is an invariant every future
+  caller would have to remember. Instead give `box_cell` an explicit style
+  reference (e.g. a `style_ref` int with line-type vs syntax-style encoding
+  behind accessor functions), so a wrong call fails to compile or is obvious at
+  the call site. Style entries are recyclable (e.g. on `:set` / theme change);
+  color pairs still come from the Step-2 allocator.
+- **Two independent capacity limits**, not one: (a) a memory/DoS cap on distinct
+  syntax styles (~512–1024) — attrs are free, so many styles share pairs; (b) the
+  ncurses pair budget, checked after (fg,bg) deduplication (the existing allocator
+  dedups on exactly that, `src/line.c:205-210`) against runtime `COLOR_PAIRS`
+  minus pairs tig already uses. Overflow of either ⇒ fallback-to-base-type.
 - **Fallback when the filter can't run** (new behavior, not today's empty view):
   resolve/stat the filter command before the io swap; if unavailable, skip the
   swap, render the plain diff, and `report()` once. (Daemon absence is handled by
@@ -275,13 +298,15 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
   ```
   set diff-syntax-filter = tig-syntax-filter
   set truecolor = auto
-  color diff-add           default #2d3d2d   # whole-row tints: our styling choice
-  color diff-del           default #3d2d2d
-  color diff-add-highlight default #345634   # intraline, brighter
-  color diff-del-highlight default #563434
+  color diff-add default rgb:2d3d2d   # whole-row tints: our styling choice
+  color diff-del default rgb:3d2d2d
   ```
-  (`default` fg means "keep token color"). A One Monokai-faithful alternative
-  snippet (teal inserted-text tint, no removed tint) goes in the docs for purists.
+  (`default` fg means "keep token color"). Note `diff-add-highlight` /
+  `diff-del-highlight` are deliberately absent: those types are selected only by
+  the legacy 7/27 protocol, which syntax mode doesn't speak — configuring them
+  would be dead configuration (intraline+syntax is a v1 non-goal). A One
+  Monokai-faithful alternative snippet (teal inserted-text tint, no removed tint)
+  goes in the docs for purists.
 - **Wrapping is excluded from v1**: highlighted lines bypass the pager wrap path
   entirely (see "What tig already has"), so `wrap-lines yes` + syntax filter means
   lines render unwrapped (truncated/scrollable) exactly like diff-highlight lines
@@ -299,9 +324,17 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
 Upgrade the filter for production:
 
 - **Daemon**: shiki instance listening on `$XDG_RUNTIME_DIR/tig-syntax.sock`,
-  lazily spawned by the thin client on first use; grammars/theme loaded once.
-  Client is a dumb pipe (small C program or compiled single binary) so per-diff
-  spawn cost is negligible.
+  lazily spawned by the thin client on first use; grammars/theme + the Oniguruma
+  WASM engine (pinned, explicitly instantiated) loaded once.
+- **Transactional client, not a dumb pipe**: once bytes are fed to a dying daemon
+  they can't be re-read from stdin, so "daemon crash ⇒ passthrough" needs
+  buffering. The per-file flush boundary is the transaction: the client tees each
+  diff-file section, sends it to the daemon, and emits the highlighted response
+  only when it arrives complete; on any failure it emits the buffered raw section
+  and degrades to passthrough for the rest of the stream. Sections too large to
+  hold in RAM spool to disk (or are passed through unhighlighted — they'd exceed
+  tokenizer limits anyway). This makes the `kill -9` exit criterion guaranteed
+  rather than aspirational.
 - **Repo context travels with every request.** The daemon's cwd is whatever repo
   first spawned it and is meaningless afterwards; only the *client* runs in
   `view->dir` (`src/diff.c:64`). Each request carries the absolute repo path
@@ -317,14 +350,22 @@ Upgrade the filter for production:
   comments, template literals, heredocs) become always correct.
 - **Cache** tokenized line-run tables + line-state checkpoints keyed by
   (repo identity, blob OID, grammar id + version, theme hash, tokenizer version);
-  LRU-bounded. Worktree-side content keyed by (repo identity, absolute path,
-  mtime+size or content hash) — path alone would alias same-named files across
-  repos.
+  LRU-bounded. Worktree-side identity is a **content hash** (correctness-bearing;
+  two contents can share mtime+size); (repo identity, absolute path, mtime+size)
+  serves only as a fast-path hint to skip rehashing.
+- **Hunk/source correspondence validation**: before injecting colors into a file's
+  hunks, verify the diff's context and old/new lines byte-match the reconstructed
+  sources at the mapped line numbers; on mismatch, pass that file through
+  unhighlighted. This is the general guard for textconv (git may display
+  transformed, not literal, blob content), clean/smudge filters, CRLF conversion,
+  and any transformation we failed to anticipate.
 - **Limits**: per-line time budget and max line length (mirror VS Code's 20k-char
-  cap); oversized/pathological input passes through unhighlighted. Daemon absence,
-  crash, or timeout ⇒ client falls back to passthrough; tig is unaffected.
-- Skip binary files, submodules, invalid-UTF-8 files, and files transformed by
-  textconv.
+  cap); oversized/pathological input passes through unhighlighted. If tokenization
+  of line N stops early (time budget), grammar state from that point is tainted —
+  pass through the **remainder of that side's document**, not just line N, since
+  later lexical state depends on it. Daemon absence, crash, or timeout ⇒ client
+  falls back to passthrough; tig is unaffected.
+- Skip binary files, submodules, and invalid-UTF-8 files outright.
 
 **Exit criteria**
 - A hunk starting inside a multiline construct highlights correctly (corpus test).
@@ -340,12 +381,14 @@ Upgrade the filter for production:
 
 - **Tests**: extend the `test/diff/` harness — SGR fixture tests per decoder mode
   (legacy 7/27 semantics locked in; syntax-mode SGR set; ESC framing round-trip),
-  losslessness over the corpus (filter), truecolor tier selection under faked
-  terminfo, `:set` re-init, `:save-options` purity, search over syntax spans,
-  missing-filter fallback, daemon-crash fallback, cross-repo daemon requests.
+  losslessness over the corpus (filter), `rgb:` color parsing, truecolor tier
+  selection under faked terminfo, `:set` re-init, `:save-options` purity, search
+  over syntax spans, missing-filter fallback, daemon-crash mid-file fallback
+  (transaction boundary), correspondence-validation passthrough (textconv/CRLF),
+  cross-repo daemon requests.
 - **Docs**: `doc/tigrc.5.adoc` entries for `diff-syntax-filter`, `truecolor`,
-  `#rrggbb` colors; a manual section with the recommended snippet from Step 4 and
-  the wrap-lines limitation.
+  `rgb:RRGGBB` colors; a manual section with the recommended snippet from Step 4
+  and the wrap-lines / intraline-highlight limitations.
 - **Packaging**: Nix derivation for the daemon with an explicit node/bun store
   dependency (no `/usr/bin/env node`); filter+daemon shippable separately from
   tig; grammar/theme versions pinned in the lockfile.
@@ -364,7 +407,7 @@ Upgrade the filter for production:
 | Wire losslessness (literal ESC in content) | Medium | framing rule + round-trip CI test over corpus incl. adversarial fixture |
 | Regressing legacy diff-highlight | Medium | separate decoder mode; existing tests must pass unmodified |
 | Dynamic style/pair growth under `:set` re-init | Medium | separate ephemeral style table + runtime `COLOR_PAIRS` cap + idempotency test |
-| Daemon lifecycle & multi-repo state (stale socket, cwd, cache aliasing) | Medium | per-request repo context; repo identity in cache keys; handshake version; client passthrough on any error |
+| Daemon lifecycle & multi-repo state (stale socket, cwd, cache aliasing) | Medium | per-request repo context; repo identity in cache keys; handshake version; transactional per-file buffering in the client, passthrough on any error |
 | Palette reprogramming surprises users | Low (opt-in) | never in `auto`; only provably-unused indices; documented restoration caveat |
 | Perf on huge diffs / huge files | Low–medium | streaming per-file flush; tokenize only to last needed line; caps; per-file passthrough fallback |
 
