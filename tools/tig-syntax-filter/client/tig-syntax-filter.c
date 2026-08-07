@@ -1,5 +1,8 @@
 /* Model-output: Claude Fable 5 */
 
+/* For struct ucred (SO_PEERCRED). */
+#define _GNU_SOURCE
+
 /*
  * tig-syntax-filter: the thin, transactional client tig runs as its
  * diff-syntax-filter.  It streams stdin to the highlight daemon (spawning
@@ -144,6 +147,20 @@ try_connect(const char *path)
 		close(fd);
 		return -1;
 	}
+#ifdef SO_PEERCRED
+	/* The socket path can be predictable (/tmp fallback); never hand the
+	 * repository's diff to a daemon owned by another user. */
+	{
+		struct ucred cred;
+		socklen_t cred_len = sizeof(cred);
+
+		if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
+		    cred.uid != geteuid()) {
+			close(fd);
+			return -1;
+		}
+	}
+#endif
 	return fd;
 }
 
@@ -374,7 +391,9 @@ main(void)
 				close(daemon_fd);
 				return fallback_passthrough(&spool, acked, stdin_open);
 			}
-			continue;
+			/* Everything is emitted and only the end frame is
+			 * missing; there is nothing left to recover. */
+			return 0;
 		}
 
 		if (stdin_slot >= 0 && (fds[stdin_slot].revents & (POLLIN | POLLHUP))) {
@@ -388,8 +407,18 @@ main(void)
 				stdin_open = false;
 				shutdown(daemon_fd, SHUT_WR);
 			} else if (got > 0) {
-				if (spool.len + (size_t) got > SPOOL_MAX ||
-				    !buf_append(&spool, chunk, (size_t) got)) {
+				if (!buf_append(&spool, chunk, (size_t) got)) {
+					/* The chunk is already consumed from
+					 * stdin: emit it after the spool so
+					 * fallback loses nothing. */
+					close(daemon_fd);
+					if (spool.len > acked) {
+						write_framed(spool.data + acked, spool.len - acked);
+					}
+					write_framed(chunk, (size_t) got);
+					return fallback_passthrough(&spool, spool.len, stdin_open);
+				}
+				if (spool.len > SPOOL_MAX) {
 					close(daemon_fd);
 					return fallback_passthrough(&spool, acked, stdin_open);
 				}

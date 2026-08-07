@@ -24,6 +24,7 @@ const EMIT_VERSION = 1;
 
 export const MAX_LINE_CHARS = 20000;
 export const MAX_DOC_LINES = 100000;
+export const MAX_RUNS_PER_LINE = 4000;
 
 const CACHE_MAX_ENTRIES = 256;
 
@@ -201,15 +202,22 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	for (const tokens of token_lines) {
 		let out = "";
 		let last_style = "";
+		let runs = 0;
 		for (const token of tokens) {
 			const seq = style_sequence(token.color, token.fontStyle);
 			if (seq !== last_style) {
 				out += seq;
 				last_style = seq;
+				runs++;
 			}
 			out += frame_content(token.content);
 		}
 		out += "\x1b[0m";
+		// tig stores at most 8192 cells per line; emit pathological
+		// lines unstyled rather than have tig truncate the text.
+		if (runs > MAX_RUNS_PER_LINE) {
+			out = frame_content(tokens.map((token) => token.content).join(""));
+		}
 		result.push(out);
 	}
 	cache_put(key, result);

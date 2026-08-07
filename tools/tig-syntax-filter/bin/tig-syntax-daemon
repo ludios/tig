@@ -2,5 +2,12 @@
 # Model-output: Claude Fable 5
 # Launch the tig-syntax highlight daemon.  Node >= 23.6 runs TypeScript
 # directly (type stripping); the daemon lives next to this script.
-dir=$(dirname "$(readlink -f "$0")")
+# Resolve symlinks portably (readlink -f is not universal).
+self=$0
+if command -v realpath >/dev/null 2>&1; then
+	self=$(realpath "$0")
+elif readlink -f / >/dev/null 2>&1; then
+	self=$(readlink -f "$0")
+fi
+dir=$(CDPATH= cd -P "$(dirname "$self")" && pwd)
 exec node "$dir/../src/daemon.ts"

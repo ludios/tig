@@ -57,16 +57,20 @@ interface side_doc {
 /**
  * Fetch and prepare one side's source document, or null when the side
  * cannot be highlighted (no source, binary/invalid UTF-8, no grammar).
+ * `worktree_fallback` reads the file itself when no object is available:
+ * git can print computed post-image OIDs for worktree content that is in
+ * no object database (correspondence validation guards a racing edit).
  */
 async function load_side(cwd: string, path: string | null, oid: string | null,
-			 from_worktree: boolean): Promise<side_doc | null> {
+			 worktree_fallback: boolean): Promise<side_doc | null> {
 	if (path === null) {
 		return null;
 	}
 	let content: Buffer | null = null;
 	if (oid !== null) {
 		content = await cat_blob(cwd, oid);
-	} else if (from_worktree) {
+	}
+	if (content === null && worktree_fallback) {
 		content = await read_worktree_file(cwd, path);
 	}
 	if (content === null || content.includes(0)) {
@@ -101,11 +105,11 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		return null;
 	}
 
-	// The new side comes from the worktree when git printed an all-zero
-	// OID (unstaged changes); the old side always has a real OID when
-	// retrievable at all.
+	// The old side always has a real OID when retrievable at all; the new
+	// side falls back to the worktree (all-zero OID for unstaged changes,
+	// and computed OIDs whose blobs exist in no object database).
 	const old_doc = await load_side(cwd, info.old_path, info.old_oid, false);
-	const new_doc = await load_side(cwd, info.new_path, info.new_oid, info.new_oid === null);
+	const new_doc = await load_side(cwd, info.new_path, info.new_oid, true);
 	if (old_doc === null && new_doc === null) {
 		logger.debug("no sources for {path}", { path: check_path });
 		return null;

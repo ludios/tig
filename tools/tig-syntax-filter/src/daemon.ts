@@ -15,7 +15,7 @@
  */
 
 import * as net from "node:net";
-import { unlink, mkdir } from "node:fs/promises";
+import { unlink, mkdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
@@ -195,6 +195,9 @@ async function main(): Promise<void> {
 	});
 
 	server.listen(path, () => {
+		// Owner-only: the socket may live in a world-writable /tmp
+		// fallback; the client additionally checks the peer UID.
+		void chmod(path, 0o600).catch(() => {});
 		logger.info("listening on {path} (pid {pid})", { path, pid: process.pid });
 		schedule_idle_exit();
 	});

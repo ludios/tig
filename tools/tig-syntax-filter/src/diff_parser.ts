@@ -157,12 +157,27 @@ export function unquote_git_path(quoted: string): string | null {
 	return Buffer.from(bytes).toString("utf8");
 }
 
-/** Strip the diff prefix ("a/" or "b/") unless the diff used --no-prefix. */
-function strip_prefix(path: string, prefix: "a/" | "b/"): string {
-	if (path.startsWith(prefix)) {
+/**
+ * Strip the diff prefix ("a/" or "b/") only when `prefixed` says the diff
+ * actually uses the default prefixes; with --no-prefix, a repository path
+ * legitimately starting with "a/" must stay intact.
+ */
+function strip_prefix(path: string, prefix: "a/" | "b/", prefixed: boolean): string {
+	if (prefixed && path.startsWith(prefix)) {
 		return path.slice(prefix.length);
 	}
 	return path;
+}
+
+/**
+ * Whether the "diff --git" header shows the default a/ b/ prefixes.
+ * Custom --src-prefix/--dst-prefix values are not recognized; their paths
+ * stay unstripped and such files simply fail source lookup and pass
+ * through raw (correspondence validation would reject them anyway).
+ */
+function has_default_prefixes(header: string): boolean {
+	const rest = header.slice("diff --git ".length);
+	return rest.startsWith("a/") || rest.startsWith("\"a/");
 }
 
 /** Parse "@@ -old[,cnt] +new[,cnt] @@ ..." into numbers, or null. */
@@ -196,6 +211,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 	const hunks: hunk[] = [];
 	let old_last_line = 0;
 	let new_last_line = 0;
+	const prefixed = has_default_prefixes(section.lines[0].bytes.toString("utf8"));
 
 	let i = 0;
 	// Header lines run until the first hunk.
@@ -224,14 +240,14 @@ export function parse_file_section(section: diff_section): file_info | null {
 			if (raw === null) {
 				return null;
 			}
-			old_path = raw === "/dev/null" ? null : strip_prefix(raw, "a/");
+			old_path = raw === "/dev/null" ? null : strip_prefix(raw, "a/", prefixed);
 		} else if (text.startsWith("+++ ")) {
 			saw_plus = true;
 			const raw = unquote_git_path(text.slice(4));
 			if (raw === null) {
 				return null;
 			}
-			new_path = raw === "/dev/null" ? null : strip_prefix(raw, "b/");
+			new_path = raw === "/dev/null" ? null : strip_prefix(raw, "b/", prefixed);
 		}
 	}
 
