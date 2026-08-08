@@ -41,6 +41,27 @@ can be installed from the 'release' branch using:
 
 Before upgrading, you are advised to read link:NEWS.{docext}[the release notes].
 
+Syntax-highlighted diffs (optional)
+-----------------------------------
+
+This fork can syntax-highlight diff views with VS Code fidelity through an
+external filter; see `tools/tig-syntax-filter/README.md` for the design. The
+filter is not built by `make` and is entirely optional — without it, `tig`
+behaves as usual. To build and enable it:
+
+	$ make -C tools/tig-syntax-filter/client   # builds the C client
+	$ cd tools/tig-syntax-filter && pnpm install   # daemon dependencies
+
+Then put `tools/tig-syntax-filter/bin` on your `PATH` (it contains the
+`tig-syntax-filter` client and the `tig-syntax-daemon` launcher) and merge
+`contrib/tig-syntax.tigrc` into your tig configuration.
+
+The daemon requires `node` >= 23.6 (it runs TypeScript directly) and `git`
+on `PATH`. Exact 24-bit colors need a terminal whose terminfo advertises
+direct color (e.g. `TERM=xterm-direct` or `tmux-direct`); other terminals
+fall back to the nearest xterm-256 colors. See the `truecolor` and
+`diff-syntax-filter` entries in `man tigrc` for details.
+
 Installation using `configure`
 ------------------------------
 
@@ -184,6 +205,8 @@ configure script and building documentation:
 |Tool				|Description
 |readline			|Adds support for completion and history in
 				 search and command prompts.
+|node (>= 23.6) and pnpm	|Only for the optional syntax-highlighting
+				 filter daemon in `tools/tig-syntax-filter/`.
 |PCRE / PCRE2			|Adds support for Perl Compatible Regular
 				 Expressions in searches.
 |automake and autoconf		|Contains autoreconf for generating configure

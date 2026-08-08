@@ -1,0 +1,155 @@
+Build tig from https://github.com/ludios/tig (the syntax-highlighting fork)
+with the tig-syntax-filter daemon and client included.
+
+Apply from the nixpkgs root:  git apply doc/slop/nixpkgs.patch
+                        or:   patch -p1 < doc/slop/nixpkgs.patch
+
+Two hashes are lib.fakeHash placeholders (src and pnpmDeps): run a build,
+copy the real hash from each mismatch error, repeat once.  Also consider
+pinning `rev` to a commit of the `prime` branch instead of the branch name
+so later pushes don't invalidate the src hash.
+
+The result installs `tig` (wrapped so a bare `tig-syntax-filter` in tigrc
+resolves), the C client, a `tig-syntax-daemon` launcher pinned to
+nodejs_24, the daemon sources + node_modules under lib/tig-syntax-filter/,
+and contrib/tig-syntax.tigrc under etc/.
+
+--- a/pkgs/by-name/ti/tig/package.nix	2026-08-08 00:48:57.701081449 +0000
++++ b/pkgs/by-name/ti/tig/package.nix	2026-08-08 00:48:57.705081407 +0000
+@@ -2,6 +2,7 @@
+   lib,
+   stdenv,
+   fetchFromGitHub,
++  fetchPnpmDeps,
+   ncurses,
+   asciidoc,
+   xmlto,
+@@ -14,17 +15,23 @@
+   autoreconfHook,
+   findXMLCatalogs,
+   pkg-config,
++  nodejs_24,
++  pnpm_11,
++  pnpmConfigHook,
+ }:
+ 
+ stdenv.mkDerivation (finalAttrs: {
+   pname = "tig";
+-  version = "2.6.1";
++  version = "2.6.1-syntax-unstable-2026-08-08";
+ 
+   src = fetchFromGitHub {
+-    owner = "jonas";
++    owner = "ludios";
+     repo = "tig";
+-    rev = "tig-${finalAttrs.version}";
+-    sha256 = "sha256-Zfmt2rpnH5sxiay1LAsXxvtvqvwEG4MbNI+p0GWJsMc=";
++    # Pin a commit of the `prime` branch for reproducibility; using the
++    # branch name works for the first build but breaks when it moves.
++    rev = "prime";
++    # Fill in: build once, copy the hash from the mismatch error.
++    hash = lib.fakeHash;
+   };
+ 
+   nativeBuildInputs = [
+@@ -36,6 +43,9 @@
+     docbook_xml_dtd_45
+     findXMLCatalogs
+     pkg-config
++    nodejs_24
++    pnpm_11
++    pnpmConfigHook
+   ];
+ 
+   autoreconfFlags = [
+@@ -51,6 +61,18 @@
+   ]
+   ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
+ 
++  # The syntax-highlighting filter daemon's node dependencies (shiki etc.);
++  # installed into tools/tig-syntax-filter/node_modules by pnpmConfigHook.
++  pnpmRoot = "tools/tig-syntax-filter";
++  pnpmDeps = fetchPnpmDeps {
++    inherit (finalAttrs) pname version src;
++    pnpm = pnpm_11;
++    fetcherVersion = 3;
++    sourceRoot = "source/tools/tig-syntax-filter";
++    # Fill in: build once, copy the hash from the mismatch error.
++    hash = lib.fakeHash;
++  };
++
+   # those files are inherently impure, we'll handle the corresponding dependencies.
+   postPatch = ''
+     rm contrib/config.make-*
+@@ -58,6 +80,11 @@
+ 
+   enableParallelBuilding = true;
+ 
++  # The C client of the syntax filter is not covered by the top-level make.
++  postBuild = ''
++    make -C tools/tig-syntax-filter/client CC=$CC
++  '';
++
+   installPhase = ''
+     make install
+     make install-doc
+@@ -67,15 +94,38 @@
+ 
+     install -D contrib/tig-completion.bash $out/share/bash-completion/completions/tig
+     cp contrib/vim.tigrc $out/etc/
++    cp contrib/tig-syntax.tigrc $out/etc/
+ 
+     # Note: Until https://github.com/jonas/tig/issues/940 is resolved it is best
+     # not to install the ZSH completion so that the fallback implementation from
+     # ZSH can be used (Completion/Unix/Command/_git: "_tig () { _git-log }"):
+     #install -D contrib/tig-completion.zsh $out/share/zsh/site-functions/_tig
+ 
++    # Syntax-highlighting filter: the C client plus the daemon sources with
++    # their pnpm-installed node_modules (symlinks into the virtual store
++    # must be preserved).
++    filter_root=$out/lib/tig-syntax-filter
++    mkdir -p $filter_root
++    cp -r tools/tig-syntax-filter/src \
++          tools/tig-syntax-filter/themes \
++          tools/tig-syntax-filter/package.json \
++          tools/tig-syntax-filter/node_modules \
++          $filter_root/
++    install -Dm755 tools/tig-syntax-filter/bin/tig-syntax-filter \
++      $out/bin/tig-syntax-filter
++
++    # The daemon launcher pins the node runtime (node >= 23.6 runs the
++    # TypeScript directly) and guarantees git for its cat-file/check-attr
++    # calls.  The client finds this launcher next to its own binary.
++    makeWrapper ${lib.getExe nodejs_24} $out/bin/tig-syntax-daemon \
++      --add-flags "$filter_root/src/daemon.ts" \
++      --suffix PATH ':' "${git}/bin"
++
+     # Prefer the git in PATH, but add a fallback one in case there isn't one.
++    # Also let `set diff-syntax-filter = tig-syntax-filter` resolve without
++    # the profile's bin on PATH.
+     wrapProgram $out/bin/tig \
+-      --suffix PATH ':' "${git}/bin"
++      --suffix PATH ':' "${git}/bin:$out/bin"
+   '';
+ 
+   outputs = [
+@@ -85,8 +135,8 @@
+   ];
+ 
+   meta = {
+-    homepage = "https://jonas.github.io/tig/";
+-    description = "Text-mode interface for git";
++    homepage = "https://github.com/ludios/tig";
++    description = "Text-mode interface for git, with syntax-highlighted truecolor diffs";
+     maintainers = with lib.maintainers; [
+       bjornfor
+       qknight
+@@ -94,7 +144,7 @@
+       ma27
+     ];
+     license = lib.licenses.gpl2Plus;
+-    platforms = lib.platforms.unix;
++    platforms = lib.platforms.linux;
+     mainProgram = "tig";
+   };
+ })
