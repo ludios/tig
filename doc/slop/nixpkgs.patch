@@ -1,25 +1,16 @@
-// Model-output: Claude Fable 5
+From 3a66b61c37b74c60fb017f64f199ba780ca077c1 Mon Sep 17 00:00:00 2001
+From: Ivan Kozik <ivan@ludios.org>
+Date: Sat, 8 Aug 2026 00:55:22 +0000
+Subject: [PATCH] tig: use ludios/tig
 
-Build tig from https://github.com/ludios/tig (the syntax-highlighting fork)
-with the tig-syntax-filter daemon and client included.
+---
+ pkgs/by-name/ti/tig/package.nix | 64 ++++++++++++++++++++++++++++-----
+ 1 file changed, 55 insertions(+), 9 deletions(-)
 
-Apply from the nixpkgs root (the patch lives in the tig repository):
-
-  git apply /path/to/tig/doc/slop/nixpkgs.patch
-  # or: patch -p1 < /path/to/tig/doc/slop/nixpkgs.patch
-
-Two hashes are lib.fakeHash placeholders (src and pnpmDeps): run a build,
-copy the real hash from each mismatch error, repeat once.  Also consider
-pinning `rev` to a commit of the `prime` branch instead of the branch name
-so later pushes don't invalidate the src hash.
-
-The result installs `tig` (wrapped so a bare `tig-syntax-filter` in tigrc
-resolves), the C client, a `tig-syntax-daemon` launcher pinned to
-nodejs_24, the daemon sources + production node_modules under
-lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
-
---- a/pkgs/by-name/ti/tig/package.nix	2026-08-08 00:48:57.701081449 +0000
-+++ b/pkgs/by-name/ti/tig/package.nix	2026-08-08 01:01:37.066117864 +0000
+diff --git a/pkgs/by-name/ti/tig/package.nix b/pkgs/by-name/ti/tig/package.nix
+index 0142d364f284..a8215d74fb2f 100644
+--- a/pkgs/by-name/ti/tig/package.nix
++++ b/pkgs/by-name/ti/tig/package.nix
 @@ -2,6 +2,7 @@
    lib,
    stdenv,
@@ -28,7 +19,7 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
    ncurses,
    asciidoc,
    xmlto,
-@@ -14,17 +15,23 @@
+@@ -14,17 +15,20 @@
    autoreconfHook,
    findXMLCatalogs,
    pkg-config,
@@ -48,15 +39,12 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
      repo = "tig";
 -    rev = "tig-${finalAttrs.version}";
 -    sha256 = "sha256-Zfmt2rpnH5sxiay1LAsXxvtvqvwEG4MbNI+p0GWJsMc=";
-+    # Pin a commit of the `prime` branch for reproducibility; using the
-+    # branch name works for the first build but breaks when it moves.
-+    rev = "prime";
-+    # Fill in: build once, copy the hash from the mismatch error.
-+    hash = lib.fakeHash;
++    rev = "b7ed96f4a19958e7518a33257a218f2ed3e86f11";
++    hash = "sha256-SI33wUHiWIhdAg3IYWokCr/fh9Cvnzes4Q1LoiazjLk=";
    };
  
    nativeBuildInputs = [
-@@ -36,6 +43,9 @@
+@@ -36,6 +40,9 @@ stdenv.mkDerivation (finalAttrs: {
      docbook_xml_dtd_45
      findXMLCatalogs
      pkg-config
@@ -66,34 +54,25 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
    ];
  
    autoreconfFlags = [
-@@ -51,6 +61,26 @@
+@@ -51,6 +58,17 @@ stdenv.mkDerivation (finalAttrs: {
    ]
    ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
  
 +  # The syntax-highlighting filter daemon's node dependencies (shiki etc.);
 +  # installed into tools/tig-syntax-filter/node_modules by pnpmConfigHook.
-+  # Production-only: the daemon needs no TypeScript/vitest tooling and the
-+  # node_modules tree is copied into the output.
 +  pnpmRoot = "tools/tig-syntax-filter";
-+  pnpmInstallFlags = [ "--prod" ];
 +  pnpmDeps = fetchPnpmDeps {
-+    inherit (finalAttrs)
-+      pname
-+      version
-+      src
-+      pnpmInstallFlags
-+      ;
++    inherit (finalAttrs) pname version src;
 +    pnpm = pnpm_11;
 +    fetcherVersion = 3;
 +    sourceRoot = "source/tools/tig-syntax-filter";
-+    # Fill in: build once, copy the hash from the mismatch error.
-+    hash = lib.fakeHash;
++    hash = "sha256-ptjBtNJnJlSjANYYSKw+ltxukUS0AKR5X/dRHaB6KFI=";
 +  };
 +
    # those files are inherently impure, we'll handle the corresponding dependencies.
    postPatch = ''
      rm contrib/config.make-*
-@@ -58,6 +88,11 @@
+@@ -58,6 +76,11 @@ stdenv.mkDerivation (finalAttrs: {
  
    enableParallelBuilding = true;
  
@@ -105,7 +84,7 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
    installPhase = ''
      make install
      make install-doc
-@@ -67,15 +102,38 @@
+@@ -67,15 +90,38 @@ stdenv.mkDerivation (finalAttrs: {
  
      install -D contrib/tig-completion.bash $out/share/bash-completion/completions/tig
      cp contrib/vim.tigrc $out/etc/
@@ -116,6 +95,8 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
      # ZSH can be used (Completion/Unix/Command/_git: "_tig () { _git-log }"):
      #install -D contrib/tig-completion.zsh $out/share/zsh/site-functions/_tig
  
+-    # Prefer the git in PATH, but add a fallback one in case there isn't one.
+-    wrapProgram $out/bin/tig \
 +    # Syntax-highlighting filter: the C client plus the daemon sources with
 +    # their pnpm-installed node_modules (symlinks into the virtual store
 +    # must be preserved).
@@ -134,18 +115,17 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
 +    # calls.  The client finds this launcher next to its own binary.
 +    makeWrapper ${lib.getExe nodejs_24} $out/bin/tig-syntax-daemon \
 +      --add-flags "$filter_root/src/daemon.ts" \
-+      --suffix PATH ':' "${git}/bin"
+       --suffix PATH ':' "${git}/bin"
 +
-     # Prefer the git in PATH, but add a fallback one in case there isn't one.
++    # Prefer the git in PATH, but add a fallback one in case there isn't one.
 +    # Also let `set diff-syntax-filter = tig-syntax-filter` resolve without
 +    # the profile's bin on PATH.
-     wrapProgram $out/bin/tig \
--      --suffix PATH ':' "${git}/bin"
++    wrapProgram $out/bin/tig \
 +      --suffix PATH ':' "${git}/bin:$out/bin"
    '';
  
    outputs = [
-@@ -85,8 +143,8 @@
+@@ -85,8 +131,8 @@ stdenv.mkDerivation (finalAttrs: {
    ];
  
    meta = {
@@ -156,7 +136,7 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
      maintainers = with lib.maintainers; [
        bjornfor
        qknight
-@@ -94,7 +152,7 @@
+@@ -94,7 +140,7 @@ stdenv.mkDerivation (finalAttrs: {
        ma27
      ];
      license = lib.licenses.gpl2Plus;
@@ -165,3 +145,6 @@ lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
      mainProgram = "tig";
    };
  })
+-- 
+2.54.0
+
