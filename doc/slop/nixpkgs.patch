@@ -1,8 +1,12 @@
+// Model-output: Claude Fable 5
+
 Build tig from https://github.com/ludios/tig (the syntax-highlighting fork)
 with the tig-syntax-filter daemon and client included.
 
-Apply from the nixpkgs root:  git apply doc/slop/nixpkgs.patch
-                        or:   patch -p1 < doc/slop/nixpkgs.patch
+Apply from the nixpkgs root (the patch lives in the tig repository):
+
+  git apply /path/to/tig/doc/slop/nixpkgs.patch
+  # or: patch -p1 < /path/to/tig/doc/slop/nixpkgs.patch
 
 Two hashes are lib.fakeHash placeholders (src and pnpmDeps): run a build,
 copy the real hash from each mismatch error, repeat once.  Also consider
@@ -11,11 +15,11 @@ so later pushes don't invalidate the src hash.
 
 The result installs `tig` (wrapped so a bare `tig-syntax-filter` in tigrc
 resolves), the C client, a `tig-syntax-daemon` launcher pinned to
-nodejs_24, the daemon sources + node_modules under lib/tig-syntax-filter/,
-and contrib/tig-syntax.tigrc under etc/.
+nodejs_24, the daemon sources + production node_modules under
+lib/tig-syntax-filter/, and contrib/tig-syntax.tigrc under etc/.
 
 --- a/pkgs/by-name/ti/tig/package.nix	2026-08-08 00:48:57.701081449 +0000
-+++ b/pkgs/by-name/ti/tig/package.nix	2026-08-08 00:48:57.705081407 +0000
++++ b/pkgs/by-name/ti/tig/package.nix	2026-08-08 01:01:37.066117864 +0000
 @@ -2,6 +2,7 @@
    lib,
    stdenv,
@@ -62,15 +66,23 @@ and contrib/tig-syntax.tigrc under etc/.
    ];
  
    autoreconfFlags = [
-@@ -51,6 +61,18 @@
+@@ -51,6 +61,26 @@
    ]
    ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
  
 +  # The syntax-highlighting filter daemon's node dependencies (shiki etc.);
 +  # installed into tools/tig-syntax-filter/node_modules by pnpmConfigHook.
++  # Production-only: the daemon needs no TypeScript/vitest tooling and the
++  # node_modules tree is copied into the output.
 +  pnpmRoot = "tools/tig-syntax-filter";
++  pnpmInstallFlags = [ "--prod" ];
 +  pnpmDeps = fetchPnpmDeps {
-+    inherit (finalAttrs) pname version src;
++    inherit (finalAttrs)
++      pname
++      version
++      src
++      pnpmInstallFlags
++      ;
 +    pnpm = pnpm_11;
 +    fetcherVersion = 3;
 +    sourceRoot = "source/tools/tig-syntax-filter";
@@ -81,7 +93,7 @@ and contrib/tig-syntax.tigrc under etc/.
    # those files are inherently impure, we'll handle the corresponding dependencies.
    postPatch = ''
      rm contrib/config.make-*
-@@ -58,6 +80,11 @@
+@@ -58,6 +88,11 @@
  
    enableParallelBuilding = true;
  
@@ -93,7 +105,7 @@ and contrib/tig-syntax.tigrc under etc/.
    installPhase = ''
      make install
      make install-doc
-@@ -67,15 +94,38 @@
+@@ -67,15 +102,38 @@
  
      install -D contrib/tig-completion.bash $out/share/bash-completion/completions/tig
      cp contrib/vim.tigrc $out/etc/
@@ -133,7 +145,7 @@ and contrib/tig-syntax.tigrc under etc/.
    '';
  
    outputs = [
-@@ -85,8 +135,8 @@
+@@ -85,8 +143,8 @@
    ];
  
    meta = {
@@ -144,7 +156,7 @@ and contrib/tig-syntax.tigrc under etc/.
      maintainers = with lib.maintainers; [
        bjornfor
        qknight
-@@ -94,7 +144,7 @@
+@@ -94,7 +152,7 @@
        ma27
      ];
      license = lib.licenses.gpl2Plus;
