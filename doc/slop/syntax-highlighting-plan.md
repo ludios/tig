@@ -307,6 +307,11 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
   would be dead configuration (intraline+syntax is a v1 non-goal). A One
   Monokai-faithful alternative snippet (teal inserted-text tint, no removed tint)
   goes in the docs for purists.
+- **Comments are lifted off theme fidelity too.** One Monokai's comment
+  foreground (`#676f7d`) is tuned for its own `#282c34` editor background; over
+  the row tints above it reads as barely-there, so the filter brightens it to
+  `#828c9c` (`TOKEN_COLOR_OVERRIDES` in `src/highlight.ts`). The vendored theme
+  JSON itself stays a verbatim upstream copy.
 - **Wrapping is excluded from v1**: highlighted lines bypass the pager wrap path
   entirely (see "What tig already has"), so `wrap-lines yes` + syntax filter means
   lines render unwrapped (truncated/scrollable) exactly like diff-highlight lines

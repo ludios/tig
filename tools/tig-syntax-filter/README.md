@@ -20,7 +20,10 @@ in the repository root.
   tokenizes with shiki, validates every hunk line against the source,
   and injects per-token foreground SGR. Logs to
   `$XDG_STATE_HOME/tig-syntax/daemon.log`.
-- `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`).
+- `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
+  vendored verbatim so it can be re-imported wholesale. Terminal-readability
+  deviations from it (currently: a brighter comment foreground) are applied at
+  load time by `TOKEN_COLOR_OVERRIDES` in `src/highlight.ts`.
 
 ## Build and install
 

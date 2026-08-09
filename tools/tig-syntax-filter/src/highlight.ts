@@ -19,8 +19,26 @@ import { getLogger } from "@logtape/logtape";
 
 const logger = getLogger(["tig-syntax", "highlight"]);
 
-/** Bump when the emission format changes, to invalidate cache keys. */
-const EMIT_VERSION = 1;
+/**
+ * Bump when the emission format or an emitted color changes, to invalidate
+ * cache keys.
+ */
+const EMIT_VERSION = 2;
+
+/**
+ * Foreground overrides for the vendored theme, keyed by the name of the
+ * `tokenColors` rule they patch.  The vendored JSON stays a verbatim copy of
+ * upstream so it can be re-imported wholesale; terminal-readability
+ * deviations live here, where they are visible and reviewable.
+ *
+ * Comment: upstream's #676f7d is a dim gray-blue tuned for the theme's own
+ * editor background.  tig draws code over its diff row tints instead, which
+ * sit lighter than that background, so comments lose too much contrast; this
+ * lifts them ~25% while keeping the hue.
+ */
+const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
+	Comment: "#828c9c",
+};
 
 export const MAX_LINE_CHARS = 20000;
 export const MAX_DOC_LINES = 100000;
@@ -40,6 +58,24 @@ let theme_bg = "#282c34";
 const line_cache = new Map<string, string[]>();
 
 /**
+ * Apply `TOKEN_COLOR_OVERRIDES` to a parsed VS Code theme, in place.  Every
+ * override must name a rule the theme actually defines: a silently-dropped
+ * override would otherwise be the outcome of re-importing a theme whose rules
+ * were renamed.
+ */
+function apply_token_color_overrides(theme: { tokenColors?: unknown }): void {
+	const rules = theme.tokenColors;
+	A(Array.isArray(rules), "theme has no tokenColors array");
+	for (const [name, foreground] of Object.entries(TOKEN_COLOR_OVERRIDES)) {
+		const rule = rules.find((candidate) => candidate?.name === name);
+		A(rule !== undefined, `theme has no tokenColors rule named ${name}`);
+		A(typeof rule.settings?.foreground === "string",
+		  `tokenColors rule ${name} sets no foreground to override`);
+		rule.settings.foreground = foreground;
+	}
+}
+
+/**
  * Initialize the shiki highlighter with the One Monokai theme and an
  * explicitly-instantiated Oniguruma WASM engine (shiki also offers a
  * JavaScript regex engine, which would break engine-lineage fidelity).
@@ -49,6 +85,7 @@ export async function init_highlighter(): Promise<void> {
 	const theme_path = join(dirname(fileURLToPath(import.meta.url)), "..", "themes", "one-monokai.json");
 	const theme = JSON.parse(await readFile(theme_path, "utf8"));
 	theme.name = theme_name;
+	apply_token_color_overrides(theme);
 	highlighter = await createHighlighter({
 		themes: [theme],
 		langs: [],
