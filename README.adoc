@@ -1,4 +1,6 @@
-This is an LLM-authored fork of [tig](https://github.com/jonas/tig) but with vscode-style syntax highlighting powered by a TypeScript backend with [shiki](https://github.com/shikijs/shiki).
+This is an LLM-authored fork of https://github.com/jonas/tig[tig] but with
+vscode-style syntax highlighting powered by a TypeScript backend with
+https://github.com/shikijs/shiki[shiki].
 
 What is Tig?
 ------------
