@@ -664,11 +664,15 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   unchanged because A1's budget already caps them).  The original "~2×
   from the old side's 51 %" billing over-credited (a): in replace-heavy
   diffs the last deleted row ≈ the hunk end anyway, and in addition-heavy
-  hunks the old header range was already small.  Recovering the 51 %
-  needs (b) — memoize per (line text, entry-state) across the two sides
-  with the A1 chunk loop so the ~99 %-identical sides tokenize once —
-  which stays gated on a profitability check against real navigation
-  traces.  What (a) does deliver: the section budget reaches deeper on
+  hunks the old header range was already small.  The remaining
+  cross-side savings need (b) — memoize per (line text, entry-state)
+  across the two sides with the A1 chunk loop so the ~99 %-identical
+  sides tokenize once — but note the pre-A1 51 % figure no longer
+  transfers: under the shared A1 budget, the sections dominating that
+  aggregate abort the old side before the new side starts, leaving (b)
+  nothing to eliminate there.  Ordinary sections measured the old side
+  at 42–46 % of tokenization; re-measure on post-A1 traces before
+  building.  What (a) does deliver: the section budget reaches deeper on
   mixed content, addition-only sections skip a blob fetch + decode, and
   the side-need accounting (b) requires now exists.
 - **C9. Memory traffic / micro-allocations.**  Only touch what BM5 shows,
@@ -817,10 +821,14 @@ fake daemon is ready to become the CI regression test for A0.
    7.6 s → 14.8 s across synth-top/mid/eof) into resumable work; C5b
    shrinks the cache bytes C6 has to budget; and C8(b) — memoizing
    tokenization per (line text, entry state) across a file's two
-   ~99 %-identical sides — is what actually recovers the old side's 51 %
-   of tokenization time (C8(a) measured neutral; see the C8 entry).
-   Gate C8(b) on a profitability check against real navigation traces
-   before building it.
+   ~99 %-identical sides — is the remaining path to cross-side savings
+   (C8(a) measured neutral; see the C8 entry).  Its payoff must be
+   re-measured on post-A1 traces before building: the pre-A1 "51 %"
+   aggregate was dominated by sections whose old side now exhausts the
+   shared budget before the new side even starts (nothing left to
+   memoize there); on ordinary non-pathological sections the old side
+   measured 42–46 % of tokenization, so think "up to ~1.7×" on sections
+   where both sides actually run, not 2× overall.
 8. **C1, B4, B5, C10–C12** — textconv batching (3 %), startup warming
    (cold start measured at only ~0.2 s, so the rest of B demotes), negative
    cache, emission slimming, batch-command preflight.
