@@ -8,6 +8,7 @@
  * emitted; backgrounds belong to tig's own diff row styling.
  */
 
+import { setImmediate as set_immediate } from "node:timers/promises";
 import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
 import { config } from "./config.ts";
 import { byte_lru } from "./lru.ts";
@@ -243,15 +244,23 @@ export function emit_sgr_lines(token_lines: ThemedToken[][]): string[] {
  *
  * Tokenization runs in CHUNK_LINES batches continued via shiki's
  * GrammarState (verified token-identical to one-shot tokenization), with
- * `deadline` (a performance.now() timestamp, or null for none) checked
- * between batches.  On exceeding it the lines tokenized so far are still
- * cached — a valid prefix that serves shallower hunks — the failure depth
- * is remembered for fail-fast, and null is returned so the section goes
- * raw.  Also returns null when the request is deeper than the configured
- * line cap or a line exceeds MAX_LINE_CHARS.
+ * the event loop yielded between batches (a macrotask: other connections'
+ * requests, socket events, and timers interleave mid-section instead of
+ * waiting out the whole budget).  `deadline` (a performance.now()
+ * timestamp, or null for none) is checked between batches; it is wall
+ * time, so under contention concurrent sections abort a little earlier —
+ * the latency-focused reading of the budget.  On exceeding it the lines
+ * tokenized so far are still cached — a valid prefix that serves
+ * shallower hunks — the failure depth is remembered for fail-fast, and
+ * null is returned so the section goes raw.  `cancelled` (e.g. "did the
+ * client hang up") also stops between batches, keeping the partial but
+ * NOT recording a failure depth: abandoned work says nothing about cost.
+ * Also returns null when the request is deeper than the configured line
+ * cap or a line exceeds MAX_LINE_CHARS.
  */
 export async function highlight_lines(identity: string, lang: string, content: string,
-					last_line: number, deadline: number | null): Promise<string[] | null> {
+					last_line: number, deadline: number | null,
+					cancelled?: () => boolean): Promise<string[] | null> {
 	A(highlighter !== null, "highlighter not initialized");
 	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
 	const cached = line_cache.get(key);
@@ -282,7 +291,20 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	// The union-typed method needs a cast to its element overload.
 	const get_state = highlighter.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
 	let state: unknown;
+	const keep_partial = (): void => {
+		if (token_lines.length > 0 &&
+		    (cached === undefined || token_lines.length > cached.length)) {
+			line_cache.set(key, emit_sgr_lines(token_lines));
+		}
+	};
 	for (let start = 0; start < needed; start += CHUNK_LINES) {
+		if (start > 0) {
+			await set_immediate();
+		}
+		if (cancelled !== undefined && cancelled()) {
+			keep_partial();
+			return null;
+		}
 		if (deadline !== null && performance.now() > deadline) {
 			const elapsed_ms = Math.round(performance.now() - started);
 			logger.info("budget exhausted tokenizing {lang} at line {done}/{needed} after {ms}ms", {
@@ -290,10 +312,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			});
 			// Keep whichever cached prefix is longer: a deep retry
 			// that dies early must not shrink an existing entry.
-			if (token_lines.length > 0 &&
-			    (cached === undefined || token_lines.length > cached.length)) {
-				line_cache.set(key, emit_sgr_lines(token_lines));
-			}
+			keep_partial();
 			fail_cache_put(fail_key, last_line);
 			return null;
 		}

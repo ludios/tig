@@ -28,6 +28,10 @@ const logger = getLogger(["tig-syntax", "daemon"]);
 
 const IDLE_EXIT_MS = 30 * 60 * 1000;
 
+/** Unprocessed queued input beyond which a connection's socket pauses
+ * (resuming at half); bounds daemon memory against a fast writer. */
+const INPUT_QUEUE_BYTES = 8 * 1048576;
+
 /** Serve one client connection; resolves when the connection is done. */
 function handle_connection(socket: net.Socket): Promise<void> {
 	return new Promise((resolve) => {
@@ -37,19 +41,54 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		let queue: Promise<void> = Promise.resolve();
 		let closed = false;
 		let sections_served = 0;
+		let queued_bytes = 0;
+		let paused = false;
 		const started = performance.now();
+
+		/** Resolves once the socket can take more output (or is gone). */
+		const drained = (): Promise<void> => new Promise((resolve) => {
+			const done = (): void => {
+				socket.off("drain", done);
+				socket.off("close", done);
+				resolve();
+			};
+			socket.once("drain", done);
+			socket.once("close", done);
+		});
 
 		const enqueue_sections = (sections: diff_section[]): void => {
 			for (const section of sections) {
+				queued_bytes += section.byte_length;
 				queue = queue.then(async () => {
+					if (closed) {
+						queued_bytes -= section.byte_length;
+						return;
+					}
+					const output = await process_section(cwd as string, section,
+									     () => closed);
+					queued_bytes -= section.byte_length;
+					if (paused && queued_bytes <= INPUT_QUEUE_BYTES / 2) {
+						paused = false;
+						socket.resume();
+					}
 					if (closed) {
 						return;
 					}
-					const output = await process_section(cwd as string, section);
 					socket.write(`O ${section.byte_length} ${output.length}\n`);
-					socket.write(output);
+					if (!socket.write(output)) {
+						// Output backpressure: a client that stops
+						// reading stalls the pipeline here instead of
+						// growing the daemon's write queue unboundedly.
+						await drained();
+					}
 					sections_served++;
 				});
+			}
+			if (!paused && queued_bytes > INPUT_QUEUE_BYTES) {
+				// Input backpressure: stop reading until the queue
+				// shrinks; the client's spool absorbs the difference.
+				paused = true;
+				socket.pause();
 			}
 		};
 

@@ -127,7 +127,8 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
  * any correctness precondition fails and the raw bytes must be used.
  */
 async function highlight_file_section(cwd: string, section: diff_section,
-				      info: file_info): Promise<Buffer | null> {
+				      info: file_info,
+				      cancelled?: () => boolean): Promise<Buffer | null> {
 	if (info.hunks.length === 0) {
 		return null;
 	}
@@ -156,9 +157,9 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// blob fetching and grammar loading above deliberately do not count.
 	const deadline = performance.now() + config.budget_ms;
 	const old_sgr = old_doc === null ? null :
-		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line, deadline);
+		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line, deadline, cancelled);
 	const new_sgr = new_doc === null ? null :
-		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line, deadline);
+		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line, deadline, cancelled);
 	if (old_sgr === null && new_sgr === null) {
 		// Nothing to style (budget exhausted or size-guarded): the raw
 		// path produces identical bytes without validation/rebuild work.
@@ -234,13 +235,15 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	return Buffer.concat(parts);
 }
 
-/** Process one section into its output bytes (highlighted or raw). */
-export async function process_section(cwd: string, section: diff_section): Promise<Buffer> {
+/** Process one section into its output bytes (highlighted or raw).
+ * `cancelled` lets a dead connection stop tokenization between chunks. */
+export async function process_section(cwd: string, section: diff_section,
+					cancelled?: () => boolean): Promise<Buffer> {
 	if (section.kind === "file") {
 		try {
 			const info = parse_file_section(section);
 			if (info !== null) {
-				const highlighted = await highlight_file_section(cwd, section, info);
+				const highlighted = await highlight_file_section(cwd, section, info, cancelled);
 				if (highlighted !== null) {
 					return highlighted;
 				}

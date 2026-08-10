@@ -80,10 +80,13 @@ tokenized.  It is also the *last* section of the diff, which triggers cause
    (grammar state is sequential), so a one-line change at line 90k of a 100k
    line file tokenizes 90k lines — for *each* side of the diff (old and new
    blobs are tokenized separately even though they are ~identical).
-3. **Sections are strictly sequential per connection**, so one pathological
-   file starves every later (possibly tiny) section in the same commit.
-   And because tokenization blocks the event loop, one pathological
-   *connection* starves every other tig instance sharing the daemon.
+3. **[MITIGATED by A1+A2] Sections are strictly sequential per
+   connection**, so one pathological file starves every later (possibly
+   tiny) section in the same commit — but tokenization now yields the
+   event loop between 128-line chunks, so one *connection* no longer
+   starves the others (measured: a warm request during another
+   connection's budget burn went from ~485 ms to ~55 ms), and the
+   per-section budget bounds the intra-connection wait.
 4. **[FIXED by A0] The client's 15 s timeout was not actually a hard
    timeout.**  The `FRAME_TIMEOUT_MS` poll only covered *waiting for
    frames*; writes to the daemon went through blocking `write_all()`, so a
@@ -416,12 +419,18 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   public API doesn't, dropping to `vscode-textmate` + `vscode-oniguruma`
   directly is fidelity-neutral (same engine lineage; the plan doc already
   argues this).
-- **A2. Yield between line batches.**  With the per-line loop, tokenize N
-  lines (or a few ms) per event-loop turn and yield with a *macrotask*
-  (`setImmediate` / timer — a microtask would drain the next batch before
-  node ever returns to libuv, keeping I/O starved), so socket reads, other
-  connections, and the idle timer stay live even mid-section.  Cheap once A1 exists; removes the
-  one-wedged-daemon-starves-every-tig failure mode without threads.
+- **A2. Yield between line batches. [IMPLEMENTED 2026-08-10]** — the A1
+  chunk loop awaits `setImmediate` between 128-line chunks (a macrotask —
+  a microtask would drain the next batch before node returns to libuv),
+  and a `cancelled` callback threads from the connection down to the
+  loop, so a client hang-up stops abandoned tokenization between chunks
+  (without recording a fail-fast depth: abandonment says nothing about
+  cost).  The section deadline is wall time, so concurrent sections under
+  contention abort a little earlier — the latency-focused reading.
+  Measured: a warm small request issued 120 ms into another connection's
+  budget burn went from ~485 ms to ~55 ms (5-run ranges 465–489 vs
+  49–86); normal-path timings unchanged.  A3's worker threads are NOT
+  needed for responsiveness now — they remain only a throughput option.
 - **A3. Worker thread(s) for tokenization.**  Move shiki + oniguruma into a
   `worker_threads` worker; the main thread keeps sockets, parsing, blob
   fetching, scheduling, and framing.  Start with **one** long-lived worker:
@@ -502,13 +511,16 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   attempt.  Also cache the negative decision keyed by content identity +
   lang + budget version, so reopening the same pathological file doesn't
   re-attempt (see C10).
-- **A9. Honor socket backpressure in the daemon.**  `handle_connection`
-  ignores `socket.write()`'s boolean; a slow/stalled client lets output
-  buffer without bound in the daemon.  Stop dequeuing sections when a write
-  returns false, resume on `'drain'`, pause input parsing when queued bytes
-  exceed a cap, and bound the per-connection queue by *bytes*, not section
-  count (ten 100-byte sections and ten 5 MB sections are not the same
-  backlog).
+- **A9. Honor socket backpressure in the daemon.
+  [IMPLEMENTED 2026-08-10]** — the section pipeline now awaits `'drain'`
+  (or close) when `socket.write()` reports backpressure, and the
+  connection's socket pauses once unprocessed queued input exceeds 8 MiB
+  (resuming at half), so both directions are byte-bounded.  Measured with
+  a never-reading client pushing a 32 MB diff: the daemon previously
+  accepted and processed all 32 MB (RSS 217 MB); it now accepts ~8.4 MB
+  and stalls the pipeline (RSS 155 MB), pushing the backlog into the
+  client's own bounded spool.  Acceptance scripts and the runner live in
+  `benchmarks/A2A9/`.
 
 ### B. Faster cold start
 
@@ -829,8 +841,12 @@ fake daemon is ready to become the CI regression test for A0.
    batchers/blobs, full-OID line-cache keys shared across worktrees and
    clones, toplevel-scoped attribute checks fixing a real subdir
    wrong-path bug, single-algorithm hashing).
-5. **A2 (or A3) + A9** — interruptible tokenization (the event loop
-   measured 15 s deaf) and daemon backpressure.
+5. **A2 + A9 — DONE (2026-08-10)** — event-loop yields between chunks +
+   cancellation on hang-up, and byte-bounded backpressure in both
+   directions.  Measured: cross-connection latency during a budget burn
+   485 ms → 55 ms; a never-reading client's accepted input 32 MB → 8.4 MB.
+   A3 (workers) not needed for responsiveness; remains a throughput-only
+   option.
 6. **D0/D1 prefetch** — first visits cost 0.2–1.1 s on ordinary commits vs
    10–50 ms revisits; once tokenization is interruptible, prefetching
    selection±1 makes j/k feel like the revisit numbers.  Measure D0's

@@ -86,6 +86,18 @@ describe("tokenization budget", () => {
 		expect(out!.length).toBeGreaterThanOrEqual(100);
 	});
 
+	it("stops on cancellation without recording a failure depth", async () => {
+		const out = await highlight_lines("test|budget-c", "typescript", doc, 600,
+						  null, () => true);
+		expect(out).toBeNull();
+		// Cancellation is not a cost verdict: the same request must still
+		// run (and succeed) when tried again uncancelled.
+		const retry = await highlight_lines("test|budget-c", "typescript", doc, 600,
+						    performance.now() + 60000);
+		expect(retry).not.toBeNull();
+		expect(retry!.length).toBe(600);
+	});
+
 	it("never shrinks a longer cached prefix on a timed-out deeper retry", async () => {
 		const ok = await highlight_lines("test|budget-b", "typescript", doc, 300, null);
 		expect(ok).not.toBeNull();
