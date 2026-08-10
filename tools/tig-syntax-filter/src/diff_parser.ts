@@ -38,7 +38,7 @@ export interface diff_section {
  * memory nor a highlight attempt.  Line alignment is preserved: a trailing
  * partial line always waits in `carry` for its newline or EOF.
  */
-export class section_splitter {
+export class SectionSplitter {
 	private carry: Buffer = Buffer.alloc(0);
 	private current: diff_line[] = [];
 	private current_bytes = 0;

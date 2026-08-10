@@ -102,7 +102,7 @@ tokenized.  It is also the *last* section of the diff, which triggers cause
 6. **[FIXED by A8] A complete file section is buffered before anything
    happens to it.**  (Since fixed: sections over 1 MB flush immediately
    and stream through raw to the next boundary.)  Original analysis:
-   `section_splitter` (`diff_parser.ts`) only releases a section at the next
+   `SectionSpliter` (`diff_parser.ts`) only releases a section at the next
    `diff --git` boundary or EOF, so the 4.5 MB final section of `5294f798`
    is retained in full — a long silent wait plus a memory spike — before
    `process_section()` even starts.
@@ -498,7 +498,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   output frames instead of per-file sections, which improves first paint
   and peak memory without changing tig at all.)
 - **A8. Detect oversized sections while they're still arriving, and stream
-  them through raw. [IMPLEMENTED 2026-08-10]** — `section_splitter` takes a
+  them through raw. [IMPLEMENTED 2026-08-10]** — `SectionSplitter` takes a
   byte threshold; a file section crossing it flushes immediately as an
   "oversized" section and streams line-aligned raw chunks (one per feed)
   until the next `diff --git`, with `process_section` passing them through
@@ -601,7 +601,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   daemon section time overall, ~350 ms of the 94-file commit's 1.1 s —
   real but secondary to tokenization.  Fix: one persistent
   `git check-attr --stdin -z diff` child per repo (same pattern as
-  `blob_batcher`), and cache driver-name → has-textconv per *repo* (one
+  `BlobBatcher`), and cache driver-name → has-textconv per *repo* (one
   `config` call per driver, not per path).
 - **C2. Fetch both sides in parallel. [IMPLEMENTED 2026-08-10]**
   `highlight_file_section()` now fetches both sides via `Promise.all`
@@ -673,7 +673,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   make the line cache store "state + sparse rendered lines" rather than a
   dense array, or C5/C6 accounting breaks).
 - **C6. Byte-bound (then grow) the caches. [IMPLEMENTED 2026-08-10]** —
-  a shared `byte_lru` (approximate sizing, entries over half the budget
+  a shared `ByteLRU` (approximate sizing, entries over half the budget
   not cached) now backs the line cache and blob cache, budgeted by
   `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` (64 MB each by
   default).  Measured: daemon RSS after a double corpus replay is
@@ -720,7 +720,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   e.g. a giant minified one — accumulates and gets re-concatenated per
   chunk; cap the carry size);
   `pending.shift()` and `Buffer.subarray` retaining large backing buffers
-  in `blob_batcher`; the client never compacting its acknowledged spool
+  in `BlobBatcher`; the client never compacting its acknowledged spool
   prefix (the 64 MB cap counts total bytes, not unacknowledged bytes).
 - **C10. Negative cache + in-flight coalescing.**  Cache the *decisions*,
   not just the data, so reopening a pathological or unhighlightable file

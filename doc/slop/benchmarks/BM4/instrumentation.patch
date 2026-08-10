@@ -64,7 +64,7 @@ diff -ruN tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
 +import { monitorEventLoopDelay } from "node:perf_hooks";
  import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
  import { getFileSink } from "@logtape/file";
- import { section_splitter, type diff_section } from "./diff_parser.ts";
+ import { SectionSplitter, type diff_section } from "./diff_parser.ts";
  import { init_highlighter } from "./highlight.ts";
  import { process_section } from "./process.ts";
 +import { snapshot, diff_since } from "./bench_stats.ts";
@@ -146,7 +146,7 @@ diff -ruN tools/tig-syntax-filter/src/git.ts /tmp/tigbench/inst/src/git.ts
 @@ -156,6 +158,7 @@
  		return batcher;
  	}
- 	batcher = new blob_batcher(cwd);
+ 	batcher = new BlobBatcher(cwd);
 +	stats.batcher_spawn++;
  	batchers.set(cwd, batcher);
  	while (batchers.size > MAX_BATCHERS) {

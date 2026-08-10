@@ -2,11 +2,11 @@
 
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { section_splitter, parse_file_section, unquote_git_path, type diff_section } from "../src/diff_parser.ts";
+import { SectionSplitter, parse_file_section, unquote_git_path, type diff_section } from "../src/diff_parser.ts";
 
 /** Split `data` into sections in one go. */
 function split_all(data: Buffer): diff_section[] {
-	const splitter = new section_splitter();
+	const splitter = new SectionSplitter();
 	return [...splitter.feed(data), ...splitter.finish()];
 }
 
@@ -49,7 +49,7 @@ const SAMPLE_DIFF = [
 	"+x = 2",
 ].join("\n") + "\n";
 
-describe("section_splitter", () => {
+describe("SectionSplitter", () => {
 	it("splits into preamble and per-file sections", () => {
 		const sections = split_all(Buffer.from(SAMPLE_DIFF));
 		expect(sections.map((s) => s.kind)).toEqual(["preamble", "file", "file"]);
@@ -70,7 +70,7 @@ describe("section_splitter", () => {
 			fc.array(fc.integer({ min: 1, max: 40 }), { maxLength: 60 }),
 			(chunk_sizes) => {
 				const data = Buffer.from(SAMPLE_DIFF);
-				const splitter = new section_splitter();
+				const splitter = new SectionSplitter();
 				const sections: diff_section[] = [];
 				let offset = 0;
 				for (const size of chunk_sizes) {

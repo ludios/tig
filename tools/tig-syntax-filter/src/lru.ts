@@ -9,7 +9,7 @@
 
 import { A } from "ayy";
 
-export class byte_lru<V> {
+export class ByteLRU<V> {
 	private map = new Map<string, { value: V, bytes: number }>();
 	private total = 0;
 	private budget: number;
@@ -22,7 +22,7 @@ export class byte_lru<V> {
 	 *                  evict everything else for a single revisit's benefit.
 	 */
 	constructor(budget: number, size_of: (value: V) => number) {
-		A(budget > 0, "byte_lru budget must be positive");
+		A(budget > 0, "ByteLRU budget must be positive");
 		this.budget = budget;
 		this.size_of = size_of;
 	}

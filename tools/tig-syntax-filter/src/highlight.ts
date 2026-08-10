@@ -8,10 +8,10 @@
  * emitted; backgrounds belong to tig's own diff row styling.
  */
 
-import { setImmediate as set_immediate } from "node:timers/promises";
+import { setImmediate } from "node:timers/promises";
 import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
 import { config } from "./config.ts";
-import { byte_lru } from "./lru.ts";
+import { ByteLRU } from "./lru.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -79,7 +79,7 @@ let theme_bg = "#282c34";
 
 /** Byte-budgeted LRU: content identity -> SGR-ready lines (no trailing
  * newline).  Sized by approximate JS string memory. */
-const line_cache = new byte_lru<string[]>(config.line_cache_mb * 1048576,
+const line_cache = new ByteLRU<string[]>(config.line_cache_mb * 1048576,
 	(lines) => lines.reduce((n, line) => n + line.length * 2 + 48, 64));
 
 /**
@@ -307,7 +307,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	};
 	for (let start = 0; start < needed; start += CHUNK_LINES) {
 		if (start > 0) {
-			await set_immediate();
+			await setImmediate();
 		}
 		if (cancelled !== undefined && cancelled()) {
 			keep_partial();

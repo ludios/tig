@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
 import { resolve } from "node:path";
-import { byte_lru } from "./lru.ts";
+import { ByteLRU } from "./lru.ts";
 import { content_identity } from "./highlight.ts";
 import { config } from "./config.ts";
 
@@ -61,7 +61,7 @@ const repo_cache = new Map<string, repo_identity | null>();
 const textconv_cache = new Map<string, boolean>();
 
 /** Byte-budgeted LRU of `common_dir\0requested_oid` -> blob. */
-const blob_cache = new byte_lru<blob_result>(config.blob_cache_mb * 1048576,
+const blob_cache = new ByteLRU<blob_result>(config.blob_cache_mb * 1048576,
 	(blob) => blob.content.length + 128);
 
 /** Run one single-value rev-parse query; null on failure or no output.
@@ -113,7 +113,7 @@ export async function repo_info(cwd: string): Promise<repo_identity | null> {
  * are answered strictly in order, so a FIFO of pending resolvers plus an
  * incremental buffer parser is sufficient.
  */
-class blob_batcher {
+class BlobBatcher {
 	private child: ChildProcessByStdio<Writable, Readable, null>;
 	private pending: { resolve: (blob: blob_result | null) => void }[] = [];
 	/** Unparsed stdout, as a chunk list to avoid per-chunk concatenation. */
@@ -235,16 +235,16 @@ class blob_batcher {
 }
 
 /** LRU of object-store directory -> live batcher. */
-const batchers = new Map<string, blob_batcher>();
+const batchers = new Map<string, BlobBatcher>();
 
-function get_batcher(dir: string): blob_batcher {
+function get_batcher(dir: string): BlobBatcher {
 	let batcher = batchers.get(dir);
 	if (batcher !== undefined && !batcher.broken) {
 		batchers.delete(dir);
 		batchers.set(dir, batcher);
 		return batcher;
 	}
-	batcher = new blob_batcher(dir);
+	batcher = new BlobBatcher(dir);
 	batchers.set(dir, batcher);
 	while (batchers.size > MAX_BATCHERS) {
 		const oldest = batchers.keys().next().value as string;

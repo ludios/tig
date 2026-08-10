@@ -14,7 +14,7 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configure } from "@logtape/logtape";
-import { section_splitter, type diff_section } from "../src/diff_parser.ts";
+import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
 import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
 
@@ -136,7 +136,7 @@ function build_diff(): { input: Buffer, big_bytes: number } {
 describe("oversized section passthrough", () => {
 	it("streams oversized sections without buffering, byte-losslessly", () => {
 		const { input, big_bytes } = build_diff();
-		const splitter = new section_splitter(4096);
+		const splitter = new SectionSplitter(4096);
 		const sections: diff_section[] = [];
 		// Feed in awkward chunk sizes to stress carry handling.
 		for (let off = 0; off < input.length; off += 1237) {
@@ -168,7 +168,7 @@ describe("oversized section passthrough", () => {
 
 	it("passes oversized sections through process_section raw", async () => {
 		const { input } = build_diff();
-		const splitter = new section_splitter(4096);
+		const splitter = new SectionSplitter(4096);
 		const sections = [...splitter.feed(input), ...splitter.finish()];
 		for (const section of sections.filter((s) => s.kind === "oversized")) {
 			const out = await process_section("/nonexistent", section);
@@ -178,7 +178,7 @@ describe("oversized section passthrough", () => {
 
 	it("emits everything as one file section when under the threshold", () => {
 		const { input } = build_diff();
-		const splitter = new section_splitter();
+		const splitter = new SectionSplitter();
 		const sections = [...splitter.feed(input), ...splitter.finish()];
 		expect(sections.map((s) => s.kind)).toEqual(["preamble", "file", "file", "file"]);
 	});

@@ -19,7 +19,7 @@ import { unlink, mkdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
-import { section_splitter, type diff_section } from "./diff_parser.ts";
+import { SectionSplitter, type diff_section } from "./diff_parser.ts";
 import { config } from "./config.ts";
 import { init_highlighter } from "./highlight.ts";
 import { process_section } from "./process.ts";
@@ -37,7 +37,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 	return new Promise((resolve) => {
 		let cwd: string | null = null;
 		let header_buf = Buffer.alloc(0);
-		const splitter = new section_splitter(config.max_section_bytes);
+		const splitter = new SectionSplitter(config.max_section_bytes);
 		let queue: Promise<void> = Promise.resolve();
 		let closed = false;
 		let sections_served = 0;

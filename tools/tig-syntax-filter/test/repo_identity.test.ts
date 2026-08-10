@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configure } from "@logtape/logtape";
 import { repo_info, has_textconv } from "../src/git.ts";
-import { byte_lru } from "../src/lru.ts";
+import { ByteLRU } from "../src/lru.ts";
 
 let repo: string;
 
@@ -78,8 +78,8 @@ describe("has_textconv from a subdirectory", () => {
 	});
 });
 
-describe("byte_lru", () => {
-	const sized = () => new byte_lru<string>(100, (v) => v.length);
+describe("ByteLRU", () => {
+	const sized = () => new ByteLRU<string>(100, (v) => v.length);
 
 	it("evicts oldest entries past the byte budget", () => {
 		const lru = sized();
