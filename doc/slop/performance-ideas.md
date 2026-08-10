@@ -101,17 +101,21 @@ of a 100k-line TypeScript file.  Record the exact SHAs in a
 ### BM2: end-to-end filter latency, cold vs warm
 
 ```sh
-# cold: kill the daemon between runs
-hyperfine --prepare 'pkill -f tig-syntax-daemon; sleep 0.2' \
+# cold: kill the daemon between runs.  The launcher execs
+# "node .../src/daemon.ts", so the live process has no "tig-syntax-daemon"
+# in its argv; match the script path, bracket-escaped so the pattern never
+# matches the pkill/hyperfine command lines themselves.
+hyperfine --prepare 'pkill -f "[t]ig-syntax-filter/src/daemon\.ts"; sleep 0.2' \
 	'git -C <repo> show <sha> | tig-syntax-filter > /dev/null'
 # warm: run once to prime, then measure
 hyperfine --warmup 2 'git -C <repo> show <sha> | tig-syntax-filter > /dev/null'
 ```
 
 (`hyperfine` via `nix-shell -p hyperfine`, or a plain `time` loop.)  Gates:
-everything in sections A–C; this is the headline number.  Beware the pkill
-self-match trap noted in the dev-environment memory: match on
-`tig-syntax-daemon`, not a broader pattern.
+everything in sections A–C; this is the headline number.  Verify the prepare
+step actually kills the daemon (check the log for a fresh "listening" line);
+a cleaner alternative is resolving the PID of whatever owns the bench socket
+via `ss -xlp src <socket>` and killing that.
 
 ### BM3: time-to-first-frame and per-section latency profile
 
@@ -185,9 +189,10 @@ reach the user.
   directly is fidelity-neutral (same engine lineage; the plan doc already
   argues this).
 - **A2. Yield between line batches.**  With the per-line loop, tokenize N
-  lines (or a few ms) per event-loop turn and `await` a microtask/timer
-  between batches, so socket reads, other connections, and the idle timer
-  stay live even mid-section.  Cheap once A1 exists; removes the
+  lines (or a few ms) per event-loop turn and yield with a *macrotask*
+  (`setImmediate` / timer — a microtask would drain the next batch before
+  node ever returns to libuv, keeping I/O starved), so socket reads, other
+  connections, and the idle timer stay live even mid-section.  Cheap once A1 exists; removes the
   one-wedged-daemon-starves-every-tig failure mode without threads.
 - **A3. Worker-thread pool for tokenization.**  2–4 `worker_threads`, each
   with its own highlighter + grammars; the main thread keeps parsing,
@@ -200,16 +205,21 @@ reach the user.
 - **A4. Progressive client fallback.**  Today the 15 s timeout is
   all-or-nothing.  After A1 the daemon guarantees bounded per-section
   latency, so the client's `FRAME_TIMEOUT_MS` can drop to ~2–3 s and become
-  a pure liveness check rather than the thing users wait on.  Independent
-  smaller change: on timeout, keep the connection and emit only the
-  *unacknowledged* spool raw (it already does exactly this) — verify with
-  BM3 that partial emission composes with tig's incremental rendering.
-- **A5. Heartbeat / progress frames.**  Add a `P <consumed> 0` no-op frame
-  the daemon emits between line batches (needs A2) so the client can
-  distinguish slow-but-alive from dead and apply a *total* budget (e.g.
-  "if the whole diff isn't done in 10 s, go raw for the rest") instead of a
-  per-frame one.  Small protocol bump; client change is a few lines in
-  `drain_frames`.
+  a pure liveness check rather than the thing users wait on.  (Note the
+  timeout fallback today *closes* the daemon connection before emitting
+  `spool[acked..]` raw; any "go raw but keep the connection for later
+  sections" variant would receive `O` frames for input already emitted raw
+  and duplicate it in tig — that variant needs explicit frame-discard
+  semantics in the protocol, it is not a small tweak.)
+- **A5. Heartbeat / progress frames.**  Add a `P` keepalive frame the daemon
+  emits between line batches (needs A2) so the client can distinguish
+  slow-but-alive from dead and apply a *total* budget (e.g. "if the whole
+  diff isn't done in 10 s, go raw for the rest") instead of a per-frame one.
+  Important: a heartbeat must **not** carry/advance the consumed-input count
+  — `acked` may only advance when the corresponding output bytes have
+  actually been emitted, otherwise a later fallback would skip those input
+  bytes and truncate the diff.  Small protocol bump; client change is a few
+  lines in `drain_frames`.
 - **A6. Configurable knobs.**  Expose the budgets (per-section ms, total ms,
   max last-line to tokenize) via environment or a tiny config file in
   `XDG_CONFIG_HOME/tig-syntax/`, with defaults chosen from BM1 data.  A
@@ -232,9 +242,14 @@ reach the user.
 
 ### B. Faster cold start
 
-- **B1. `module.enableCompileCache()`** first thing in `daemon.ts` (Node ≥ 22;
-  this machine runs 26).  One line; caches V8 compilation (including the
-  type-stripped TS) across daemon restarts.
+- **B1. V8 compile cache** (Node ≥ 22; this machine runs 26): caches
+  compilation (including the type-stripped TS) across daemon restarts.  It
+  must be enabled *before* the module graph loads — a
+  `module.enableCompileCache()` call inside `daemon.ts` runs after all its
+  static imports (shiki included) are already compiled and caches nothing
+  useful.  Either export `NODE_COMPILE_CACHE=<dir>` from
+  `bin/tig-syntax-daemon`, or make the entry point a tiny bootstrap that
+  enables the cache and then dynamically imports the real daemon.
 - **B2. Bundle the daemon.**  shiki 4's module graph is large; if BM6 shows
   import time matters, esbuild-bundle daemon + deps into one JS file at
   build/install time (the nixpkgs patch already builds this package; add a
@@ -249,14 +264,21 @@ reach the user.
   seconds away once tig is open.  When `diff-syntax-filter` is configured,
   tig (or even the shell profile) can fire `: | tig-syntax-filter &` once at
   startup; the client already spawns the daemon and exits cleanly on empty
-  input.  C-side: a one-shot background `io_exec` when the option is first
-  resolved in `app_syntax_filter_load` (`src/apps.c`).
+  input.  C-side placement matters: `app_syntax_filter_load` (`src/apps.c`)
+  is only called from `diff_init_highlight`, i.e. when the first diff is
+  already opening — too late, and a warm-up client would race the real one.
+  Hook the one-shot background spawn right after startup configuration is
+  loaded (post-tigrc, in `src/tig.c`), fire-and-forget.
 - **B5. Stay alive longer / shed instead of exit.**  `IDLE_EXIT_MS` is 30 min;
   every expiry buys the next user a full cold start.  Either raise it a lot
   and *shrink the caches* on idle (drop blob LRU, keep the small SGR line
-  cache), or go the whole way: a systemd user socket unit so activation is
-  instant and invisible.  The C client needs no changes for socket
-  activation (it just connects); ship an example unit in `contrib/`.
+  cache), or go the whole way: systemd user socket activation so startup is
+  invisible.  The C client needs no changes (it just connects), but the
+  *daemon* does: it currently ignores inherited descriptors, calls
+  `server.listen(path)`, and treats `EADDRINUSE` as "another daemon is
+  live" and exits — under a socket unit that owns the path it would exit
+  every activation.  The idea includes `LISTEN_FDS`/fd-3 handling in
+  `daemon.ts` plus an example unit in `contrib/`.
 - **B6. Grammar preload.**  Persist the recently-used language list in the
   state dir; after listen (B3), load those grammars in the background so the
   first real request doesn't pay `loadLanguage`.  BM4 will show how much
@@ -293,7 +315,12 @@ reach the user.
   `--show-toplevel` once per connection and use that everywhere; better
   still, key the tokenization cache on the *OID alone* (blobs are
   content-addressed; the repo is irrelevant to tokenization), which also
-  gives cross-worktree/clone cache hits for free.
+  gives cross-worktree/clone cache hits for free.  Caveat for OID-only keys:
+  the `index` OIDs in `git show` output are *abbreviated* and unique only
+  within one repository — a cross-repo key must use the full OID (echoed by
+  `cat-file --batch` in its response header, so it's free to capture) or a
+  hash of the fetched content, never the abbreviated prefix.  Applies to
+  C7's persistent cache too.
 - **C5. Extend cached tokenizations instead of recomputing.**  The line
   cache requires `cached.length >= last_line` (`highlight.ts`) — revisiting
   the same file with a deeper hunk re-tokenizes from line 1.  With the A1
@@ -301,10 +328,14 @@ reach the user.
   from line N.  Same mechanism gives partial-progress reuse after a budget
   abort (a later revisit continues instead of starting over).
 - **C6. Grow / re-shape the caches.**  256 cached documents and 128 blobs is
-  small for a browsing session; SGR line arrays are much smaller than blobs.
-  After BM4 hit-rate data: bound caches by approximate bytes rather than
-  entries, and raise the line-cache bound substantially (it's the one that
-  turns 150 ms into 5 ms).
+  small for a browsing session.  Don't assume SGR line arrays are small,
+  though: every style run adds a ~20-byte escape sequence plus JS
+  string/array overhead, so a heavily-tokenized document's cached lines can
+  exceed the source blob several-fold.  After BM4 hit-rate data *and* a
+  resident-memory measurement: bound both caches by approximate bytes rather
+  than entry count, then raise the line-cache byte budget (it's the cache
+  that turns 150 ms into 5 ms) to whatever memory target seems fair for a
+  long-lived daemon.
 - **C7. Persistent on-disk cache.**  Key `oid | lang | EMIT_VERSION |
   theme-hash` → SGR lines, stored via `node:sqlite` (built into this node)
   in `XDG_CACHE_HOME/tig-syntax/`.  Survives daemon restarts and combines
@@ -333,10 +364,16 @@ reach the user.
   `git show <next-sha> --patch-with-stat … | tig-syntax-filter >/dev/null`
   for selection+1 (and −1), mirroring the diff view's argv.  This warms the
   daemon's blob + line caches, so the subsequent j/k lands on the 3–6 ms
-  path.  Gate behind an option (`set diff-prefetch = yes`), kill the
-  prefetch child when the selection moves again, and `nice` it.  C work:
-  `src/main.c` selection hook + a small background-io helper; no protocol or
-  daemon changes at all.
+  path.  Gate behind an option (`set diff-prefetch = yes`) and kill the
+  prefetch child when the selection moves again.  C work: `src/main.c`
+  selection hook + a small background-io helper.  Caveat: killing or
+  `nice`ing the *client* does not touch the work already queued in the
+  long-lived daemon — with today's synchronous tokenizer even the
+  socket-close callback can't run mid-section, so prefetching a giant
+  commit would delay the foreground diff it was meant to accelerate.
+  Sequence D1 *after* A2 (interruptible tokenization: cancel on
+  disconnect between batches) or A3 (workers), and consider a protocol
+  priority bit so foreground requests preempt prefetch ones.
 - **D2. Deeper readahead.**  Same mechanism, N commits ahead, budgeted (stop
   when the daemon is busy — trivially observable once A5 heartbeats exist).
   Only if D1 measurably helps and the CPU cost is acceptable; note laptops.
@@ -358,9 +395,13 @@ reach the user.
 - **E4. Blocking-read hazard note** (`io.c` `io_get_line` loops on a
   *blocking* `read` until a full line arrives): safe today because daemon
   frames are line-aligned per section, but a producer stalling mid-line
-  would freeze tig's UI, not just the view.  Verify line-alignment with BM3;
-  the durable fix is `O_NONBLOCK` view pipes, which would also let E3 poll
-  on the pipe fd instead of sleeping.
+  would freeze tig's UI, not just the view.  Verify line-alignment with BM3.
+  The durable fix is `O_NONBLOCK` view pipes — but note that flipping the
+  flag alone is not enough: `io_read` currently retries `EAGAIN` in a tight
+  loop, so `io_get_line` would spin instead of block on a partial line.
+  The real change is: preserve the partial buffer, return control to the
+  event loop on `EAGAIN`, and resume after polling the fd — which is also
+  exactly what E3 needs to poll on pipe fds instead of sleeping.
 
 ## Suggested order
 
@@ -369,9 +410,9 @@ reach the user.
 2. **A1 + A6** — the time budget.  This is the hang fix; ship it first.
 3. **C1, C2, C4** — cheap warm-path wins with no architectural risk.
 4. **B1, B3, B4** — cheap cold-start wins.
-5. **D1** — prefetch; likely the biggest *felt* improvement for j/k browsing
-   once warm-path hits are cheap.
-6. **A2/A3, C5–C7** — chunking/workers and the cache deepening, sized by the
-   numbers.
+5. **A2 (or A3), then D1** — prefetch is likely the biggest *felt*
+   improvement for j/k browsing once warm-path hits are cheap, but it needs
+   interruptible tokenization first (see the D1 caveat).
+6. **A3, C5–C7** — workers and the cache deepening, sized by the numbers.
 7. **A7** — only if giant commits still feel bad after budgets + workers.
 8. **E-items** — only with BM7/BM8 evidence.
