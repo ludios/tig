@@ -10,6 +10,7 @@
 
 import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
 import { config } from "./config.ts";
+import { byte_lru } from "./lru.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -44,8 +45,6 @@ const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
 export const MAX_LINE_CHARS = 20000;
 export const MAX_RUNS_PER_LINE = 4000;
 
-const CACHE_MAX_ENTRIES = 256;
-
 /** Lines tokenized between deadline checks; ~10-60 ms of work per chunk at
  * measured grammar rates, so a section overshoots its budget by at most
  * roughly that. */
@@ -77,8 +76,10 @@ let theme_name = "one-monokai";
 let theme_fg = "#bbbbbb";
 let theme_bg = "#282c34";
 
-/** LRU cache: content identity -> SGR-ready lines (no trailing newline). */
-const line_cache = new Map<string, string[]>();
+/** Byte-budgeted LRU: content identity -> SGR-ready lines (no trailing
+ * newline).  Sized by approximate JS string memory. */
+const line_cache = new byte_lru<string[]>(config.line_cache_mb * 1048576,
+	(lines) => lines.reduce((n, line) => n + line.length * 2 + 48, 64));
 
 /**
  * Apply `TOKEN_COLOR_OVERRIDES` to a parsed VS Code theme, in place.  Every
@@ -191,30 +192,20 @@ function style_sequence(color: string | undefined, font_style: number | undefine
 	return `\x1b[${params}m`;
 }
 
-function cache_get(key: string): string[] | undefined {
-	const hit = line_cache.get(key);
-	if (hit !== undefined) {
-		line_cache.delete(key);
-		line_cache.set(key, hit);
-	}
-	return hit;
-}
-
-function cache_put(key: string, value: string[]): void {
-	line_cache.set(key, value);
-	while (line_cache.size > CACHE_MAX_ENTRIES) {
-		const oldest = line_cache.keys().next().value as string;
-		line_cache.delete(oldest);
-	}
-}
-
-/** A stable identity for source content within a repository. */
-export function content_identity(repo: string, oid_or_content: string | Buffer): string {
+/**
+ * A stable, repository-independent identity for source content.  Git
+ * objects are content-addressed, so a FULL object id (as echoed by
+ * cat-file — never the diff's abbreviated form, which is unique only
+ * within one repository) identifies content globally; worktree bytes are
+ * identified by their own hash.  Cross-worktree and cross-clone cache
+ * hits fall out for free.
+ */
+export function content_identity(oid_or_content: string | Buffer): string {
 	if (typeof oid_or_content === "string") {
-		return `${repo}|oid:${oid_or_content}`;
+		return `oid:${oid_or_content}`;
 	}
 	const hash = createHash("sha256").update(oid_or_content).digest("hex");
-	return `${repo}|sha256:${hash}`;
+	return `sha256:${hash}`;
 }
 
 /** Render token lines into SGR-annotated strings (exported for tests). */
@@ -263,7 +254,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 					last_line: number, deadline: number | null): Promise<string[] | null> {
 	A(highlighter !== null, "highlighter not initialized");
 	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
-	const cached = cache_get(key);
+	const cached = line_cache.get(key);
 	if (cached !== undefined && cached.length >= last_line) {
 		return cached;
 	}
@@ -301,7 +292,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			// that dies early must not shrink an existing entry.
 			if (token_lines.length > 0 &&
 			    (cached === undefined || token_lines.length > cached.length)) {
-				cache_put(key, emit_sgr_lines(token_lines));
+				line_cache.set(key, emit_sgr_lines(token_lines));
 			}
 			fail_cache_put(fail_key, last_line);
 			return null;
@@ -323,6 +314,6 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	}
 
 	const result = emit_sgr_lines(token_lines);
-	cache_put(key, result);
+	line_cache.set(key, result);
 	return result;
 }

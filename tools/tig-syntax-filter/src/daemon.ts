@@ -200,7 +200,7 @@ async function main(): Promise<void> {
 		// fallback; the client additionally checks the peer UID.
 		void chmod(path, 0o600).catch(() => {});
 		logger.info("listening on {path} (pid {pid})", { path, pid: process.pid });
-		logger.info("budgets: {budget_ms}ms/section, max {max_lines} lines, passthrough over {max_section_bytes} bytes", config);
+		logger.info("budgets: {budget_ms}ms/section, max {max_lines} lines, passthrough over {max_section_bytes} bytes, caches {line_cache_mb}+{blob_cache_mb}MB", config);
 		schedule_idle_exit();
 	});
 }

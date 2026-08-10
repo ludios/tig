@@ -13,6 +13,9 @@
  *   section is not highlighted at all (bounds tokenization memory).
  * - TIG_SYNTAX_MAX_SECTION_BYTES: file sections larger than this stop being
  *   buffered and stream through raw instead (see diff_parser.ts).
+ * - TIG_SYNTAX_LINE_CACHE_MB / TIG_SYNTAX_BLOB_CACHE_MB: approximate byte
+ *   budgets for the tokenized-line cache (highlight.ts) and the blob cache
+ *   (git.ts).
  */
 
 /** Parse integer environment variable `name`, enforcing [min, max]. */
@@ -33,4 +36,6 @@ export const config = {
 	budget_ms: int_env("TIG_SYNTAX_BUDGET_MS", 500, 50, 600000),
 	max_lines: int_env("TIG_SYNTAX_MAX_LINES", 100000, 100, 1000000),
 	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 20, 1 << 16, 1 << 26),
+	line_cache_mb: int_env("TIG_SYNTAX_LINE_CACHE_MB", 64, 1, 4096),
+	blob_cache_mb: int_env("TIG_SYNTAX_BLOB_CACHE_MB", 64, 1, 4096),
 };

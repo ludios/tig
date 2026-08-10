@@ -47,11 +47,13 @@ describe("cat_blob under a batcher kill", () => {
 		]);
 		expect(big).toBeNull();
 		expect(small).not.toBeNull();
-		expect(small!.toString("utf8")).toBe("hello blob\n");
+		expect(small!.content.toString("utf8")).toBe("hello blob\n");
 		// The FIFO stays synchronized after the discard: later requests on
-		// the same child still resolve correctly.
+		// the same child still resolve correctly — and an abbreviated
+		// request comes back with the full echoed OID (C4).
 		const again = await cat_blob(repo, small_oid.slice(0, 12));
 		expect(again).not.toBeNull();
-		expect(again!.toString("utf8")).toBe("hello blob\n");
+		expect(again!.content.toString("utf8")).toBe("hello blob\n");
+		expect(again!.oid).toBe(small_oid);
 	});
 });

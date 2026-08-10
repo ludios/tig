@@ -54,6 +54,9 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
 - `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this are not
   buffered or highlighted at all; they stream through raw as they arrive
   (65536–67108864; default 1048576).
+- `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` — approximate
+  byte budgets for the tokenized-line cache and the blob cache (1–4096;
+  default 64 each).
 
 The daemon knobs are read once at daemon startup (restart the daemon after
 changing them); the client's `TIG_SYNTAX_DEADLINE_MS` is read per run.

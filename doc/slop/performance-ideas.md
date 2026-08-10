@@ -596,12 +596,26 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   concurrently), and keep only tokenization + emission in input order.
   Frames must still ack input order, so this is a prefetch inside the
   daemon, not a protocol change.  Pairs well with A3.
-- **C4. Normalize the repo identity to the toplevel.**  The client sends its
+- **C4. Normalize the repo identity to the toplevel.
+  [IMPLEMENTED 2026-08-10]** — `repo_info(cwd)` resolves (once, cached)
+  the absolute common git dir, worktree toplevel, and object format via a
+  single `rev-parse`.  Batchers and the blob cache key on the common dir
+  (worktrees sharing an object store share them), attribute checks run
+  from — and cache by — the toplevel (the subdir wrong-path bug was real;
+  now unit-tested), `content_matches_oid` hashes only the repo's actual
+  algorithm, and the line cache keys on the **full OID echoed by
+  cat-file** (never the diff's abbreviated one), making tokenization
+  results shared across worktrees, clones, and repositories.  Measured: a
+  linked worktree's "first visit" of the medium commit costs 196 ms vs
+  597 ms for a true first visit — blobs and tokenization are shared; the
+  residual is the per-worktree textconv spawns (C1's territory, and
+  correctly per-worktree since attributes can differ).  Original idea
+  text: the client sends its
   cwd, and `git.ts`/`highlight.ts` key *everything* on it: batchers, blob
   LRU, and the tokenization cache identity (`content_identity(cwd, oid)`).
   tig run from a subdirectory gets duplicate batchers and cold caches for
   the same repo — and `check-attr` with repo-relative paths from a subdir
-  cwd may even answer for the wrong path (verify!).  Resolve cwd →
+  cwd may even answer for the wrong path (verified real).  Resolve cwd →
   `--show-toplevel` once per connection and use that everywhere; better
   still, key the tokenization cache on the *OID alone* (blobs are
   content-addressed; the repo is irrelevant to tokenization), which also
@@ -639,15 +653,16 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   bytes sharply for the common small-hunk-late-in-big-file case (caveat:
   make the line cache store "state + sparse rendered lines" rather than a
   dense array, or C5/C6 accounting breaks).
-- **C6. Byte-bound (then grow) the caches.**  256 cached documents and 128
-  blobs is small for a browsing session — but the bound must be *bytes*
-  first: SGR line arrays for big documents dwarf their source (every style
-  run adds a ~20-byte escape plus JS string/array overhead), and BM4
-  measured the daemon at **RSS 1.4 GB** after one corpus replay under the
-  current entry-count LRUs.  Cap by approximate bytes, then raise the
-  line-cache byte budget (it's the cache that turns first visits into
-  ~10 ms revisits) to whatever memory target seems fair for a long-lived
-  daemon.
+- **C6. Byte-bound (then grow) the caches. [IMPLEMENTED 2026-08-10]** —
+  a shared `byte_lru` (approximate sizing, entries over half the budget
+  not cached) now backs the line cache and blob cache, budgeted by
+  `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` (64 MB each by
+  default).  Measured: daemon RSS after a double corpus replay is
+  **~410 MB** (was 1.4 GB under the entry-count LRUs), with warm revisits
+  unregressed (~8 ms).  Original rationale: SGR line arrays for big
+  documents dwarf their source (every style run adds a ~20-byte escape
+  plus JS string/array overhead), so entry counts let a few giants own
+  memory; byte budgets track what matters.
 - **C7. Persistent on-disk cache.**  Key `oid | lang | EMIT_VERSION |
   theme-hash` → SGR lines, stored via `node:sqlite` (built into this node)
   in `XDG_CACHE_HOME/tig-syntax/`.  Survives daemon restarts and combines
@@ -807,8 +822,11 @@ fake daemon is ready to become the CI regression test for A0.
    Measured neutral-to-slightly-better wall clock; the 51 %-of-tokenization
    recovery turns out to require C8(b) (cross-side memoization), which
    remains open and gated on a profitability check.
-4. **C6 + C4** — byte-bounded caches (RSS 1.4 GB measured) and
-   toplevel/full-OID cache keys.
+4. **C6 + C4 — DONE (2026-08-10)** — byte-bounded caches (RSS 1.4 GB →
+   ~410 MB on the same replay) and canonical identities (common-dir-keyed
+   batchers/blobs, full-OID line-cache keys shared across worktrees and
+   clones, toplevel-scoped attribute checks fixing a real subdir
+   wrong-path bug, single-algorithm hashing).
 5. **A2 (or A3) + A9** — interruptible tokenization (the event loop
    measured 15 s deaf) and daemon backpressure.
 6. **D0/D1 prefetch** — first visits cost 0.2–1.1 s on ordinary commits vs

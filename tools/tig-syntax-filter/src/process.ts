@@ -15,7 +15,7 @@ import { getLogger } from "@logtape/logtape";
 import { parse_file_section, type diff_section, type file_info } from "./diff_parser.ts";
 import { ensure_lang, highlight_lines, frame_content, content_identity } from "./highlight.ts";
 import { detect_lang } from "./lang_map.ts";
-import { cat_blob, read_worktree_file, has_textconv } from "./git.ts";
+import { cat_blob, read_worktree_file, has_textconv, repo_info } from "./git.ts";
 import { config } from "./config.ts";
 
 const logger = getLogger(["tig-syntax", "process"]);
@@ -56,11 +56,14 @@ interface side_doc {
 	lines: string[];
 }
 
-/** Whether `content` hashes to the (possibly abbreviated) blob `oid`,
- * under either of git's hash algorithms. */
-function content_matches_oid(content: Buffer, oid: string): boolean {
+/** Whether `content` hashes to the (possibly abbreviated) blob `oid`
+ * under the repository's hash algorithm (both are tried only when the
+ * repository's algorithm could not be resolved). */
+async function content_matches_oid(cwd: string, content: Buffer, oid: string): Promise<boolean> {
+	const info = await repo_info(cwd);
+	const algorithms = info !== null ? [info.object_format] : ["sha1", "sha256"];
 	const header = Buffer.from(`blob ${content.length}\0`);
-	for (const algorithm of ["sha1", "sha256"]) {
+	for (const algorithm of algorithms) {
 		const hex = createHash(algorithm).update(header).update(content).digest("hex");
 		if (hex.startsWith(oid)) {
 			return true;
@@ -84,18 +87,25 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 		return null;
 	}
 	let content: Buffer | null = null;
-	let from_worktree = false;
+	let identity: string | null = null;
 	if (oid !== null) {
-		content = await cat_blob(cwd, oid);
+		const blob = await cat_blob(cwd, oid);
+		if (blob !== null) {
+			content = blob.content;
+			// Key by the FULL OID git echoed, never the diff's
+			// abbreviated one: content-addressed, so shared across
+			// worktrees, clones, and repositories.
+			identity = content_identity(blob.oid);
+		}
 	}
 	if (content === null && worktree_fallback) {
 		const file = await read_worktree_file(cwd, path);
-		if (file !== null && (oid === null || content_matches_oid(file, oid))) {
+		if (file !== null && (oid === null || await content_matches_oid(cwd, file, oid))) {
 			content = file;
-			from_worktree = true;
+			identity = content_identity(file);
 		}
 	}
-	if (content === null || content.includes(0)) {
+	if (content === null || identity === null || content.includes(0)) {
 		return null;
 	}
 	const text = decode_utf8(content);
@@ -108,8 +118,6 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 	if (lang === null || !(await ensure_lang(lang))) {
 		return null;
 	}
-	const identity = (oid !== null && !from_worktree)
-		? content_identity(cwd, oid) : content_identity(cwd, content);
 	return { identity, lang, text, lines: text.split("\n") };
 }
 

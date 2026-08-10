@@ -2,12 +2,17 @@
 
 /**
  * Git plumbing used by the daemon.  Every operation takes the requesting
- * client's working directory explicitly (`git -C`): the daemon serves many
- * repositories and its own cwd is meaningless.
+ * client's working directory and resolves it once (cached) to the
+ * repository's canonical identities: the common git directory keys
+ * object-level state (worktrees sharing one object store share batchers
+ * and blob cache entries) and the worktree top level keys worktree-level
+ * state (attribute lookups, file reads) — see plan item C4.
  *
  * Blob reads go through a persistent `git cat-file --batch` child per
- * repository plus an in-memory LRU, so that revisiting commits while
- * navigating in tig costs no process spawns.
+ * object store plus a byte-budgeted LRU, so that revisiting commits while
+ * navigating in tig costs no process spawns.  Responses carry the full
+ * OID git echoes, so callers can key caches content-addressably even when
+ * the diff only gave an abbreviated OID.
  */
 
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
@@ -17,42 +22,92 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
+import { byte_lru } from "./lru.ts";
+import { config } from "./config.ts";
 
 const execfile_p = promisify(execFile);
 const logger = getLogger(["tig-syntax", "git"]);
 
 const MAX_BLOB_BYTES = 8 * 1024 * 1024;
 const MAX_BATCHERS = 8;
-const BLOB_CACHE_ENTRIES = 128;
 
-/** Cache of `cwd` -> worktree top-level directory (or null outside a repo). */
-const toplevel_cache = new Map<string, string | null>();
+/** A blob response: git's echoed full OID and the content. */
+export interface blob_result {
+	oid: string;
+	content: Buffer;
+}
 
-/** Cache of `cwd\0path` -> whether a textconv diff driver applies. */
+/** A repository's canonical identities, resolved from a client cwd. */
+export interface repo_identity {
+	/** Absolute common git directory: identifies the object store. */
+	common_dir: string;
+	/** "sha1" or "sha256". */
+	object_format: string;
+	/** Absolute worktree top level, or null for a bare repository. */
+	toplevel: string | null;
+}
+
+/** Cache of `cwd` -> resolved identity (null = not a repository). */
+const repo_cache = new Map<string, repo_identity | null>();
+
+/** Cache of `toplevel\0path` -> whether a textconv diff driver applies. */
 const textconv_cache = new Map<string, boolean>();
 
-/** LRU of `cwd\0oid` -> blob content. */
-const blob_cache = new Map<string, Buffer>();
+/** Byte-budgeted LRU of `common_dir\0requested_oid` -> blob. */
+const blob_cache = new byte_lru<blob_result>(config.blob_cache_mb * 1048576,
+	(blob) => blob.content.length + 128);
 
 /**
- * A persistent `git cat-file --batch` child for one repository.  Requests
+ * Resolve the canonical identity of the repository containing `cwd`, or
+ * null when cwd is not inside one.  One git spawn per distinct cwd, cached
+ * for the daemon's lifetime.
+ */
+export async function repo_info(cwd: string): Promise<repo_identity | null> {
+	const cached = repo_cache.get(cwd);
+	if (cached !== undefined) {
+		return cached;
+	}
+	let result: repo_identity | null = null;
+	try {
+		// --show-toplevel prints nothing in a bare repository, so it goes
+		// last where a missing line is detectable.
+		const { stdout } = await execfile_p("git", ["-C", cwd, "rev-parse",
+			"--path-format=absolute", "--git-common-dir",
+			"--show-object-format", "--show-toplevel"]);
+		const lines = stdout.split("\n").filter((line) => line !== "");
+		if (lines.length >= 2) {
+			result = {
+				common_dir: lines[0],
+				object_format: lines[1],
+				toplevel: lines.length >= 3 ? lines[2] : null,
+			};
+		}
+	} catch {
+		result = null;
+	}
+	repo_cache.set(cwd, result);
+	return result;
+}
+
+/**
+ * A persistent `git cat-file --batch` child for one object store.  Requests
  * are answered strictly in order, so a FIFO of pending resolvers plus an
  * incremental buffer parser is sufficient.
  */
 class blob_batcher {
 	private child: ChildProcessByStdio<Writable, Readable, null>;
-	private pending: { resolve: (blob: Buffer | null) => void }[] = [];
+	private pending: { resolve: (blob: blob_result | null) => void }[] = [];
 	/** Unparsed stdout, as a chunk list to avoid per-chunk concatenation. */
 	private chunks: Buffer[] = [];
 	private buffered = 0;
-	/** Size and blobness of the payload the last header announced. */
-	private expecting: { size: number, is_blob: boolean } | null = null;
+	/** Full OID, size, and blobness announced by the last header. */
+	private expecting: { oid: string, size: number, is_blob: boolean } | null = null;
 	/** Bytes of an oversized payload still being discarded. */
 	private discard_left = 0;
 	broken = false;
 
-	constructor(cwd: string) {
-		this.child = spawn("git", ["-C", cwd, "cat-file", "--batch"], {
+	constructor(dir: string) {
+		this.child = spawn("git", ["-C", dir, "cat-file", "--batch"], {
 			stdio: ["pipe", "pipe", "ignore"],
 		});
 		this.child.on("error", () => {
@@ -117,34 +172,35 @@ class blob_batcher {
 				}
 				const header = data.subarray(0, nl).toString("utf8");
 				this.consume(nl + 1);
-				const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
+				const m = /^([0-9a-f]+) (\w+) (\d+)$/.exec(header);
 				if (m === null) {
-					// "<oid> missing": no payload follows.
+					// "<oid> missing"/"<oid> ambiguous": no payload.
 					this.pending.shift()?.resolve(null);
 					continue;
 				}
-				const size = parseInt(m[2], 10);
+				const size = parseInt(m[3], 10);
 				if (size > MAX_BLOB_BYTES) {
 					this.pending.shift()?.resolve(null);
 					// Payload plus the trailing newline git appends.
 					this.discard_left = size + 1;
 					continue;
 				}
-				this.expecting = { size, is_blob: m[1] === "blob" };
+				this.expecting = { oid: m[1], size, is_blob: m[2] === "blob" };
 			}
 			// Payload plus the trailing newline git appends.
 			if (this.buffered < this.expecting.size + 1) {
 				return;
 			}
 			const content = this.contiguous().subarray(0, this.expecting.size);
-			const is_blob = this.expecting.is_blob;
+			const { oid, is_blob } = this.expecting;
 			this.consume(this.expecting.size + 1);
 			this.expecting = null;
-			this.pending.shift()?.resolve(is_blob ? Buffer.from(content) : null);
+			this.pending.shift()?.resolve(
+				is_blob ? { oid, content: Buffer.from(content) } : null);
 		}
 	}
 
-	request(oid: string): Promise<Buffer | null> {
+	request(oid: string): Promise<blob_result | null> {
 		if (this.broken) {
 			return Promise.resolve(null);
 		}
@@ -159,18 +215,18 @@ class blob_batcher {
 	}
 }
 
-/** LRU of `cwd` -> live batcher. */
+/** LRU of object-store directory -> live batcher. */
 const batchers = new Map<string, blob_batcher>();
 
-function get_batcher(cwd: string): blob_batcher {
-	let batcher = batchers.get(cwd);
+function get_batcher(dir: string): blob_batcher {
+	let batcher = batchers.get(dir);
 	if (batcher !== undefined && !batcher.broken) {
-		batchers.delete(cwd);
-		batchers.set(cwd, batcher);
+		batchers.delete(dir);
+		batchers.set(dir, batcher);
 		return batcher;
 	}
-	batcher = new blob_batcher(cwd);
-	batchers.set(cwd, batcher);
+	batcher = new blob_batcher(dir);
+	batchers.set(dir, batcher);
 	while (batchers.size > MAX_BATCHERS) {
 		const oldest = batchers.keys().next().value as string;
 		batchers.get(oldest)?.kill();
@@ -180,59 +236,31 @@ function get_batcher(cwd: string): blob_batcher {
 }
 
 /**
- * The worktree top-level directory for a repository at `cwd`, or null when
- * git cannot resolve one (bare repository, not a repository).
+ * The blob `oid` (possibly abbreviated) in the repository at `cwd`, with
+ * git's full OID, or null when the object is missing, not a blob, or
+ * exceeds the size limit.
  */
-export async function get_toplevel(cwd: string): Promise<string | null> {
-	const cached = toplevel_cache.get(cwd);
-	if (cached !== undefined) {
-		return cached;
-	}
-	let result: string | null;
-	try {
-		const { stdout } = await execfile_p("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
-		result = stdout.trim() || null;
-	} catch {
-		result = null;
-	}
-	toplevel_cache.set(cwd, result);
-	return result;
-}
-
-/**
- * The full content of blob `oid` in the repository at `cwd`, or null when
- * the object is missing, not a blob, or exceeds the size limit.
- */
-export async function cat_blob(cwd: string, oid: string): Promise<Buffer | null> {
-	const key = cwd + "\0" + oid;
+export async function cat_blob(cwd: string, oid: string): Promise<blob_result | null> {
+	const info = await repo_info(cwd);
+	const store = info?.common_dir ?? cwd;
+	const key = store + "\0" + oid;
 	const cached = blob_cache.get(key);
 	if (cached !== undefined) {
-		blob_cache.delete(key);
-		blob_cache.set(key, cached);
 		return cached;
 	}
-	const batcher = get_batcher(cwd);
+	const batcher = get_batcher(store);
 	let blob = await batcher.request(oid);
 	if (blob === null && batcher.broken) {
-		// The batcher died mid-flight — typically another pipelined
-		// request's payload tripped the size limit and killed the child,
-		// taking this innocent request with it.  One retry on a fresh
-		// batcher; if this oid is itself the culprit, the retry fails
-		// the same way and null stands.
-		blob = await get_batcher(cwd).request(oid);
+		// The batcher died mid-flight — a real child failure (oversized
+		// payloads are discarded, not fatal).  One retry on a fresh
+		// batcher for this innocent request.
+		blob = await get_batcher(store).request(oid);
 	}
 	if (blob === null) {
-		logger.debug("no blob {oid} in {cwd}", { oid, cwd });
-		return null;
-	}
-	if (blob.length > MAX_BLOB_BYTES) {
+		logger.debug("no blob {oid} in {store}", { oid, store });
 		return null;
 	}
 	blob_cache.set(key, blob);
-	while (blob_cache.size > BLOB_CACHE_ENTRIES) {
-		const oldest = blob_cache.keys().next().value as string;
-		blob_cache.delete(oldest);
-	}
 	return blob;
 }
 
@@ -241,12 +269,12 @@ export async function cat_blob(cwd: string, oid: string): Promise<Buffer | null>
  * unreadable or exceeding the size limit.
  */
 export async function read_worktree_file(cwd: string, path: string): Promise<Buffer | null> {
-	const toplevel = await get_toplevel(cwd);
-	if (toplevel === null) {
+	const info = await repo_info(cwd);
+	if (info === null || info.toplevel === null) {
 		return null;
 	}
 	try {
-		const content = await readFile(join(toplevel, path));
+		const content = await readFile(join(info.toplevel, path));
 		if (content.length > MAX_BLOB_BYTES) {
 			return null;
 		}
@@ -260,22 +288,27 @@ export async function read_worktree_file(cwd: string, path: string): Promise<Buf
  * Whether git applies a textconv diff driver to `path` in the repository at
  * `cwd`.  Textconv means git may show transformed rather than literal blob
  * content, so such files must not be highlighted from raw sources.
+ * `path` is repository-relative, so the attribute check runs from the
+ * worktree top level — running it from a subdirectory cwd would resolve
+ * the path against the wrong location.
  */
 export async function has_textconv(cwd: string, path: string): Promise<boolean> {
-	const key = cwd + "\0" + path;
+	const info = await repo_info(cwd);
+	const root = info?.toplevel ?? cwd;
+	const key = root + "\0" + path;
 	const cached = textconv_cache.get(key);
 	if (cached !== undefined) {
 		return cached;
 	}
 	let result = false;
 	try {
-		const { stdout } = await execfile_p("git", ["-C", cwd, "check-attr", "diff", "--", path]);
+		const { stdout } = await execfile_p("git", ["-C", root, "check-attr", "diff", "--", path]);
 		// Format: "<path>: diff: <value>"
 		const value = stdout.trim().split(": ").pop() ?? "";
 		if (value !== "unspecified" && value !== "unset" && value !== "set" && value !== "") {
 			try {
 				const { stdout: conv } = await execfile_p("git",
-					["-C", cwd, "config", "--get", `diff.${value}.textconv`]);
+					["-C", root, "config", "--get", `diff.${value}.textconv`]);
 				result = conv.trim().length > 0;
 			} catch {
 				result = false;
