@@ -865,8 +865,10 @@ fake daemon is ready to become the CI regression test for A0.
 6. **D1 prefetch — DONE (2026-08-10; D0 skipped by decision)** — two
    commits ahead of the selection, debounced, cancellable, memoized.
    Measured ~6× on prefetched navigation (115 ms vs 692 ms cold).
-7. **C5/C5b + C8(b) — checkpoint/resume, visible-lines-only rendering,
-   cross-side memoization** — three extensions of the same A1 chunk loop.
+7. **C5/C5b + C8(b) — SKIPPED for now (2026-08-10, by decision)**: too
+   much complexity for the remaining benefit once the budget, caches, and
+   prefetch landed.  Original description — three extensions of the same
+   A1 chunk loop.
    C5's grammar-state checkpoints turn the linear-in-depth cost (89 ms →
    7.6 s → 14.8 s across synth-top/mid/eof) into resumable work; C5b
    shrinks the cache bytes C6 has to budget; and C8(b) — memoizing
@@ -879,9 +881,27 @@ fake daemon is ready to become the CI regression test for A0.
    memoize there); on ordinary non-pathological sections the old side
    measured 42–46 % of tokenization, so think "up to ~1.7×" on sections
    where both sides actually run, not 2× overall.
-8. **C1, B4, B5, C10–C12** — textconv batching (3 %), startup warming
-   (cold start measured at only ~0.2 s, so the rest of B demotes), negative
-   cache, emission slimming, batch-command preflight.
+8. **C1, B4, B5, C10–C12 — DONE (2026-08-10)**:
+   - C1: persistent `git check-attr --stdin -z` child per worktree +
+     per-repo driver config cache; **many-small first visit 1124 → 367 ms
+     (3×)** — the measured 3 % was an underestimate for spawn-heavy
+     commits.
+   - B4: tig warms the filter daemon right after config load
+     (`prefetch_warmup_filter`), verified via pty: the daemon is up before
+     any diff is opened.
+   - B5: at 30 min idle the daemon sheds cheap-to-rebuild state (blob
+     cache, git children) but keeps the tokenized-line cache; exit moved
+     to 24 h.
+   - C10: failed grammars remembered, language loads coalesced;
+     binary/invalid-UTF-8 verdicts cached by content identity; concurrent
+     same-blob fetches and same-document tokenizations (possible since
+     A2's yields — e.g. prefetch racing the foreground) share one pass.
+   - C11: (color, font-style) → SGR sequence memoized; differential
+     emission deliberately not done (≈2 bytes/run for decoder risk).
+   - C12: cat-file switched to `--batch-command` (git ≥ 2.36, probed once;
+     older git keeps the `--batch` + incremental-discard path): every
+     request is `info`-preflighted, so missing/non-blob/oversized objects
+     never transfer payloads.
 9. **A3 workers / A7 style spans** — only if the above leaves giant
    commits feeling bad; tig's own giant-on cost is 384 ms (BM7), so A7(b)
    is a last-mile improvement, not a necessity.  E5 (`argv_size` at 3.2 %

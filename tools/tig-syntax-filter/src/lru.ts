@@ -56,6 +56,12 @@ export class ByteLRU<V> {
 		}
 	}
 
+	/** Drop every entry (idle shedding). */
+	clear(): void {
+		this.map.clear();
+		this.total = 0;
+	}
+
 	/** Current approximate resident bytes (for tests and logging). */
 	get bytes(): number {
 		return this.total;

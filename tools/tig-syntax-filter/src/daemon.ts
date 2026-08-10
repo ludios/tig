@@ -21,12 +21,19 @@ import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
 import { SectionSplitter, type diff_section } from "./diff_parser.ts";
 import { config } from "./config.ts";
+import { shed_git_state } from "./git.ts";
 import { init_highlighter } from "./highlight.ts";
 import { process_section } from "./process.ts";
 
 const logger = getLogger(["tig-syntax", "daemon"]);
 
-const IDLE_EXIT_MS = 30 * 60 * 1000;
+/* Idle lifecycle (plan item B5): after IDLE_SHED_MS the cheap-to-rebuild
+ * state goes (blob cache, git children) while the valuable tokenized-line
+ * cache stays, so a same-day return skips re-tokenization; only after
+ * IDLE_EXIT_MS does the daemon exit entirely.  (Cold start is also hidden
+ * by tig's startup warm-up, plan item B4.) */
+const IDLE_SHED_MS = 30 * 60 * 1000;
+const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
 /** Unprocessed queued input beyond which a connection's socket pauses
  * (resuming at half); bounds daemon memory against a fast writer. */
@@ -216,10 +223,18 @@ async function main(): Promise<void> {
 	const path = socket_path();
 	let active_connections = 0;
 	let idle_timer: ReturnType<typeof setTimeout>;
+	let shed_timer: ReturnType<typeof setTimeout>;
 	const schedule_idle_exit = (): void => {
 		clearTimeout(idle_timer);
+		clearTimeout(shed_timer);
+		shed_timer = setTimeout(() => {
+			logger.info("idle for {min} minutes, shedding git state", {
+				min: IDLE_SHED_MS / 60000,
+			});
+			shed_git_state();
+		}, IDLE_SHED_MS);
 		idle_timer = setTimeout(() => {
-			logger.info("idle for {min} minutes, exiting", { min: IDLE_EXIT_MS / 60000 });
+			logger.info("idle for {hours} hours, exiting", { hours: IDLE_EXIT_MS / 3600000 });
 			server.close();
 			process.exit(0);
 		}, IDLE_EXIT_MS);
@@ -230,6 +245,7 @@ async function main(): Promise<void> {
 	const server = net.createServer({ allowHalfOpen: true }, (socket) => {
 		active_connections++;
 		clearTimeout(idle_timer);
+		clearTimeout(shed_timer);
 		void handle_connection(socket).then(() => {
 			active_connections--;
 			if (active_connections === 0) {

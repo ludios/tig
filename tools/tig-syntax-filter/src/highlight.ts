@@ -82,6 +82,15 @@ let theme_bg = "#282c34";
 const line_cache = new ByteLRU<string[]>(config.line_cache_mb * 1048576,
 	(lines) => lines.reduce((n, line) => n + line.length * 2 + 48, 64));
 
+/** In-flight tokenizations by cache key, so concurrent requests for the
+ * same document (e.g. a prefetch racing the foreground view, possible
+ * since tokenization yields the event loop) share one pass instead of
+ * duplicating oniguruma work. */
+const tokenize_inflight = new Map<string, {
+	last_line: number,
+	promise: Promise<string[] | null>,
+}>();
+
 /**
  * Apply `TOKEN_COLOR_OVERRIDES` to a parsed VS Code theme, in place.  Every
  * override must name a rule the theme actually defines: a silently-dropped
@@ -122,19 +131,40 @@ export async function init_highlighter(): Promise<void> {
 	logger.info("highlighter ready: theme fg={fg} bg={bg}", { fg: theme_fg, bg: theme_bg });
 }
 
-/** Whether `lang` has a grammar in shiki's bundle, loading it on demand. */
+const loaded_langs = new Set<string>();
+const failed_langs = new Set<string>();
+const loading_langs = new Map<string, Promise<boolean>>();
+
+/** Whether `lang` has a grammar in shiki's bundle, loading it on demand.
+ * Load failures are remembered (a grammarless language stays grammarless)
+ * and concurrent loads of one language coalesce into a single attempt. */
 export async function ensure_lang(lang: string): Promise<boolean> {
 	A(highlighter !== null, "highlighter not initialized");
-	if (highlighter.getLoadedLanguages().includes(lang)) {
+	if (loaded_langs.has(lang)) {
 		return true;
 	}
-	try {
-		await highlighter.loadLanguage(lang as never);
-		return true;
-	} catch (err) {
-		logger.warn("no grammar for {lang}: {err}", { lang, err: String(err) });
+	if (failed_langs.has(lang)) {
 		return false;
 	}
+	const loading = loading_langs.get(lang);
+	if (loading !== undefined) {
+		return loading;
+	}
+	const attempt = (async () => {
+		try {
+			await highlighter!.loadLanguage(lang as never);
+			loaded_langs.add(lang);
+			return true;
+		} catch (err) {
+			logger.warn("no grammar for {lang}: {err}", { lang, err: String(err) });
+			failed_langs.add(lang);
+			return false;
+		} finally {
+			loading_langs.delete(lang);
+		}
+	})();
+	loading_langs.set(lang, attempt);
+	return attempt;
 }
 
 /**
@@ -174,8 +204,18 @@ export function frame_content(text: string): string {
 	return text.replaceAll("\x1b", LITERAL_ESC_MARKER);
 }
 
+/** Memo of (color, font style) -> emitted sequence; a theme produces only
+ * a handful of distinct styles, and BM5 showed the rebuild+reparse in the
+ * profile (plan item C11). */
+const style_memo = new Map<string, string>();
+
 /** The SGR prefix selecting a token's style; always resets first. */
 function style_sequence(color: string | undefined, font_style: number | undefined): string {
+	const memo_key = `${color ?? ""}|${font_style ?? 0}`;
+	const memoized = style_memo.get(memo_key);
+	if (memoized !== undefined) {
+		return memoized;
+	}
 	const [r, g, b] = color_to_rgb(color ?? theme_fg);
 	let params = `0;38;2;${r};${g};${b}`;
 	const style = font_style ?? 0;
@@ -190,7 +230,10 @@ function style_sequence(color: string | undefined, font_style: number | undefine
 			params += ";4";
 		}
 	}
-	return `\x1b[${params}m`;
+	const sequence = `\x1b[${params}m`;
+	style_memo.set(memo_key, sequence);
+	A(style_memo.size < 100000, "style memo unbounded");
+	return sequence;
 }
 
 /**
@@ -274,6 +317,28 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		return null;
 	}
 
+	const inflight = tokenize_inflight.get(key);
+	if (inflight !== undefined && inflight.last_line >= last_line) {
+		// Someone else is already tokenizing this document at least as
+		// deep: join their result instead of redoing the work.
+		const theirs = await inflight.promise;
+		if (theirs !== null && theirs.length >= last_line) {
+			return theirs;
+		}
+		// They aborted or fell short; their partial or failure depth may
+		// still answer for us.
+		const after = line_cache.get(key);
+		if (after !== undefined && after.length >= last_line) {
+			return after;
+		}
+		const failed_after = budget_fail_cache.get(fail_key);
+		if (failed_after !== undefined && last_line >= failed_after) {
+			return null;
+		}
+	}
+
+	const hl = highlighter;
+	const work = async (): Promise<string[] | null> => {
 	const all_lines = content.split("\n");
 	const needed = Math.min(last_line, all_lines.length);
 	if (needed > config.max_lines) {
@@ -289,7 +354,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	const started = performance.now();
 	const token_lines: ThemedToken[][] = [];
 	// The union-typed method needs a cast to its element overload.
-	const get_state = highlighter.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
+	const get_state = hl.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
 	let state: unknown;
 	// Store-time length comparisons re-read the cache: after yields, a
 	// concurrent call for the same identity may have cached a longer
@@ -325,7 +390,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			return null;
 		}
 		const chunk = slice.slice(start, start + CHUNK_LINES).join("\n");
-		const chunk_tokens = highlighter.codeToTokensBase(chunk, {
+		const chunk_tokens = hl.codeToTokensBase(chunk, {
 			lang: lang as never,
 			theme: theme_name as never,
 			grammarState: state as never,
@@ -343,4 +408,15 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	const result = emit_sgr_lines(token_lines);
 	keep_if_longer(result);
 	return result;
+	};
+
+	const entry = { last_line, promise: work() };
+	tokenize_inflight.set(key, entry);
+	try {
+		return await entry.promise;
+	} finally {
+		if (tokenize_inflight.get(key) === entry) {
+			tokenize_inflight.delete(key);
+		}
+	}
 }

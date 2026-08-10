@@ -13,7 +13,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configure } from "@logtape/logtape";
-import { cat_blob } from "../src/git.ts";
+import { cat_blob, has_textconv, shed_git_state } from "../src/git.ts";
 
 let repo: string;
 let big_oid: string;
@@ -56,5 +56,23 @@ describe("cat_blob under a batcher kill", () => {
 		expect(again!.content.toString("utf8")).toBe("hello blob\n");
 		expect(again!.oid).toBe(small_oid);
 		expect(again!.identity).toMatch(/^sha256:/);
+	});
+
+	it("recovers transparently after idle shedding", async () => {
+		shed_git_state();
+		const blob = await cat_blob(repo, small_oid);
+		expect(blob).not.toBeNull();
+		expect(blob!.content.toString("utf8")).toBe("hello blob\n");
+		expect(await has_textconv(repo, "small.txt")).toBe(false);
+	});
+
+	it("coalesces concurrent fetches of the same blob", async () => {
+		shed_git_state();
+		const [a, b] = await Promise.all([
+			cat_blob(repo, small_oid),
+			cat_blob(repo, small_oid),
+		]);
+		expect(a).not.toBeNull();
+		expect(a).toBe(b);   // literally the same shared result object
 	});
 });

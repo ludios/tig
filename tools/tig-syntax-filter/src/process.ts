@@ -36,6 +36,12 @@ export function raw_section_output(section: diff_section): Buffer {
 	return Buffer.concat(parts);
 }
 
+/** Content identities known to be unhighlightable (binary or invalid
+ * UTF-8) — a content-global verdict, so identity alone may key it (plan
+ * item C10).  Bounded FIFO-ish: cleared when it grows silly. */
+const undecodable = new Set<string>();
+const UNDECODABLE_MAX = 4096;
+
 /** Decode a Buffer as strict UTF-8, or null when it is not valid UTF-8. */
 function decode_utf8(bytes: Buffer): string | null {
 	try {
@@ -43,6 +49,13 @@ function decode_utf8(bytes: Buffer): string | null {
 	} catch {
 		return null;
 	}
+}
+
+function remember_undecodable(identity: string): void {
+	if (undecodable.size >= UNDECODABLE_MAX) {
+		undecodable.clear();
+	}
+	undecodable.add(identity);
 }
 
 /**
@@ -106,11 +119,19 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 			identity = content_identity(file);
 		}
 	}
-	if (content === null || identity === null || content.includes(0)) {
+	if (content === null || identity === null) {
+		return null;
+	}
+	if (undecodable.has(identity)) {
+		return null;
+	}
+	if (content.includes(0)) {
+		remember_undecodable(identity);
 		return null;
 	}
 	const text = decode_utf8(content);
 	if (text === null) {
+		remember_undecodable(identity);
 		return null;
 	}
 	const first_newline = text.indexOf("\n");
