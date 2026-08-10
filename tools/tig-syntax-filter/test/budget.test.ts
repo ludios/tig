@@ -85,6 +85,19 @@ describe("tokenization budget", () => {
 		expect(out).not.toBeNull();
 		expect(out!.length).toBeGreaterThanOrEqual(100);
 	});
+
+	it("never shrinks a longer cached prefix on a timed-out deeper retry", async () => {
+		const ok = await highlight_lines("test|budget-b", "typescript", doc, 300, null);
+		expect(ok).not.toBeNull();
+		// Deep retry with (nearly) no budget: may tokenize 0 or a few
+		// chunks before dying — either way the 300-line entry survives.
+		const dead = await highlight_lines("test|budget-b", "typescript", doc, 600,
+						   performance.now() + 0.01);
+		expect(dead).toBeNull();
+		const shallow = await highlight_lines("test|budget-b", "typescript", doc, 250,
+						      performance.now() - 1);
+		expect(shallow).not.toBeNull();
+	});
 });
 
 /** Reassemble a section's exact input bytes. */

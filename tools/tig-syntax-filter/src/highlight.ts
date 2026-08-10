@@ -297,7 +297,10 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			logger.info("budget exhausted tokenizing {lang} at line {done}/{needed} after {ms}ms", {
 				lang, done: token_lines.length, needed, ms: elapsed_ms,
 			});
-			if (token_lines.length > 0) {
+			// Keep whichever cached prefix is longer: a deep retry
+			// that dies early must not shrink an existing entry.
+			if (token_lines.length > 0 &&
+			    (cached === undefined || token_lines.length > cached.length)) {
 				cache_put(key, emit_sgr_lines(token_lines));
 			}
 			fail_cache_put(fail_key, last_line);
