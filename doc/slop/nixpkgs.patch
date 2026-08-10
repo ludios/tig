@@ -1,14 +1,5 @@
-From 3a66b61c37b74c60fb017f64f199ba780ca077c1 Mon Sep 17 00:00:00 2001
-From: Ivan Kozik <ivan@ludios.org>
-Date: Sat, 8 Aug 2026 00:55:22 +0000
-Subject: [PATCH] tig: use ludios/tig
-
----
- pkgs/by-name/ti/tig/package.nix | 64 ++++++++++++++++++++++++++++-----
- 1 file changed, 55 insertions(+), 9 deletions(-)
-
 diff --git a/pkgs/by-name/ti/tig/package.nix b/pkgs/by-name/ti/tig/package.nix
-index 0142d364f284..a8215d74fb2f 100644
+index 0142d364f284..00930da9c0ac 100644
 --- a/pkgs/by-name/ti/tig/package.nix
 +++ b/pkgs/by-name/ti/tig/package.nix
 @@ -2,6 +2,7 @@
@@ -31,7 +22,7 @@ index 0142d364f284..a8215d74fb2f 100644
  stdenv.mkDerivation (finalAttrs: {
    pname = "tig";
 -  version = "2.6.1";
-+  version = "2.6.1-syntax-unstable-2026-08-08";
++  version = "2.6.1-syntax-unstable-2026-08-10";
  
    src = fetchFromGitHub {
 -    owner = "jonas";
@@ -39,8 +30,8 @@ index 0142d364f284..a8215d74fb2f 100644
      repo = "tig";
 -    rev = "tig-${finalAttrs.version}";
 -    sha256 = "sha256-Zfmt2rpnH5sxiay1LAsXxvtvqvwEG4MbNI+p0GWJsMc=";
-+    rev = "b7ed96f4a19958e7518a33257a218f2ed3e86f11";
-+    hash = "sha256-SI33wUHiWIhdAg3IYWokCr/fh9Cvnzes4Q1LoiazjLk=";
++    rev = "1865a7e8acf8313a724f00a4e154442ec94a73de";
++    hash = "sha256-FxZv2wYCk1Vw/MdFGq7I/9tDdvU1IrOWgjy1oMzUOVg=";
    };
  
    nativeBuildInputs = [
@@ -145,6 +136,3 @@ index 0142d364f284..a8215d74fb2f 100644
      mainProgram = "tig";
    };
  })
--- 
-2.54.0
-
