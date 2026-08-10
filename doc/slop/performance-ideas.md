@@ -811,9 +811,16 @@ fake daemon is ready to become the CI regression test for A0.
    10–50 ms revisits; once tokenization is interruptible, prefetching
    selection±1 makes j/k feel like the revisit numbers.  Measure D0's
    natural reuse first.
-7. **C5/C5b checkpoints + visible-lines-only rendering** — turns the
-   linear-in-depth cost (89 ms → 7.6 s → 14.8 s across synth-top/mid/eof)
-   into resumable work, and shrinks the cache bytes C6 has to budget.
+7. **C5/C5b + C8(b) — checkpoint/resume, visible-lines-only rendering,
+   cross-side memoization** — three extensions of the same A1 chunk loop.
+   C5's grammar-state checkpoints turn the linear-in-depth cost (89 ms →
+   7.6 s → 14.8 s across synth-top/mid/eof) into resumable work; C5b
+   shrinks the cache bytes C6 has to budget; and C8(b) — memoizing
+   tokenization per (line text, entry state) across a file's two
+   ~99 %-identical sides — is what actually recovers the old side's 51 %
+   of tokenization time (C8(a) measured neutral; see the C8 entry).
+   Gate C8(b) on a profitability check against real navigation traces
+   before building it.
 8. **C1, B4, B5, C10–C12** — textconv batching (3 %), startup warming
    (cold start measured at only ~0.2 s, so the rest of B demotes), negative
    cache, emission slimming, batch-command preflight.
