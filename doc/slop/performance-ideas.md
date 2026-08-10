@@ -6,6 +6,13 @@ Status: idea collection, 2026-08-10.  Nothing here is implemented; each idea
 names the code it would touch.  Benchmark before optimizing — the section
 "Benchmarks to run first" defines the measurements that gate the ideas.
 
+Incorporates the strongest findings from the independent review in
+`raw-proposals/alt-performance-ideas.md` (notably the empirically-reproduced
+client write-stall, the `5294f798` reproducer, streaming raw passthrough,
+grammar-state checkpoints, and the C-side fragment-builder hot path); that
+document also contains a deeper benchmark/telemetry matrix and acceptance
+criteria worth consulting when the implementation work starts.
+
 ## Pipeline recap and what we already know
 
 ```
@@ -41,7 +48,18 @@ machine, the tig repo itself):
 
 ## Why giant commits hang
 
-Several compounding causes, all visible in the code:
+Several compounding causes.  (Causes 4 and 6 and the reproducer commit come
+from the independent review in `raw-proposals/alt-performance-ideas.md`,
+which verified the write-stall empirically against a fake daemon; the rest
+were confirmed directly in the code.)
+
+An in-repo reproducer: commit `5294f798` ("Update utf8proc to v2.10.0") —
+a 4.5 MB diff, 31k diff lines, whose ~4.5 MB section for
+`compat/utf8proc_data.c` has short lines and both sides under the 100k-line
+limit, so every current static guard admits it, and whose final hunk sits
+near the end of both ~17k-line sources so nearly all of both files gets
+tokenized.  It is also the *last* section of the diff, which triggers cause
+6 below.
 
 1. **Tokenization is synchronous and unbounded in time.**
    `highlighter.codeToTokensBase()` (`highlight.ts`) blocks the daemon's
@@ -58,19 +76,33 @@ Several compounding causes, all visible in the code:
    file starves every later (possibly tiny) section in the same commit.
    And because tokenization blocks the event loop, one pathological
    *connection* starves every other tig instance sharing the daemon.
-4. **The client waits up to `FRAME_TIMEOUT_MS` (15 s) for a frame**
-   (`client/tig-syntax-filter.c`) before falling back to emitting the raw
-   diff.  Worst case UX today: blank diff pane for 15 s, then the whole raw
-   diff dumps in.  Worse: if each section completes in under 15 s, the
-   timeout never fires and a 50-file commit can trickle for minutes with no
-   fallback at all.
-5. Meanwhile tig busy-polls (`get_input` in `src/display.c` sets `delay = 0`
+4. **The client's 15 s timeout is not actually a hard timeout.**  The
+   `FRAME_TIMEOUT_MS` poll only covers *waiting for frames*; the client's
+   writes to the daemon go through blocking `write_all()`
+   (`client/tig-syntax-filter.c`, the daemon write in the poll loop).  When
+   the daemon's event loop is busy tokenizing it stops reading its socket;
+   once the kernel socket buffer fills, the client blocks *inside
+   `write()`* and never reaches its timeout.  The alt-review reproduced
+   this: against a same-UID fake daemon that accepts but never reads, the
+   client was still blocked after 18 s.  This is a correctness-level
+   responsiveness bug, not a tuning problem.
+5. **Even when the timeout does fire, fallback is all-or-nothing**: blank
+   diff pane for 15 s, then the whole raw diff dumps in.  And if each
+   section completes in under 15 s, the timeout never fires and a 50-file
+   commit can trickle for minutes with no fallback at all.
+6. **A complete file section is buffered before anything happens to it.**
+   `section_splitter` (`diff_parser.ts`) only releases a section at the next
+   `diff --git` boundary or EOF, so the 4.5 MB final section of `5294f798`
+   is retained in full — a long silent wait plus a memory spike — before
+   `process_section()` even starts.
+7. Meanwhile tig busy-polls (`get_input` in `src/display.c` sets `delay = 0`
    while any view has a live pipe), burning a core on top of the daemon's
    tokenizer.  Keys still work, but the machine is pegged and the pane is
    empty — indistinguishable from a hang.
 
-The fix directions are in section A below; the short version is: convert the
-size limits into a **time budget**, make tokenization **interruptible /
+The fix directions are in section A below; the short version is: make the
+client's daemon socket **nonblocking with an absolute deadline**, convert
+the size limits into a **time budget**, make tokenization **interruptible /
 off-loop**, and make the client's fallback **progressive** instead of
 all-or-nothing.
 
@@ -97,6 +129,15 @@ heavy commit, (e) a commit in a language with an expensive grammar (C++,
 TypeScript).  Also synthesize a worst case: one commit appending to the end
 of a 100k-line TypeScript file.  Record the exact SHAs in a
 `doc/slop/bench-corpus.txt` so numbers stay comparable across sessions.
+
+This repo already provides three of the corpus points (identified by the
+alt-review):
+
+| Revision   | Characteristic                                              |
+| ---------- | ----------------------------------------------------------- |
+| `494a4085` | 94 small files; exposes per-path and per-process overhead   |
+| `ff8a7c3a` | 16 files, ~122 KB; representative medium feature commit     |
+| `5294f798` | 4.5 MB generated-C diff, hunks to EOF; the stall reproducer |
 
 ### BM2: end-to-end filter latency, cold vs warm
 
@@ -170,12 +211,59 @@ reach the user.
 ### BM8 (only if BM7 shows C-side time): perf on tig
 
 `perf record -g tig …` while loading the giant highlighted diff; look for
-`syntax_style_get`, `diff_common_syntax`, `utf8proc` frames.  Gates: E1, E2.
+`syntax_style_get`, `diff_common_syntax`, `argv_appendn`, `utf8proc` frames.
+Gates: E1, E2, E5.  For E5 specifically, add a synthetic case: single lines
+with 10 / 100 / 500 / 1000 / 4000 style transitions (the daemon permits up
+to `MAX_RUNS_PER_LINE` = 4000).
+
+### BM9: protocol fault injection (regression tests, not just benchmarks)
+
+Small fake daemons that: accept but never read (the reproduced write-stall
+case — make this one a CI regression test in `test/`); read one byte every
+few ms; read everything but never reply; trickle a partial response forever;
+declare an oversized frame; disconnect mid-frame; reply just after the
+deadline.  Assert the client emits lossless raw output within its deadline
+and exits 0 in every case.  Gates: A0, A4, A5 — this is what makes "stalls
+impossible" verifiable rather than hoped.
+
+### BM10: layer decomposition
+
+When comparing before/after, run the corpus through the pipeline in layers
+so a win in one layer isn't hidden by another: (1) `git show` alone, (2)
+client + a trivial echo daemon, (3) daemon with tokenization stubbed out
+(parse + git I/O only), (4) full daemon, (5) full tig via the BM7 pty
+harness.  Also record daemon event-loop delay (`perf_hooks.monitorEventLoopDelay`)
+during the giant-commit run — the direct measure of "does one section starve
+everything else" that A2/A3 must drive to ~zero.
+
+### Acceptance criteria (calibrate exact numbers on this machine)
+
+- No client write or wait can exceed an absolute foreground deadline; a
+  pathological section starts rendering *raw* within a few hundred ms (p95).
+- Rapid j/j/j navigation cancels stale daemon work promptly (A2/A3), and
+  speculative work never increases foreground p95 (D-items).
+- Warm small/medium commits don't regress; stripping the SGR from output
+  stays byte-identical to the input diff (the existing invariant).
 
 ## Ideas
 
 ### A. Kill the giant-commit hang (highest priority)
 
+- **A0. Nonblocking client socket with an absolute deadline.**  Fixes hang
+  cause 4, the verified write-stall.  Set the daemon socket `O_NONBLOCK` and
+  drive *both* directions through the existing `poll()` loop: request
+  `POLLOUT` while spool bytes remain unsent (tracking an offset instead of
+  `write_all`), `POLLIN` as today, and compute each poll timeout from an
+  **absolute deadline** on the oldest unacknowledged input (no restarting
+  the clock on partial progress, which would let a byte-trickling daemon
+  stretch a request forever).  On deadline: close, emit `spool[acked..]`
+  raw.  Once reliable, the deadline should drop from 15 s toward hundreds
+  of milliseconds for foreground use.  Add the missing protocol bounds
+  while in there: max declared frame length, max inbox size, max
+  unacknowledged bytes.  This is the single highest-priority change in
+  this document — it is a correctness fix that no daemon-side improvement
+  can substitute for, and it makes every later budget actually enforceable
+  from the client's side.
 - **A1. Per-section time budget in the daemon.**  Replace
   `codeToTokensBase()` with a direct per-line tokenization loop against the
   grammar (vscode-textmate's `grammar.tokenizeLine(line, ruleStack,
@@ -194,14 +282,22 @@ reach the user.
   node ever returns to libuv, keeping I/O starved), so socket reads, other
   connections, and the idle timer stay live even mid-section.  Cheap once A1 exists; removes the
   one-wedged-daemon-starves-every-tig failure mode without threads.
-- **A3. Worker-thread pool for tokenization.**  2–4 `worker_threads`, each
-  with its own highlighter + grammars; the main thread keeps parsing,
-  fetching blobs, and framing.  Gains: parallel sections within a commit,
-  parallel connections, and a giant file occupies one worker instead of the
-  process.  Costs: per-worker memory (grammar + wasm instance, measure via
-  BM5/BM6) and cache duplication unless the SGR line cache stays on the main
-  thread (it should: workers return token runs, main thread renders + caches).
-  Do after A1/A2 — budgets fix the hang; workers fix throughput.
+- **A3. Worker thread(s) for tokenization.**  Move shiki + oniguruma into a
+  `worker_threads` worker; the main thread keeps sockets, parsing, blob
+  fetching, scheduling, and framing.  Start with **one** long-lived worker:
+  that already makes the event loop permanently responsive (same effective
+  CPU concurrency as today) without duplicating shiki/wasm/grammar RSS per
+  worker; grow to 2 (foreground + speculative) only on measurement.  Two
+  properties only workers can provide: a **hard** deadline — the main
+  thread can `terminate()` a worker stuck inside a single pathological
+  oniguruma call, which no in-thread `Promise.race` or per-line check can
+  interrupt — and **cancellation**: when tig kills the client on
+  navigation, today the daemon can't even observe the socket close until
+  tokenization returns; with a worker (or A2's yielding), disconnect
+  cancels queued and in-flight work for that connection instead of
+  finishing it invisibly.  Keep the SGR line cache on the main thread
+  (workers return token runs; main thread renders + caches).  Do after
+  A1/A2 — budgets fix the hang; workers fix responsiveness under load.
 - **A4. Progressive client fallback.**  Today the 15 s timeout is
   all-or-nothing.  After A1 the daemon guarantees bounded per-section
   latency, so the client's `FRAME_TIMEOUT_MS` can drop to ~2–3 s and become
@@ -238,7 +334,32 @@ reach the user.
   framework has no restyle-after-load mechanism today — real C work in
   `view.c`/`diff.c`.
   Only reach for A7 if A1–A5 still feel bad on the corpus; budgets plus
-  warm-cache latencies of 3–6 ms may make it unnecessary.
+  warm-cache latencies of 3–6 ms may make it unnecessary.  (The alt-review
+  argues (b) > (a): a full-view reload risks cursor/scroll/flicker
+  complications that line-level style spans avoid — and spans would also
+  delete the E5 fragment-building hot path outright, since styles stop
+  being escape sequences embedded in text.  A middle step: per-*hunk*
+  output frames instead of per-file sections, which improves first paint
+  and peak memory without changing tig at all.)
+- **A8. Detect oversized sections while they're still arriving, and stream
+  them through raw.**  Fixes hang cause 6.  Track cheap counters during
+  parsing (section bytes, diff lines, largest source line referenced by a
+  hunk headers-so-far); when a threshold trips, don't keep buffering:
+  flush the already-buffered prefix as raw output, switch the splitter into
+  a passthrough mode that streams chunks unchanged until the next
+  `diff --git` boundary, then resume normal parsing.  Turns the 4.5 MB
+  `5294f798` section into a fast raw render with flat memory, instead of a
+  silent buffer-up followed by a doomed (or budget-aborted) highlight
+  attempt.  Also cache the negative decision keyed by content identity +
+  lang + budget version, so reopening the same pathological file doesn't
+  re-attempt (see C10).
+- **A9. Honor socket backpressure in the daemon.**  `handle_connection`
+  ignores `socket.write()`'s boolean; a slow/stalled client lets output
+  buffer without bound in the daemon.  Stop dequeuing sections when a write
+  returns false, resume on `'drain'`, pause input parsing when queued bytes
+  exceed a cap, and bound the per-connection queue by *bytes*, not section
+  count (ten 100-byte sections and ten 5 MB sections are not the same
+  backlog).
 
 ### B. Faster cold start
 
@@ -250,16 +371,25 @@ reach the user.
   useful.  Either export `NODE_COMPILE_CACHE=<dir>` from
   `bin/tig-syntax-daemon`, or make the entry point a tiny bootstrap that
   enables the cache and then dynamically imports the real daemon.
-- **B2. Bundle the daemon.**  shiki 4's module graph is large; if BM6 shows
-  import time matters, esbuild-bundle daemon + deps into one JS file at
-  build/install time (the nixpkgs patch already builds this package; add a
-  bundle step there and in `bin/tig-syntax-daemon`).  Composes with B1.
+- **B2. Bundle the daemon / fine-grained shiki imports.**  shiki 4's module
+  graph is large; if BM6 shows import time matters, either esbuild-bundle
+  daemon + deps into one JS file at build/install time (the nixpkgs patch
+  already builds this package; add a bundle step there and in
+  `bin/tig-syntax-daemon`), or switch to shiki's documented fine-grained
+  core setup (`shiki/core` + only the oniguruma engine, the one theme, and
+  lazy per-language grammar imports) so the default bundle's full
+  theme/grammar registry never loads.  Composes with B1; measure both
+  import-to-listen and first-language latency, since dozens of tiny dynamic
+  imports can trade startup for first-use cost.
 - **B3. Listen before shiki is ready.**  `main()` currently awaits
   `init_highlighter()` *before* `server.listen()`, so the client's
   connect-retry loop eats the whole init.  Listen immediately, queue
   connections (or just let sections queue on the init promise), and start
   git blob fetches while the highlighter initializes — cold-start work then
-  overlaps instead of serializing.
+  overlaps instead of serializing.  Binding first also closes a thundering-
+  herd hole: today several simultaneous cold clients each spawn a daemon
+  that fully loads shiki + wasm + theme before all but one lose the
+  bind race and exit.
 - **B4. Warm the daemon when tig starts.**  A diff view is almost always
   seconds away once tig is open.  When `diff-syntax-filter` is configured,
   tig (or even the shell profile) can fire `: | tig-syntax-filter &` once at
@@ -287,6 +417,15 @@ reach the user.
   cross-run wasm code cache to lean on; if it's big, the only lever is
   keeping the daemon alive (B5).  Note: switching to shiki's JS regex engine
   would help startup but breaks the engine-lineage fidelity goal — rejected.
+- **B8. Remove the launcher's retry quantization.**  The client polls
+  `connect()` at 50 ms intervals for up to 3 s, so cold start rounds up to
+  the next tick.  With B3 (bind before heavy imports) the window shrinks a
+  lot on its own; to eliminate it, have `spawn_daemon()` pass a pipe the
+  daemon closes once listening (readiness signal), or lean on B5's socket
+  activation.  Longer term: tig could hold one persistent daemon connection
+  itself, dropping the per-view client process + connect entirely — only
+  worth it if BM2's layer numbers show the per-view setup actually costs
+  something.
 
 ### C. Warm-path latency (the ~150 ms per new commit)
 
@@ -320,13 +459,35 @@ reach the user.
   within one repository — a cross-repo key must use the full OID (echoed by
   `cat-file --batch` in its response header, so it's free to capture) or a
   hash of the fetched content, never the abbreviated prefix.  Applies to
-  C7's persistent cache too.
+  C7's persistent cache too.  Refinements from the alt-review: the right
+  canonical key differs by cache — the common *git object directory* for
+  object caches (worktrees sharing one object store then share entries) vs
+  the worktree root for worktree-content caches; and detect the repo's hash
+  algorithm once per repo so `content_matches_oid` (`process.ts`) stops
+  hashing every worktree file under *both* sha1 and sha256.
 - **C5. Extend cached tokenizations instead of recomputing.**  The line
   cache requires `cached.length >= last_line` (`highlight.ts`) — revisiting
   the same file with a deeper hunk re-tokenizes from line 1.  With the A1
   per-line loop, store the rule stack alongside the cached lines and resume
-  from line N.  Same mechanism gives partial-progress reuse after a budget
-  abort (a later revisit continues instead of starting over).
+  from line N; go further and keep **periodic grammar-state checkpoints**
+  (every ~128–256 lines — shiki even exposes this as `GrammarState`), so a
+  later hunk resumes from the nearest checkpoint rather than only from the
+  exact previous stopping point, and extending line 5,000 → 5,300 scans 300
+  lines instead of 5,300.  Same mechanism gives partial-progress reuse
+  after a budget abort.  Sizing note: checkpoints trade memory for rescan
+  distance; pick the interval from the BM1 synthetic hunk-position cases.
+  One honest limit: a *cold* hunk at the end of a big file still needs the
+  full prefix scanned once — checkpoints make revisits and extensions
+  cheap, they don't replace the A1 budget for first encounters.
+- **C5b. Materialize styles only for diff-visible lines.**  Tokenizing the
+  prefix is required for grammar state, but *rendering* it isn't: today the
+  daemon builds an SGR string for every prefix line, though the diff shows
+  only a subset.  With the per-line loop, advance state through
+  non-referenced lines and discard their tokens immediately; build style
+  runs/SGR only for lines a hunk actually maps.  Cuts allocation and cache
+  bytes sharply for the common small-hunk-late-in-big-file case (caveat:
+  make the line cache store "state + sparse rendered lines" rather than a
+  dense array, or C5/C6 accounting breaks).
 - **C6. Grow / re-shape the caches.**  256 cached documents and 128 blobs is
   small for a browsing session.  Don't assume SGR line arrays are small,
   though: every style run adds a ~20-byte escape sequence plus JS
@@ -342,21 +503,59 @@ reach the user.
   with B4/B5 so even a cold daemon serves repeat commits instantly.  Needs an
   eviction story (LRU by mtime, size cap) and the usual concurrent-writer
   care (sqlite gives this cheaply).
-- **C8. Stop tokenizing the old side twice.**  Both sides of a modified file
-  are ~99 % identical, yet each is tokenized fully.  Options, increasing in
-  ambition: (a) only tokenize the old side up to its last *deleted* line
-  (context lines already map to the new side — check `process.ts` mapping:
-  context uses `new_doc`, so the old side is needed only for `-` lines; its
-  `last_line` may already be much smaller — verify with BM4 how often old
-  side dominates); (b) with the A1 loop, memoize per (line text, entry-state)
-  across the two sides so shared prefixes tokenize once.
-- **C9. Micro-allocations.**  Double `split("\n")` of the same text
-  (`load_side` and `highlight_lines`), per-line Buffer churn in emission,
-  latin1 round-trips.  Only touch what BM5 shows; these are likely noise
-  next to oniguruma.
+- **C8. Load and tokenize only the sides a hunk actually needs.**  Both
+  sides of a modified file are ~99 % identical, yet each is tokenized fully.
+  The precise need (context lines already map to `new_doc` in `process.ts`):
+  the old side serves only `-` lines, so (a) set its `last_line` to the last
+  *deleted* row, not the end of the last old hunk — and skip fetching the
+  old blob entirely for addition-only sections (and the new side for pure
+  deletions); (b) with the A1 loop, memoize per (line text, entry-state)
+  across the two sides so shared prefixes tokenize once.  Verify with BM4
+  how often the old side dominates before doing (b).
+- **C9. Memory traffic / micro-allocations.**  Only touch what BM5 shows,
+  but the alt-review's inventory is worth keeping: double `split("\n")` of
+  the same text (`load_side` and `highlight_lines`) — one newline-offset
+  index instead; validation building a per-line body string and `Map` per
+  hunk line; per-line `Buffer.from("\n")` allocations and one giant
+  `Buffer.concat` per section in emission; quadratic carry growth in
+  `diff_parser.ts` when a huge section never yields a boundary (each `feed`
+  re-concats the whole carry — same fix as A8's passthrough mode);
+  `pending.shift()` and `Buffer.subarray` retaining large backing buffers
+  in `blob_batcher`; the client never compacting its acknowledged spool
+  prefix (the 64 MB cap counts total bytes, not unacknowledged bytes).
+- **C10. Negative cache + in-flight coalescing.**  Cache the *decisions*,
+  not just the data: oversize / budget-exceeded / invalid-UTF-8 / textconv /
+  no-grammar verdicts keyed by content identity (+ budget version), so
+  reopening a pathological or unhighlightable file doesn't rediscover the
+  failure.  And keep promise maps for in-flight blob fetches, language
+  loads, and document tokenizations so two views (or two tig instances)
+  requesting the same thing share one computation instead of both missing
+  the cache.  Minor cousin: `ensure_lang` calls
+  `getLoadedLanguages().includes()` per section — keep a `Set` plus an
+  in-flight map.
+- **C11. Precompute and slim the SGR emission.**  `style_sequence()`
+  re-parses hex colors and rebuilds the escape string for every token;
+  memoize `(color, fontStyle) → sequence` (a handful of distinct values per
+  theme).  Then benchmark *differential* emission — emit only what changed
+  (using 22/23/24 attribute resets) instead of a full reset + set per run.
+  Fewer output bytes means less socket traffic, less C-side SGR parsing,
+  and fewer tig cells; weigh against decoder complexity on the tig side.
+- **C12. `cat-file --batch-command` preflight.**  Switch the batcher to
+  `--batch-command` and issue `info` before `contents`: oversized blobs get
+  rejected from the size in the info reply *without* transferring or —
+  as the code does today — killing the whole batcher child and failing
+  every pending request.  The info reply also supplies the full OID for
+  C4's canonical cache keys, and old/new info requests pipeline naturally.
 
 ### D. Prefetch the next commit
 
+- **D0. First measure how much comes free from content-addressed caching.**
+  Adjacent commits share most blobs: one commit's new side is often the
+  next one's old side, and unchanged files keep identical OIDs.  Once
+  caches are keyed by full OID (C4) and resumable (C5), plain j/k
+  navigation may already hit warm state for most sections — measure that
+  reuse rate (BM4 counters) before building explicit prefetch; D1 is only
+  worth its complexity for the residual misses.
 - **D1. tig-driven adjacent-commit prefetch.**  The daemon can't guess the
   next commit (it only ever sees diff text), so prefetch must come from tig.
   In the main view, when the selection settles (debounce ~150 ms) and the
@@ -386,6 +585,17 @@ reach the user.
 - **E2. `diff_common_syntax` cell building**: per-line box/cell allocation
   and double `strchr(data, 0x1b)` scans (`src/diff.c:524,606`).  Same
   gating.
+- **E5. The fragment-builder is quadratic in style runs per line** (spotted
+  by the alt-review; verified).  In the syntax path `context->skip` is
+  true, so *every* style fragment goes through `argv_appendn`
+  (`src/diff.c:131`), and `argv_appendn` calls `argv_size` — a linear scan
+  to the terminating NULL (`src/argv.c:223`) — plus one `strndup` per
+  fragment, then `argv_to_string_alloc` re-joins the lot.  O(R²) pointer
+  scanning for R runs, with R allowed up to `MAX_RUNS_PER_LINE` = 4000: a
+  token-dense minified line is a credible tig-side stall.  Fix: build the
+  stripped text into one growing buffer alongside the cell array (the cell
+  lengths already delimit the fragments; the argv detour adds nothing).
+  BM8's synthetic runs-per-line case quantifies it.
 - **E3. Busy-poll while loading** (`src/display.c` `get_input`, `delay = 0`
   whenever any pipe is live): each iteration is a 500 µs `select` per view
   plus a nonblocking `wgetch`.  During a long daemon stall this spins a core
@@ -405,14 +615,24 @@ reach the user.
 
 ## Suggested order
 
-1. **BM1–BM4** (instrumentation + corpus; roughly an afternoon).  BM4's
-   stage breakdown decides most of what follows.
-2. **A1 + A6** — the time budget.  This is the hang fix; ship it first.
-3. **C1, C2, C4** — cheap warm-path wins with no architectural risk.
-4. **B1, B3, B4** — cheap cold-start wins.
-5. **A2 (or A3), then D1** — prefetch is likely the biggest *felt*
-   improvement for j/k browsing once warm-path hits are cheap, but it needs
-   interruptible tokenization first (see the D1 caveat).
-6. **A3, C5–C7** — workers and the cache deepening, sized by the numbers.
-7. **A7** — only if giant commits still feel bad after budgets + workers.
-8. **E-items** — only with BM7/BM8 evidence.
+1. **BM1–BM4 + BM9** (instrumentation, corpus, fault-injection regression
+   tests; roughly a day).  BM4's stage breakdown decides most of what
+   follows; BM9's never-reads fake daemon is the regression test for the
+   next item.
+2. **A0** — nonblocking client writes with an absolute deadline.  The
+   verified correctness bug; without it every other budget is advisory.
+3. **A1 + A6 + A8** — the time budget and streaming raw passthrough.
+   Together with A0 this is the hang fix.
+4. **C1, C2, C4** — cheap warm-path wins with no architectural risk.
+5. **B1, B3, B4** — cheap cold-start wins.
+6. **A2 (or A3) + A9, then D0/D1** — interruptible tokenization and daemon
+   backpressure, then measure natural cache reuse before deciding whether
+   explicit prefetch is still needed; prefetch is likely the biggest *felt*
+   improvement for j/k browsing if D0's numbers say it's not already free.
+7. **A3, C5/C5b, C6–C12** — workers and the cache/emission deepening, sized
+   by the numbers.
+8. **A7** — only if giant commits still feel bad after budgets + workers;
+   prefer the style-span variant (b), possibly via the per-hunk-frames
+   middle step.
+9. **E-items** — only with BM7/BM8 evidence (E5 is the one most likely to
+   clear that bar).
