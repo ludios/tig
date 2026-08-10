@@ -672,10 +672,13 @@ main_select(struct view *view, struct line *line)
 	string_copy_rev(view->env->commit, commit->id);
 	view->env->blob[0] = 0;
 
-	if (line->type == LINE_MAIN_COMMIT || line->type == LINE_MAIN_ANNOTATED) {
-		/* Ask for the two commits after the selection to be prefetched
-		 * once the cursor settles, so navigating onto them hits the
-		 * syntax filter daemon's warm caches. */
+	/* Ask for the two commits after the selection to be prefetched once
+	 * the cursor settles, so navigating onto them hits the syntax filter
+	 * daemon's warm caches.  Only in the actual main view: reflog and
+	 * stash reuse this select handler but show different diffs.  Pseudo
+	 * rows (local changes) participate too — the commits below them are
+	 * where the cursor is headed. */
+	if (!strcmp(view->name, "main")) {
 		const char *ids[2];
 		size_t found = 0;
 		size_t pos = line - view->line;

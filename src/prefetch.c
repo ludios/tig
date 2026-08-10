@@ -41,6 +41,28 @@ static char prefetch_pending[PREFETCH_JOBS][SIZEOF_REV];
 static size_t prefetch_pending_count;
 static long long prefetch_pending_since;
 
+static bool
+prefetch_jobs_active(void)
+{
+	int i;
+
+	for (i = 0; i < PREFETCH_JOBS; i++)
+		if (prefetch_jobs[i].pgid > 0)
+			return true;
+	return false;
+}
+
+/* Exit handler: running pipelines must not outlive tig. */
+static void
+prefetch_shutdown(void)
+{
+	int i;
+
+	for (i = 0; i < PREFETCH_JOBS; i++)
+		if (prefetch_jobs[i].pgid > 0)
+			kill(-prefetch_jobs[i].pgid, SIGKILL);
+}
+
 static long long
 prefetch_now_ms(void)
 {
@@ -101,20 +123,26 @@ prefetch_spawn(const char *id, struct app_external *app)
 		"git", "show", encoding_arg, "--pretty=fuller", "--root",
 			"--patch-with-stat", show_notes_arg(),
 			diff_context_arg(), ignore_space_arg(), "--no-color",
-			id, NULL
+			NULL
 	};
-	const char *show_argv[ARRAY_SIZE(candidates)];
+	const char *show_argv[32];
 	size_t argc = 0;
 	int pipefds[2];
 	pid_t pid;
 	size_t arg;
 
-	/* The option helpers return "" when disabled; the diff view's argv
-	 * goes through argv_format which drops empties, but a direct exec
-	 * must not hand git empty arguments (git treats "" as fatal). */
+	/* Mirror the diff view's hunk-affecting options: the option helpers
+	 * return "" when disabled (the diff view's argv_format drops those,
+	 * but a direct exec must not hand git empty arguments), and the
+	 * user's diff-options change hunk shapes, so cache keys only match
+	 * when they are included. */
 	for (arg = 0; candidates[arg]; arg++)
 		if (*candidates[arg])
 			show_argv[argc++] = candidates[arg];
+	for (arg = 0; opt_diff_options && opt_diff_options[arg] &&
+		      argc < ARRAY_SIZE(show_argv) - 2; arg++)
+		show_argv[argc++] = opt_diff_options[arg];
+	show_argv[argc++] = id;
 	show_argv[argc] = NULL;
 
 	if (pipe(pipefds) < 0)
@@ -170,7 +198,15 @@ prefetch_request(const char *ids[], size_t ids_len)
 	int job;
 
 	if (!opt_diff_prefetch || opt_word_diff ||
-	    !opt_diff_syntax_filter || !*opt_diff_syntax_filter) {
+	    !opt_diff_syntax_filter || !*opt_diff_syntax_filter ||
+	    (opt_file_args && opt_file_args[0])) {
+		/* Disabled (or the diff is file-filtered, which the prefetch
+		 * pipeline does not replicate): cancel and forget everything,
+		 * so a live :set change takes effect immediately. */
+		for (job = 0; job < PREFETCH_JOBS; job++) {
+			prefetch_kill(&prefetch_jobs[job]);
+			prefetch_jobs[job].id[0] = 0;
+		}
 		prefetch_pending_count = 0;
 		return;
 	}
@@ -208,8 +244,13 @@ prefetch_adjust_delay(int delay)
 {
 	long long remaining;
 
-	if (prefetch_pending_count == 0)
+	if (prefetch_pending_count == 0) {
+		/* Poll occasionally while pipelines run so they get reaped
+		 * even if the user stays idle. */
+		if (prefetch_jobs_active() && (delay < 0 || delay > 1000))
+			return 1000;
 		return delay;
+	}
 	remaining = PREFETCH_DEBOUNCE_MS - (prefetch_now_ms() - prefetch_pending_since);
 	if (remaining < 1)
 		remaining = 1;
@@ -240,6 +281,12 @@ prefetch_idle(void)
 	for (i = 0; i < prefetch_pending_count; i++) {
 		struct prefetch_job *slot = NULL;
 
+		/* Prefer slots holding nothing over completed-job memos, so
+		 * launching one new commit does not erase the memo that stops
+		 * another from being redone. */
+		for (job = 0; job < PREFETCH_JOBS && !slot; job++)
+			if (prefetch_jobs[job].pgid == 0 && !prefetch_jobs[job].id[0])
+				slot = &prefetch_jobs[job];
 		for (job = 0; job < PREFETCH_JOBS && !slot; job++)
 			if (prefetch_jobs[job].pgid == 0)
 				slot = &prefetch_jobs[job];
@@ -248,10 +295,17 @@ prefetch_idle(void)
 			break;
 		}
 		slot->pgid = prefetch_spawn(prefetch_pending[i], app);
-		if (slot->pgid > 0)
+		if (slot->pgid > 0) {
+			static bool at_exit_registered;
+
 			string_copy_rev(slot->id, prefetch_pending[i]);
-		else
+			if (!at_exit_registered) {
+				at_exit_registered = true;
+				atexit(prefetch_shutdown);
+			}
+		} else {
 			slot->pgid = 0;
+		}
 	}
 	prefetch_pending_count = 0;
 }
