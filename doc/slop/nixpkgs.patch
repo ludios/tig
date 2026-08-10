@@ -1,5 +1,5 @@
 diff --git a/pkgs/by-name/ti/tig/package.nix b/pkgs/by-name/ti/tig/package.nix
-index 0142d364f284..00930da9c0ac 100644
+index 0142d364f284..d3f4a9722964 100644
 --- a/pkgs/by-name/ti/tig/package.nix
 +++ b/pkgs/by-name/ti/tig/package.nix
 @@ -2,6 +2,7 @@
@@ -30,8 +30,8 @@ index 0142d364f284..00930da9c0ac 100644
      repo = "tig";
 -    rev = "tig-${finalAttrs.version}";
 -    sha256 = "sha256-Zfmt2rpnH5sxiay1LAsXxvtvqvwEG4MbNI+p0GWJsMc=";
-+    rev = "1865a7e8acf8313a724f00a4e154442ec94a73de";
-+    hash = "sha256-FxZv2wYCk1Vw/MdFGq7I/9tDdvU1IrOWgjy1oMzUOVg=";
++    rev = "d7e52cd835e3eef8e7a4aa2e0e8ce4568b96f844";
++    hash = "sha256-lnNEJbo2EsxkO6Bqic62wVno6QWEPQO9lAw5JU3xm9o=";
    };
  
    nativeBuildInputs = [
