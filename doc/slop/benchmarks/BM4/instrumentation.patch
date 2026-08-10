@@ -47,7 +47,7 @@ diff -ruN tools/tig-syntax-filter/src/bench_stats.ts /tmp/tigbench/inst/src/benc
 +}
 diff -ruN tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
 --- tools/tig-syntax-filter/src/daemon.ts	2026-08-07 20:13:20.120478689 +0000
-+++ /tmp/tigbench/inst/src/daemon.ts	2026-08-10 04:19:43.726489416 +0000
++++ /tmp/tigbench/inst/src/daemon.ts	2026-08-10 04:51:58.064088453 +0000
 @@ -12,16 +12,22 @@
   *	"E 0\n" on clean end of stream.
   * The client keeps unacknowledged input spooled, so a daemon crash at any
@@ -82,7 +82,7 @@ diff -ruN tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
  
  		const enqueue_sections = (sections: diff_section[]): void => {
  			for (const section of sections) {
-@@ -100,8 +110,30 @@
+@@ -100,8 +110,34 @@
  		});
  
  		const finish = (): void => {
@@ -91,29 +91,33 @@ diff -ruN tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
 +			}
  			closed = true;
  			resolve();
-+			// BENCH: one summary line per connection, machine-parsable.
-+			// Deferred so the delay monitor's overdue timer can record a
-+			// stall that ended in this very tick (e.g. the close event
-+			// after a long synchronous tokenization).
-+			setTimeout(() => {
-+			eld.disable();
++			// BENCH: snapshot everything that must not absorb the next
++			// request's work NOW; only the delay histogram is read one
++			// turn later (setImmediate runs after the timers phase, so
++			// the monitor's overdue timer records a stall that ended in
++			// this very tick, before a new request can contribute).
++			const ms = Math.round(performance.now() - started);
 +			const mem = process.memoryUsage();
++			const stats = diff_since(stats_base);
++			const served = sections_served;
++			setImmediate(() => {
++			eld.disable();
 +			logger.info("CONNSTATS {json}", { json: JSON.stringify({
-+				cwd, sections: sections_served,
-+				ms: Math.round(performance.now() - started),
++				cwd, sections: served,
++				ms,
 +				eld_mean_ms: Math.round(eld.mean / 1e4) / 100,
 +				eld_p99_ms: Math.round(eld.percentile(99) / 1e4) / 100,
 +				eld_max_ms: Math.round(eld.max / 1e4) / 100,
 +				rss_mb: Math.round(mem.rss / 1048576),
 +				heap_mb: Math.round(mem.heapUsed / 1048576),
 +				external_mb: Math.round(mem.external / 1048576),
-+				stats: diff_since(stats_base),
++				stats,
 +			}) });
-+			}, 60);
++			});
  		};
  		socket.on("close", finish);
  		socket.on("error", (err) => {
-@@ -144,11 +176,11 @@
+@@ -144,11 +180,11 @@
  	await mkdir(log_dir, { recursive: true });
  	await configure({
  		sinks: {

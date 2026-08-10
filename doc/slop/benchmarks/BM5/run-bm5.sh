@@ -23,10 +23,18 @@ node --cpu-prof --cpu-prof-dir="$out" --cpu-prof-name=daemon-replay.cpuprofile \
 	--input-type=module \
 	-e "setTimeout(() => process.exit(0), $window_ms); import('file://$repo/tools/tig-syntax-filter/src/daemon.ts');" &
 daemon_pid=$!
+ok=no
 for _ in $(seq 200); do
-	[ -S "$sock" ] && break
+	if [ -S "$sock" ]; then
+		ok=yes
+		break
+	fi
 	sleep 0.05
 done
+if [ "$ok" = no ] || ! kill -0 "$daemon_pid" 2>/dev/null; then
+	echo "profiled daemon never bound $sock" >&2
+	exit 1
+fi
 
 ( cd "$repo" && git show 5294f798 | "$client" > /dev/null ) || true
 ( cd "$repo" && git show 5294f798 | "$client" > /dev/null ) || true

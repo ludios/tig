@@ -271,12 +271,12 @@ the wedge effect live in the data.)
 
 ### Where the time goes
 
-- **Tokenization is 94 % of daemon section time** (BM4, 348 sections:
-  39.1 s of 41.4 s; textconv 1.28 s ≈ 3 %, blob loads ≈ 1.5 %, validation
-  0.03 s, emission 0.15 s).  BM5 CPU profile concurs: oniguruma wasm
+- **Tokenization is 95 % of daemon section time** (BM4, 348 sections:
+  41.0 s of 43.3 s; textconv 1.29 s ≈ 3 %, blob loads ≈ 1.5 %, validation
+  and emission < 0.5 %).  BM5 CPU profile concurs: oniguruma wasm
   dominates all non-idle self time; the largest JS entry (`color_to_rgb`)
   is 0.5 %.
-- **The old side is 47 % of tokenization** (BM4: 18.5 s old vs 20.6 s new).
+- **The old side is 51 % of tokenization** (BM4: 20.9 s old vs 20.1 s new).
 - **Tokenization rate**: big.ts (regular TS lines) ≈ 75 µs/line;
   `utf8proc_data.c` ≈ 440 µs/line.  Cost scales with hunk depth exactly as
   predicted: synth-top 89 ms → synth-mid 7.6 s → synth-eof 14.8 s.
@@ -332,7 +332,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
    it sacrifices exactly the cases that today end as a 15 s wait for a raw
    dump anyway (giant, synth-mid/eof), and C5 checkpoints later make those
    progressively highlightable on revisit.
-3. **C8 (skip/shrink the old side) is worth ~1.9× on first visits** — 47 %
+3. **C8 (skip/shrink the old side) is worth ~2× on first visits** — 51 %
    of tokenize time, far more than its earlier "verify with BM4" billing.
 4. **C1 (textconv batching) demotes**: 3 % overall, ~350 ms of the
    many-small commit's 1.1 s.  Still cheap and worth doing, but it is not
@@ -621,8 +621,8 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   care (sqlite gives this cheaply).
 - **C8. Load and tokenize only the sides a hunk actually needs.**  Both
   sides of a modified file are ~99 % identical, yet each is tokenized fully
-  — and BM4 measured the old side at **47 % of all tokenization time**, so
-  this is worth up to ~1.9× on first visits.  The precise need (context
+  — and BM4 measured the old side at **51 % of all tokenization time**, so
+  this is worth up to ~2× on first visits.  The precise need (context
   lines already map to `new_doc` in `process.ts`): the old side serves only
   `-` lines, so (a) set its `last_line` to the last *deleted* row, not the
   end of the last old hunk — and skip fetching the old blob entirely for
@@ -757,8 +757,8 @@ fake daemon is ready to become the CI regression test for A0.
    limits, and streaming raw passthrough for oversized sections.  With A0
    this turns "15 s blank, then a raw dump" into "raw within ~0.5 s";
    today's sub-second commits are untouched.
-3. **C8 + C2** — old-side reduction (measured 47 % of tokenization; up to
-   ~1.9× on first visits) and parallel side fetches.  Now ahead of C1,
+3. **C8 + C2** — old-side reduction (measured 51 % of tokenization; up to
+   ~2× on first visits) and parallel side fetches.  Now ahead of C1,
    which measured at only 3 %.
 4. **C6 + C4** — byte-bounded caches (RSS 1.4 GB measured) and
    toplevel/full-OID cache keys.
