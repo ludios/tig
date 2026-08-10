@@ -45,6 +45,18 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   raw diff (100–600000; default 15000).  The deadline is absolute: partial
   reads, partial writes, or trickled bytes do not extend it — only a
   completed frame does.
+- `TIG_SYNTAX_BUDGET_MS` — daemon-side tokenization budget per file
+  section, shared by the old and new side (50–600000; default 500).  A
+  section that exceeds it renders raw; the lines tokenized within budget
+  stay cached for shallower hunks and revisits.
+- `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
+  the section is not highlighted (100–1000000; default 100000).
+- `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this are not
+  buffered or highlighted at all; they stream through raw as they arrive
+  (65536–67108864; default 1048576).
+
+The daemon knobs are read once at daemon startup (restart the daemon after
+changing them); the client's `TIG_SYNTAX_DEADLINE_MS` is read per run.
 
 ## Guarantees
 

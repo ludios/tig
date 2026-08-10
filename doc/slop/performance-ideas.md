@@ -4,10 +4,16 @@ Model-output: Claude Fable 5
 
 Status: 2026-08-10 — ideas collected, all gating benchmarks (BM1–BM10)
 run (raw data in `benchmarks/`, findings in "Measured results" below, the
-implementation order at the end is data-ranked), and **A0 is implemented**
-(nonblocking client with an absolute frame deadline; BM9 now shows every
-fault mode ending in a lossless raw fallback within the deadline).  The
-other ideas are not yet implemented; each names the code it would touch.
+implementation order at the end is data-ranked), and **A0, A1, A6, and A8
+are implemented**: the hang is fixed from both sides.  A0 gives the client
+a hard frame deadline (BM9: every fault mode ends in a lossless raw
+fallback).  A1/A6/A8 give the daemon a per-section tokenization budget
+(chunked via shiki GrammarState, verified token-identical), env-var knobs,
+and streaming raw passthrough for oversized sections — measured on the old
+worst cases: giant first visit 15.2 s → **318 ms** (its 4.5 MB section
+streams raw while the commit's other files still highlight), synth-eof
+14.8 s → **629 ms**, budget-failed revisits fail fast at ~43 ms, normal
+commits unchanged.  The remaining ideas are not yet implemented.
 
 Incorporates the strongest findings from the independent review in
 `raw-proposals/alt-performance-ideas.md` (notably the empirically-reproduced
@@ -59,7 +65,11 @@ near the end of both ~17k-line sources so nearly all of both files gets
 tokenized.  It is also the *last* section of the diff, which triggers cause
 6 below.
 
-1. **Tokenization is synchronous and unbounded in time.**
+1. **[BOUNDED by A1] Tokenization is synchronous and unbounded in time.**
+   (Since fixed: tokenization now runs in 128-line chunks with a
+   per-section budget, default 500 ms — still synchronous per chunk, which
+   A2/A3 would address, but no longer unbounded.)
+   Original analysis:
    `highlighter.codeToTokensBase()` (`highlight.ts`) blocks the daemon's
    event loop until the whole document slice is tokenized.  The size limits
    (`MAX_DOC_LINES` 100k, `MAX_LINE_CHARS` 20k, 8 MB blobs) are *size*
@@ -86,7 +96,9 @@ tokenized.  It is also the *last* section of the diff, which triggers cause
    diff pane for 15 s, then the whole raw diff dumps in.  And if each
    section completes in under 15 s, the timeout never fires and a 50-file
    commit can trickle for minutes with no fallback at all.
-6. **A complete file section is buffered before anything happens to it.**
+6. **[FIXED by A8] A complete file section is buffered before anything
+   happens to it.**  (Since fixed: sections over 1 MB flush immediately
+   and stream through raw to the next boundary.)  Original analysis:
    `section_splitter` (`diff_parser.ts`) only releases a section at the next
    `diff --git` boundary or EOF, so the 4.5 MB final section of `5294f798`
    is retained in full — a long silent wait plus a memory spike — before
@@ -384,7 +396,15 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   this document — it is a correctness fix that no daemon-side improvement
   can substitute for, and it makes every later budget actually enforceable
   from the client's side.
-- **A1. Per-section time budget in the daemon.**  Replace
+- **A1. Per-section time budget in the daemon.
+  [IMPLEMENTED 2026-08-10]** — via chunked `codeToTokensBase` +
+  `GrammarState` continuation (128-line chunks, verified token-identical
+  to one-shot in `test/budget.test.ts`) rather than a per-line
+  `tokenizeLine` loop; shiki's own per-line `tokenizeTimeLimit` (500 ms)
+  still bounds pathological single lines.  Budget-aborted prefixes are
+  cached (they serve shallower hunks) and the failure depth is
+  remembered for fail-fast (the C10-scoped negative cache).  Original
+  idea text: replace
   `codeToTokensBase()` with a direct per-line tokenization loop against the
   grammar (vscode-textmate's `grammar.tokenizeLine(line, ruleStack,
   timeLimit)` — the same API VS Code uses, including its `timeLimit` /
@@ -436,11 +456,13 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   actually been emitted, otherwise a later fallback would skip those input
   bytes and truncate the diff.  Small protocol bump; client change is a few
   lines in `drain_frames`.
-- **A6. Configurable knobs.**  Expose the budgets (per-section ms, total ms,
-  max last-line to tokenize) via environment or a tiny config file in
-  `XDG_CONFIG_HOME/tig-syntax/`, with defaults chosen from BM1 data.  A
-  lower `MAX_DOC_LINES`-style default (e.g. 30k) is a blunt but zero-risk
-  stopgap that could ship before A1.
+- **A6. Configurable knobs. [IMPLEMENTED 2026-08-10]** — as environment
+  variables read at daemon start (`src/config.ts`): `TIG_SYNTAX_BUDGET_MS`
+  (default 500), `TIG_SYNTAX_MAX_LINES` (bounds the required hunk depth,
+  default 100k), `TIG_SYNTAX_MAX_SECTION_BYTES` (A8's threshold, default
+  1 MB); documented in the filter README.  A total-ms-per-connection knob
+  was deliberately skipped: with per-section budgets each section streams
+  its frame promptly, so the client-side deadline (A0) covers liveness.
 - **A7. (Big) Show raw immediately, restyle asynchronously.**  The deep fix
   the user hinted at: tig renders the unfiltered diff instantly and styles
   arrive later.  Two shapes:
@@ -462,7 +484,11 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   output frames instead of per-file sections, which improves first paint
   and peak memory without changing tig at all.)
 - **A8. Detect oversized sections while they're still arriving, and stream
-  them through raw.**  Fixes hang cause 6.  Track cheap counters during
+  them through raw. [IMPLEMENTED 2026-08-10]** — `section_splitter` takes a
+  byte threshold; a file section crossing it flushes immediately as an
+  "oversized" section and streams line-aligned raw chunks (one per feed)
+  until the next `diff --git`, with `process_section` passing them through
+  untouched.  Fixes hang cause 6.  Original idea text:  Track cheap counters during
   parsing (section bytes, diff lines, largest source line referenced by a
   hunk headers-so-far); when a threshold trips, don't keep buffering:
   flush the already-buffered prefix as raw output, switch the splitter into
@@ -760,11 +786,10 @@ fake daemon is ready to become the CI regression test for A0.
    absolute, non-restarting deadline; see the A0 entry for the measured
    before/after.  The daemon can no longer block tig, only delay
    highlighting until the deadline lands the raw fallback.
-2. **A1 + A6 + A8** — the per-section time budget (default ~300–500 ms ≈
-   1–6k prefix lines at the measured 75–440 µs/line), cheap preflight
-   limits, and streaming raw passthrough for oversized sections.  With A0
-   this turns "15 s blank, then a raw dump" into "raw within ~0.5 s";
-   today's sub-second commits are untouched.
+2. **A1 + A6 + A8 — DONE (2026-08-10)** — per-section budget (500 ms
+   default), env knobs, and streaming passthrough.  Measured: giant
+   15.2 s → 318 ms, synth-eof 14.8 s → 629 ms, failed-budget revisits
+   ~43 ms, sub-second commits untouched; "raw within ~0.5 s" achieved.
 3. **C8 + C2** — old-side reduction (measured 51 % of tokenization; up to
    ~2× on first visits) and parallel side fetches.  Now ahead of C1,
    which measured at only 3 %.

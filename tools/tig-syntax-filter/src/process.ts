@@ -16,6 +16,7 @@ import { parse_file_section, type diff_section, type file_info } from "./diff_pa
 import { ensure_lang, highlight_lines, frame_content, content_identity } from "./highlight.ts";
 import { detect_lang } from "./lang_map.ts";
 import { cat_blob, read_worktree_file, has_textconv } from "./git.ts";
+import { config } from "./config.ts";
 
 const logger = getLogger(["tig-syntax", "process"]);
 
@@ -137,10 +138,18 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		return null;
 	}
 
+	// One tokenization budget for the whole section, shared by both sides;
+	// blob fetching and grammar loading above deliberately do not count.
+	const deadline = performance.now() + config.budget_ms;
 	const old_sgr = old_doc === null ? null :
-		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line);
+		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line, deadline);
 	const new_sgr = new_doc === null ? null :
-		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line);
+		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line, deadline);
+	if (old_sgr === null && new_sgr === null) {
+		// Nothing to style (budget exhausted or size-guarded): the raw
+		// path produces identical bytes without validation/rebuild work.
+		return null;
+	}
 
 	// Validate every hunk body line against the mapped source line before
 	// emitting anything; a single mismatch (racing worktree edit, an

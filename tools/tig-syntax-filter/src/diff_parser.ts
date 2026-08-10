@@ -16,9 +16,10 @@ export interface diff_line {
 	had_newline: boolean;
 }
 
-/** A run of input lines: the preamble before any diff, or one file's diff. */
+/** A run of input lines: the preamble before any diff, one file's diff, or
+ * a slice of an oversized file's diff being streamed through raw. */
 export interface diff_section {
-	kind: "preamble" | "file";
+	kind: "preamble" | "file" | "oversized";
 	lines: diff_line[];
 	/** Total input bytes these lines consumed (including newlines). */
 	byte_length: number;
@@ -28,12 +29,25 @@ export interface diff_section {
  * Incrementally splits a diff byte stream into sections.  feed() returns
  * the sections completed by the given chunk; finish() flushes the rest.
  * A section boundary is a line starting with "diff --git ".
+ *
+ * A file section that grows beyond `max_section_bytes` stops being
+ * buffered: its accumulated lines flush immediately as an "oversized"
+ * section and every complete line until the next boundary streams out the
+ * same way, one oversized section per feed() call (plan item A8).  Callers
+ * pass such sections through raw, so a giant generated file costs neither
+ * memory nor a highlight attempt.  Line alignment is preserved: a trailing
+ * partial line always waits in `carry` for its newline or EOF.
  */
 export class section_splitter {
 	private carry: Buffer = Buffer.alloc(0);
 	private current: diff_line[] = [];
 	private current_bytes = 0;
-	private current_kind: "preamble" | "file" = "preamble";
+	private current_kind: "preamble" | "file" | "oversized" = "preamble";
+	private max_section_bytes: number;
+
+	constructor(max_section_bytes: number = Infinity) {
+		this.max_section_bytes = max_section_bytes;
+	}
 
 	private take_section(): diff_section | null {
 		if (this.current.length === 0) {
@@ -59,6 +73,15 @@ export class section_splitter {
 		}
 		this.current.push({ bytes, had_newline });
 		this.current_bytes += bytes.length + (had_newline ? 1 : 0);
+		if (this.current_kind === "file" && this.current_bytes > this.max_section_bytes) {
+			// From here to the next boundary this file streams through
+			// raw; flush what is buffered so it stops occupying memory.
+			this.current_kind = "oversized";
+			const done = this.take_section();
+			if (done !== null) {
+				completed.push(done);
+			}
+		}
 	}
 
 	feed(chunk: Buffer): diff_section[] {
@@ -75,6 +98,13 @@ export class section_splitter {
 			start = nl + 1;
 		}
 		this.carry = data.subarray(start);
+		if (this.current_kind === "oversized") {
+			// Stream, do not buffer: everything complete goes out now.
+			const done = this.take_section();
+			if (done !== null) {
+				completed.push(done);
+			}
+		}
 		return completed;
 	}
 

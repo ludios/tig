@@ -8,7 +8,8 @@
  * emitted; backgrounds belong to tig's own diff row styling.
  */
 
-import { createHighlighter, type Highlighter } from "shiki";
+import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
+import { config } from "./config.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -41,10 +42,32 @@ const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
 };
 
 export const MAX_LINE_CHARS = 20000;
-export const MAX_DOC_LINES = 100000;
 export const MAX_RUNS_PER_LINE = 4000;
 
 const CACHE_MAX_ENTRIES = 256;
+
+/** Lines tokenized between deadline checks; ~10-60 ms of work per chunk at
+ * measured grammar rates, so a section overshoots its budget by at most
+ * roughly that. */
+const CHUNK_LINES = 128;
+
+/** identity|lang -> shallowest requested depth whose tokenization has
+ * exceeded the budget.  Requests at least that deep fail fast; shallower
+ * hunks in the same document still get a fresh attempt (the budget verdict
+ * depends on the requested prefix, so the key alone must not damn the
+ * whole document). */
+const budget_fail_cache = new Map<string, number>();
+const FAIL_CACHE_MAX = 512;
+
+function fail_cache_put(key: string, last_line: number): void {
+	const prev = budget_fail_cache.get(key);
+	budget_fail_cache.delete(key);
+	budget_fail_cache.set(key, prev === undefined ? last_line : Math.min(prev, last_line));
+	while (budget_fail_cache.size > FAIL_CACHE_MAX) {
+		const oldest = budget_fail_cache.keys().next().value as string;
+		budget_fail_cache.delete(oldest);
+	}
+}
 
 /** The private SGR parameter marking a literal ESC byte of content. */
 const LITERAL_ESC_MARKER = "\x1b[999m";
@@ -194,47 +217,8 @@ export function content_identity(repo: string, oid_or_content: string | Buffer):
 	return `${repo}|sha256:${hash}`;
 }
 
-/**
- * Tokenize `content` (a complete source document) as `lang` and return one
- * SGR-annotated string per source line, up to `last_line` (1-based; grammar
- * state only depends on preceding lines, so later lines need no work).
- * Lines are cached under `identity` + lang + emit version.  Returns null
- * when the document exceeds size limits or contains an overlong line, in
- * which case the caller renders the section unhighlighted.
- */
-export async function highlight_lines(identity: string, lang: string, content: string,
-					last_line: number): Promise<string[] | null> {
-	A(highlighter !== null, "highlighter not initialized");
-	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
-	const cached = cache_get(key);
-	if (cached !== undefined && cached.length >= last_line) {
-		return cached;
-	}
-
-	const all_lines = content.split("\n");
-	if (all_lines.length > MAX_DOC_LINES) {
-		return null;
-	}
-	const needed = Math.min(last_line, all_lines.length);
-	const slice = all_lines.slice(0, needed);
-	for (const line of slice) {
-		if (line.length > MAX_LINE_CHARS) {
-			return null;
-		}
-	}
-
-	const started = performance.now();
-	const token_lines = highlighter.codeToTokensBase(slice.join("\n"), {
-		lang: lang as never,
-		theme: theme_name as never,
-	});
-	const elapsed = performance.now() - started;
-	if (elapsed > 200) {
-		logger.info("tokenized {lines} lines of {lang} in {ms}ms", {
-			lines: needed, lang, ms: Math.round(elapsed),
-		});
-	}
-
+/** Render token lines into SGR-annotated strings (exported for tests). */
+export function emit_sgr_lines(token_lines: ThemedToken[][]): string[] {
 	const result: string[] = [];
 	for (const tokens of token_lines) {
 		let out = "";
@@ -257,6 +241,85 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		}
 		result.push(out);
 	}
+	return result;
+}
+
+/**
+ * Tokenize `content` (a complete source document) as `lang` and return one
+ * SGR-annotated string per source line, up to `last_line` (1-based; grammar
+ * state only depends on preceding lines, so later lines need no work).
+ * Lines are cached under `identity` + lang + emit version.
+ *
+ * Tokenization runs in CHUNK_LINES batches continued via shiki's
+ * GrammarState (verified token-identical to one-shot tokenization), with
+ * `deadline` (a performance.now() timestamp, or null for none) checked
+ * between batches.  On exceeding it the lines tokenized so far are still
+ * cached — a valid prefix that serves shallower hunks — the failure depth
+ * is remembered for fail-fast, and null is returned so the section goes
+ * raw.  Also returns null when the request is deeper than the configured
+ * line cap or a line exceeds MAX_LINE_CHARS.
+ */
+export async function highlight_lines(identity: string, lang: string, content: string,
+					last_line: number, deadline: number | null): Promise<string[] | null> {
+	A(highlighter !== null, "highlighter not initialized");
+	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
+	const cached = cache_get(key);
+	if (cached !== undefined && cached.length >= last_line) {
+		return cached;
+	}
+
+	const fail_key = `${identity}|${lang}`;
+	const failed_at = budget_fail_cache.get(fail_key);
+	if (failed_at !== undefined && last_line >= failed_at) {
+		return null;
+	}
+
+	const all_lines = content.split("\n");
+	const needed = Math.min(last_line, all_lines.length);
+	if (needed > config.max_lines) {
+		return null;
+	}
+	const slice = all_lines.slice(0, needed);
+	for (const line of slice) {
+		if (line.length > MAX_LINE_CHARS) {
+			return null;
+		}
+	}
+
+	const started = performance.now();
+	const token_lines: ThemedToken[][] = [];
+	// The union-typed method needs a cast to its element overload.
+	const get_state = highlighter.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
+	let state: unknown;
+	for (let start = 0; start < needed; start += CHUNK_LINES) {
+		if (deadline !== null && performance.now() > deadline) {
+			const elapsed_ms = Math.round(performance.now() - started);
+			logger.info("budget exhausted tokenizing {lang} at line {done}/{needed} after {ms}ms", {
+				lang, done: token_lines.length, needed, ms: elapsed_ms,
+			});
+			if (token_lines.length > 0) {
+				cache_put(key, emit_sgr_lines(token_lines));
+			}
+			fail_cache_put(fail_key, last_line);
+			return null;
+		}
+		const chunk = slice.slice(start, start + CHUNK_LINES).join("\n");
+		const chunk_tokens = highlighter.codeToTokensBase(chunk, {
+			lang: lang as never,
+			theme: theme_name as never,
+			grammarState: state as never,
+		});
+		state = get_state(chunk_tokens);
+		token_lines.push(...chunk_tokens);
+	}
+	const elapsed = performance.now() - started;
+	if (elapsed > 200) {
+		logger.info("tokenized {lines} lines of {lang} in {ms}ms", {
+			lines: needed, lang, ms: Math.round(elapsed),
+		});
+	}
+
+	const result = emit_sgr_lines(token_lines);
 	cache_put(key, result);
 	return result;
 }
