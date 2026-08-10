@@ -1,27 +1,27 @@
 {
   "results": [
     {
-      "command": "cd /tmp/tigbench/synth && git show 1e05977 | /home/at/code/system/tig/tools/tig-syntax-filter/bin/tig-syntax-filter > /dev/null",
-      "mean": 0.34191734046000005,
-      "stddev": 0.06406148256434509,
-      "median": 0.37504705606,
-      "user": 0.03200564,
-      "system": 0.013938419999999998,
-      "min": 0.27343061706,
-      "max": 0.41126497706,
+      "command": "cd /tmp/tigbench/synth && git show ada2b4c | /home/at/code/system/tig/tools/tig-syntax-filter/bin/tig-syntax-filter > /dev/null",
+      "mean": 15.235824355920002,
+      "stddev": 0.026337983021923052,
+      "median": 15.22635468232,
+      "user": 0.02337964,
+      "system": 0.014121119999999997,
+      "min": 15.21687142532,
+      "max": 15.28226077232,
       "times": [
-        0.41126497706,
-        0.27373262906,
-        0.37504705606,
-        0.37611142306,
-        0.27343061706
+        15.22635468232,
+        15.21687142532,
+        15.22490962132,
+        15.28226077232,
+        15.22872527832
       ],
       "memory_usage_byte": [
-        25616384,
-        25616384,
-        25616384,
-        25616384,
-        25665536
+        25460736,
+        25460736,
+        25460736,
+        25542656,
+        25542656
       ],
       "exit_codes": [
         0,

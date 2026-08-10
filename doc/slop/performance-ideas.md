@@ -2,9 +2,10 @@
 
 Model-output: Claude Fable 5
 
-Status: idea collection, 2026-08-10.  Nothing here is implemented; each idea
-names the code it would touch.  Benchmark before optimizing — the section
-"Benchmarks to run first" defines the measurements that gate the ideas.
+Status: 2026-08-10 — ideas collected AND all gating benchmarks (BM1–BM10)
+run; raw data in `benchmarks/`, findings in "Measured results" below, and
+the implementation order at the end is now data-ranked.  No optimization
+itself is implemented yet; each idea names the code it would touch.
 
 Incorporates the strongest findings from the independent review in
 `raw-proposals/alt-performance-ideas.md` (notably the empirically-reproduced
@@ -34,17 +35,12 @@ git show … ──pipe──> tig-syntax-filter (C client) ──unix socket─
 - tig decodes the SGR into ephemeral styles (`diff_common_syntax` in
   `src/diff.c`, style table in `src/line.c`).
 
-Numbers from `~/.local/state/tig-syntax/daemon.log` (2026-08-07..09, this
-machine, the tig repo itself):
-
-- Warm daemon, previously-seen commit (all caches hit): **3–6 ms** for 10
-  sections.  The cache works; making more traffic hit it is the theme of
-  half the ideas below.
-- Warm daemon, new commit: **~140–180 ms** for 10 sections.  This is the
-  latency felt on every j/k step through history in a split view.
-- Cold daemon: shiki init before the socket even listens, then **~370–510 ms**
-  for the first serve.  Plus node boot and the client's 50 ms connect-retry
-  granularity in front of that (not yet measured, see B-benchmarks).
+All the BM benchmarks below have now been run — data in `benchmarks/`
+(scripts + raw results per BM folder, environment in
+`benchmarks/environment.txt`), findings in the "Measured results" section
+after the benchmark definitions.  Earlier anecdotal daemon.log numbers
+(3–6 ms cached revisits, ~150 ms warm new commits) are superseded by those
+measurements.
 
 ## Why giant commits hang
 
@@ -247,6 +243,117 @@ everything else" that A2/A3 must drive to ~zero.
   invariant documented in `process.ts` — plain SGR-stripping alone would
   eat the `ESC[999m` markers that stand in for literal ESC bytes).
 
+## Measured results (2026-08-10)
+
+All BMs ran on an idle 12600HX (16 threads, 128 GB); raw data and the exact
+scripts in `benchmarks/`.  Corpus: `benchmarks/BM1/bench-corpus.txt` —
+notably `5294f798` ("giant", the 4.5 MB utf8proc diff) and a synthetic
+99k-line TypeScript file with 1-line edits at line 10 / 50k / ~99k
+(synth-top/mid/eof).
+
+### End-to-end filter latency (BM2, `git show | tig-syntax-filter`)
+
+| case          | cold (fresh daemon) | first visit (warm daemon) | revisit | steady state |
+|---------------|--------------------:|--------------------------:|--------:|-------------:|
+| small-c       |              410 ms |                    215 ms |   11 ms |        11 ms |
+| medium        |              855 ms |                    597 ms |   13 ms |        12 ms |
+| large         |                   — |                    600 ms |   50 ms |        19 ms |
+| many-small    |                   — |                   1135 ms |   30 ms |        19 ms |
+| giant         |            15530 ms |                  15189 ms |  141 ms |        73 ms |
+| synth-top     |                   — |                     89 ms* |  243 ms |        36 ms |
+| synth-mid     |                   — |                   7576 ms |   42 ms |        36 ms |
+| synth-eof     |            15236 ms |                  14802 ms |   46 ms |        57 ms |
+
+(first visit/revisit from `sequence.csv`; steady state = hyperfine warm
+mean; * = BM4's replay — in BM2's sequence synth-top ran while the daemon
+was still finishing the giant's abandoned tokenization and took 1905 ms,
+the wedge effect live in the data.)
+
+### Where the time goes
+
+- **Tokenization is 94 % of daemon section time** (BM4, 348 sections:
+  39.1 s of 41.4 s; textconv 1.28 s ≈ 3 %, blob loads ≈ 1.5 %, validation
+  0.03 s, emission 0.15 s).  BM5 CPU profile concurs: oniguruma wasm
+  dominates all non-idle self time; the largest JS entry (`color_to_rgb`)
+  is 0.5 %.
+- **The old side is 47 % of tokenization** (BM4: 18.5 s old vs 20.6 s new).
+- **Tokenization rate**: big.ts (regular TS lines) ≈ 75 µs/line;
+  `utf8proc_data.c` ≈ 440 µs/line.  Cost scales with hunk depth exactly as
+  predicted: synth-top 89 ms → synth-mid 7.6 s → synth-eof 14.8 s.
+- **Giant first visit = 15.3 s daemon-side** (BM3, no client timeout in the
+  measurement path); the C client's 15 s timeout means real tig gets a raw
+  dump at ~15.2 s (BM2 cold/first ≈ 15.2–15.5 s).  Warm revisit 141 ms.
+- **Layer decomposition (BM10, warm)**: git show alone ≈ echo daemon
+  (≤ 31 ms, so client+protocol overhead is negligible); parse+git-I/O-only
+  (stub) 41–57 ms; full warm 35–129 ms.
+- **First frame streams at ~1 ms** (BM3) and every frame's payload ended in
+  `\n` across the corpus — E4's line-alignment assumption holds.
+
+### The hang, confirmed (BM9, BM10-eld)
+
+- Fake daemon that **accepts but never reads**: client blocked in `write()`
+  past a 60 s external kill, **zero bytes of output** — tig would sit on a
+  blank pane indefinitely.  Same for slow-read (1 B/5 ms) and for a daemon
+  that **trickles response bytes** (1 B/s resets the poll clock forever).
+  The 15 s timeout works only for frame-level faults: read-never-reply,
+  oversized frame declaration, and late replies all fall back losslessly at
+  15.05 s; mid-frame disconnect at 0.13 s.
+- The daemon's **event loop stalls for 15.0 s** during the giant
+  (`monitorEventLoopDelay` max in BM10's eld.log) — it cannot see socket
+  closes, new connections, or timers while tokenizing one section.
+- Memory: the instrumented daemon ended the corpus replay at **RSS 1.4 GB**
+  (BM4 connstats) — the entry-count-bounded caches happily hold multi-MB
+  documents' SGR lines.
+
+### Cold start (BM6) — smaller than assumed
+
+node boot 35 ms; `import("shiki")` 66 ms; full import graph 78 ms; launcher
+exec → socket accepting ≈ 190 ms; client-observed cold start (spawn +
+50 ms-granularity connect retries) ≈ 213 ms; warm client connect+handshake
+7 ms.  The whole cold penalty is ~0.2 s — noticeable, not the problem.
+
+### tig's own cost (BM7 pty medians, BM8 perf)
+
+filter off → on, warm daemon and caches: small-c 54 → 45 ms (noise),
+medium 47 → 62 ms, many-small 58 → 73 ms, synth-runs 28 → 56 ms,
+**giant 98 → 384 ms** (the 29 MB SGR-expanded section).  perf on the giant
+shows `diff_common_syntax` at 3.3 % of tig cycles — the rest of the delta
+is spread over io/parse/draw of the 6.5× larger input.  On the
+runs-per-line synthetic, `argv_size` alone is 3.2 % of cycles at ≤ 3900
+runs/line (E5's quadratic path is real, though bounded at current caps).
+
+### What the data changes about the plan
+
+1. **A0 unchanged as #1** — BM9 is the proof, and it also shows the
+   trickle case defeats any per-frame timeout, so the absolute deadline
+   (not restarted on progress) is mandatory, not optional.
+2. **A1's budget has a clear default**: tokenization runs 75–440 µs/line,
+   so a 300–500 ms per-section budget admits roughly 1–6k lines of prefix —
+   it sacrifices exactly the cases that today end as a 15 s wait for a raw
+   dump anyway (giant, synth-mid/eof), and C5 checkpoints later make those
+   progressively highlightable on revisit.
+3. **C8 (skip/shrink the old side) is worth ~1.9× on first visits** — 47 %
+   of tokenize time, far more than its earlier "verify with BM4" billing.
+4. **C1 (textconv batching) demotes**: 3 % overall, ~350 ms of the
+   many-small commit's 1.1 s.  Still cheap and worth doing, but it is not
+   "the bulk of the warm 150 ms" — first-visit time is tokenization.
+5. **C6 (byte-bounded caches) promotes**: RSS 1.4 GB after one corpus
+   replay is not a hypothetical.
+6. **B-group demotes overall**: the whole cold start is ~0.2 s (B1/B2 can
+   shave at most ~100 ms of import); B4 (warm at tig startup) still makes
+   sense as it hides all of it, and B5's idle-exit still costs a daily
+   cold start.  B3's listen-before-init matters mostly for the
+   thundering-herd case.
+7. **D prefetch's payoff is quantified**: j/k first visits cost 0.2–1.1 s
+   on ordinary commits vs 10–50 ms revisits; prefetch converts the former
+   into the latter.  Still gated on interruptible tokenization (the BM2
+   sequence recorded the wedge: a synth-top visit behind the giant's
+   abandoned work took 21× longer).
+8. **E5 confirmed but modest** at current caps (3.2 % of tig cycles on the
+   worst synthetic); fix opportunistically, not urgently.  tig's giant-on
+   total (384 ms) is acceptable; A7(b) style spans would reclaim most of
+   it if it ever matters.
+
 ## Ideas
 
 ### A. Kill the giant-commit hang (highest priority)
@@ -439,8 +546,9 @@ everything else" that A2/A3 must drive to ~zero.
 
 - **C1. Batch the textconv attribute checks.**  `has_textconv()` (`git.ts`)
   spawns up to two git processes per first-seen path (`check-attr` +
-  `config --get`).  A 10-file commit can spawn ~20 processes — plausibly the
-  bulk of the 150 ms (BM4 will confirm).  Fix: one persistent
+  `config --get`).  Measured (BM4): ~3.7 ms per first-seen section, 3 % of
+  daemon section time overall, ~350 ms of the 94-file commit's 1.1 s —
+  real but secondary to tokenization.  Fix: one persistent
   `git check-attr --stdin -z diff` child per repo (same pattern as
   `blob_batcher`), and cache driver-name → has-textconv per *repo* (one
   `config` call per driver, not per path).
@@ -496,15 +604,15 @@ everything else" that A2/A3 must drive to ~zero.
   bytes sharply for the common small-hunk-late-in-big-file case (caveat:
   make the line cache store "state + sparse rendered lines" rather than a
   dense array, or C5/C6 accounting breaks).
-- **C6. Grow / re-shape the caches.**  256 cached documents and 128 blobs is
-  small for a browsing session.  Don't assume SGR line arrays are small,
-  though: every style run adds a ~20-byte escape sequence plus JS
-  string/array overhead, so a heavily-tokenized document's cached lines can
-  exceed the source blob several-fold.  After BM4 hit-rate data *and* a
-  resident-memory measurement: bound both caches by approximate bytes rather
-  than entry count, then raise the line-cache byte budget (it's the cache
-  that turns 150 ms into 5 ms) to whatever memory target seems fair for a
-  long-lived daemon.
+- **C6. Byte-bound (then grow) the caches.**  256 cached documents and 128
+  blobs is small for a browsing session — but the bound must be *bytes*
+  first: SGR line arrays for big documents dwarf their source (every style
+  run adds a ~20-byte escape plus JS string/array overhead), and BM4
+  measured the daemon at **RSS 1.4 GB** after one corpus replay under the
+  current entry-count LRUs.  Cap by approximate bytes, then raise the
+  line-cache byte budget (it's the cache that turns first visits into
+  ~10 ms revisits) to whatever memory target seems fair for a long-lived
+  daemon.
 - **C7. Persistent on-disk cache.**  Key `oid | lang | EMIT_VERSION |
   theme-hash` → SGR lines, stored via `node:sqlite` (built into this node)
   in `XDG_CACHE_HOME/tig-syntax/`.  Survives daemon restarts and combines
@@ -512,14 +620,15 @@ everything else" that A2/A3 must drive to ~zero.
   eviction story (LRU by mtime, size cap) and the usual concurrent-writer
   care (sqlite gives this cheaply).
 - **C8. Load and tokenize only the sides a hunk actually needs.**  Both
-  sides of a modified file are ~99 % identical, yet each is tokenized fully.
-  The precise need (context lines already map to `new_doc` in `process.ts`):
-  the old side serves only `-` lines, so (a) set its `last_line` to the last
-  *deleted* row, not the end of the last old hunk — and skip fetching the
-  old blob entirely for addition-only sections (and the new side for pure
-  deletions); (b) with the A1 loop, memoize per (line text, entry-state)
-  across the two sides so shared prefixes tokenize once.  Verify with BM4
-  how often the old side dominates before doing (b).
+  sides of a modified file are ~99 % identical, yet each is tokenized fully
+  — and BM4 measured the old side at **47 % of all tokenization time**, so
+  this is worth up to ~1.9× on first visits.  The precise need (context
+  lines already map to `new_doc` in `process.ts`): the old side serves only
+  `-` lines, so (a) set its `last_line` to the last *deleted* row, not the
+  end of the last old hunk — and skip fetching the old blob entirely for
+  addition-only sections (and the new side for pure deletions); (b) with
+  the A1 loop, memoize per (line text, entry-state) across the two sides so
+  shared prefixes tokenize once.
 - **C9. Memory traffic / micro-allocations.**  Only touch what BM5 shows,
   but the alt-review's inventory is worth keeping: double `split("\n")` of
   the same text (`load_side` and `highlight_lines`) — one newline-offset
@@ -634,26 +743,39 @@ everything else" that A2/A3 must drive to ~zero.
   event loop on `EAGAIN`, and resume after polling the fd — which is also
   exactly what E3 needs to poll on pipe fds instead of sleeping.
 
-## Suggested order
+## Suggested order (updated with the measured data)
 
-1. **BM1–BM4 + BM9** (instrumentation, corpus, fault-injection regression
-   tests; roughly a day).  BM4's stage breakdown decides most of what
-   follows; BM9's never-reads fake daemon is the regression test for the
-   next item.
-2. **A0** — nonblocking client writes with an absolute deadline.  The
-   verified correctness bug; without it every other budget is advisory.
-3. **A1 + A6 + A8** — the time budget and streaming raw passthrough.
-   Together with A0 this is the hang fix.
-4. **C1, C2, C4** — cheap warm-path wins with no architectural risk.
-5. **B1, B3, B4** — cheap cold-start wins.
-6. **A2 (or A3) + A9, then D0/D1** — interruptible tokenization and daemon
-   backpressure, then measure natural cache reuse before deciding whether
-   explicit prefetch is still needed; prefetch is likely the biggest *felt*
-   improvement for j/k browsing if D0's numbers say it's not already free.
-7. **A3, C5/C5b, C6–C12** — workers and the cache/emission deepening, sized
-   by the numbers.
-8. **A7** — only if giant commits still feel bad after budgets + workers;
-   prefer the style-span variant (b), possibly via the per-hunk-frames
-   middle step.
-9. **E-items** — only with BM7/BM8 evidence (E5 is the one most likely to
-   clear that bar).
+The benchmarks (step 1 of the original order) are done; BM9's never-reads
+fake daemon is ready to become the CI regression test for A0.
+
+1. **A0** — nonblocking client writes with an absolute, non-restarting
+   deadline.  BM9 proved both the indefinite write-stall and that a
+   trickling daemon defeats any per-frame timeout.  This is the hang's
+   correctness half.
+2. **A1 + A6 + A8** — the per-section time budget (default ~300–500 ms ≈
+   1–6k prefix lines at the measured 75–440 µs/line), cheap preflight
+   limits, and streaming raw passthrough for oversized sections.  With A0
+   this turns "15 s blank, then a raw dump" into "raw within ~0.5 s";
+   today's sub-second commits are untouched.
+3. **C8 + C2** — old-side reduction (measured 47 % of tokenization; up to
+   ~1.9× on first visits) and parallel side fetches.  Now ahead of C1,
+   which measured at only 3 %.
+4. **C6 + C4** — byte-bounded caches (RSS 1.4 GB measured) and
+   toplevel/full-OID cache keys.
+5. **A2 (or A3) + A9** — interruptible tokenization (the event loop
+   measured 15 s deaf) and daemon backpressure.
+6. **D0/D1 prefetch** — first visits cost 0.2–1.1 s on ordinary commits vs
+   10–50 ms revisits; once tokenization is interruptible, prefetching
+   selection±1 makes j/k feel like the revisit numbers.  Measure D0's
+   natural reuse first.
+7. **C5/C5b checkpoints + visible-lines-only rendering** — turns the
+   linear-in-depth cost (89 ms → 7.6 s → 14.8 s across synth-top/mid/eof)
+   into resumable work, and shrinks the cache bytes C6 has to budget.
+8. **C1, B4, B5, C10–C12** — textconv batching (3 %), startup warming
+   (cold start measured at only ~0.2 s, so the rest of B demotes), negative
+   cache, emission slimming, batch-command preflight.
+9. **A3 workers / A7 style spans** — only if the above leaves giant
+   commits feeling bad; tig's own giant-on cost is 384 ms (BM7), so A7(b)
+   is a last-mile improvement, not a necessity.  E5 (`argv_size` at 3.2 %
+   of tig cycles on the worst synthetic) rides along with any E-work, not
+   urgently.

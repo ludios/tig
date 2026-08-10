@@ -1,7 +1,53 @@
-Only in /tmp/tigbench/inst/src: bench_stats.ts
-diff -ru tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
+diff -ruN tools/tig-syntax-filter/src/bench_stats.ts /tmp/tigbench/inst/src/bench_stats.ts
+--- tools/tig-syntax-filter/src/bench_stats.ts	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tigbench/inst/src/bench_stats.ts	2026-08-10 03:45:31.436434807 +0000
+@@ -0,0 +1,43 @@
++// Model-output: Claude Fable 5
++
++/**
++ * BENCH: shared mutable counters for the instrumented benchmark build
++ * (BM4/BM10).  Not part of the shipped daemon.  Counters only ever
++ * increase; consumers snapshot and diff.
++ */
++
++export const stats: Record<string, number> = {
++	blob_cache_hit: 0,
++	blob_cache_miss: 0,
++	blob_batch_null: 0,
++	batcher_spawn: 0,
++	toplevel_call: 0,
++	toplevel_spawn: 0,
++	textconv_call: 0,
++	textconv_spawn: 0,
++	worktree_read: 0,
++	line_cache_hit: 0,
++	line_cache_short: 0,
++	line_cache_miss: 0,
++	tokenize_call: 0,
++	tokenize_ms: 0,
++	tokenize_line: 0,
++	lang_load: 0,
++};
++
++/** Snapshot the counters. */
++export function snapshot(): Record<string, number> {
++	return { ...stats };
++}
++
++/** Per-key difference `now - base`, omitting zeros. */
++export function diff_since(base: Record<string, number>): Record<string, number> {
++	const out: Record<string, number> = {};
++	for (const [k, v] of Object.entries(stats)) {
++		const d = v - (base[k] ?? 0);
++		if (d !== 0) {
++			out[k] = Math.round(d * 100) / 100;
++		}
++	}
++	return out;
++}
+diff -ruN tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
 --- tools/tig-syntax-filter/src/daemon.ts	2026-08-07 20:13:20.120478689 +0000
-+++ /tmp/tigbench/inst/src/daemon.ts	2026-08-10 03:50:03.571363283 +0000
++++ /tmp/tigbench/inst/src/daemon.ts	2026-08-10 04:19:43.726489416 +0000
 @@ -12,16 +12,22 @@
   *	"E 0\n" on clean end of stream.
   * The client keeps unacknowledged input spooled, so a daemon crash at any
@@ -36,11 +82,20 @@ diff -ru tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
  
  		const enqueue_sections = (sections: diff_section[]): void => {
  			for (const section of sections) {
-@@ -101,6 +111,20 @@
+@@ -100,8 +110,30 @@
+ 		});
  
  		const finish = (): void => {
++			if (closed) {
++				return;
++			}
  			closed = true;
+ 			resolve();
 +			// BENCH: one summary line per connection, machine-parsable.
++			// Deferred so the delay monitor's overdue timer can record a
++			// stall that ended in this very tick (e.g. the close event
++			// after a long synchronous tokenization).
++			setTimeout(() => {
 +			eld.disable();
 +			const mem = process.memoryUsage();
 +			logger.info("CONNSTATS {json}", { json: JSON.stringify({
@@ -54,10 +109,11 @@ diff -ru tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
 +				external_mb: Math.round(mem.external / 1048576),
 +				stats: diff_since(stats_base),
 +			}) });
- 			resolve();
++			}, 60);
  		};
  		socket.on("close", finish);
-@@ -144,11 +168,11 @@
+ 		socket.on("error", (err) => {
+@@ -144,11 +176,11 @@
  	await mkdir(log_dir, { recursive: true });
  	await configure({
  		sinks: {
@@ -71,7 +127,7 @@ diff -ru tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
  			{ category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console"] },
  		],
  	});
-diff -ru tools/tig-syntax-filter/src/git.ts /tmp/tigbench/inst/src/git.ts
+diff -ruN tools/tig-syntax-filter/src/git.ts /tmp/tigbench/inst/src/git.ts
 --- tools/tig-syntax-filter/src/git.ts	2026-08-07 20:19:31.678665261 +0000
 +++ /tmp/tigbench/inst/src/git.ts	2026-08-10 03:46:07.138018011 +0000
 @@ -18,6 +18,8 @@
@@ -144,7 +200,7 @@ diff -ru tools/tig-syntax-filter/src/git.ts /tmp/tigbench/inst/src/git.ts
  	try {
  		const { stdout } = await execfile_p("git", ["-C", cwd, "check-attr", "diff", "--", path]);
  		// Format: "<path>: diff: <value>"
-diff -ru tools/tig-syntax-filter/src/highlight.ts /tmp/tigbench/inst/src/highlight.ts
+diff -ruN tools/tig-syntax-filter/src/highlight.ts /tmp/tigbench/inst/src/highlight.ts
 --- tools/tig-syntax-filter/src/highlight.ts	2026-08-09 13:04:08.910529242 +0000
 +++ /tmp/tigbench/inst/src/highlight.ts	2026-08-10 03:46:16.532756561 +0000
 @@ -18,6 +18,7 @@
@@ -195,9 +251,9 @@ diff -ru tools/tig-syntax-filter/src/highlight.ts /tmp/tigbench/inst/src/highlig
  	if (elapsed > 200) {
  		logger.info("tokenized {lines} lines of {lang} in {ms}ms", {
  			lines: needed, lang, ms: Math.round(elapsed),
-diff -ru tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.ts
+diff -ruN tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.ts
 --- tools/tig-syntax-filter/src/process.ts	2026-08-07 20:19:51.224718249 +0000
-+++ /tmp/tigbench/inst/src/process.ts	2026-08-10 03:47:25.562297090 +0000
++++ /tmp/tigbench/inst/src/process.ts	2026-08-10 04:19:43.726151951 +0000
 @@ -8,6 +8,10 @@
   *
   * Output invariant: stripping injected SGR sequences and unescaping the
@@ -251,7 +307,7 @@ diff -ru tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.t
  	if (old_doc === null && new_doc === null) {
  		logger.debug("no sources for {path}", { path: check_path });
  		return null;
-@@ -139,8 +156,10 @@
+@@ -139,8 +156,16 @@
  
  	const old_sgr = old_doc === null ? null :
  		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line);
@@ -259,10 +315,16 @@ diff -ru tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.t
  	const new_sgr = new_doc === null ? null :
  		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line);
 +	stamp("ms_hl_new");
++	// BENCH: size-guard rejections (highlight_lines -> null) must not be
++	// recorded as "highlighted"; the rebuilt output would be byte-identical
++	// to the raw path anyway.
++	if (old_sgr === null && new_sgr === null) {
++		return null;
++	}
  
  	// Validate every hunk body line against the mapped source line before
  	// emitting anything; a single mismatch (racing worktree edit, an
-@@ -190,6 +209,7 @@
+@@ -190,6 +215,7 @@
  			sgr_by_line.set(line_index, sgr_lines[doc_line - 1]);
  		}
  	}
@@ -270,7 +332,7 @@ diff -ru tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.t
  
  	// All lines validated; rebuild the section.
  	const parts: Buffer[] = [];
-@@ -208,27 +228,54 @@
+@@ -208,27 +234,54 @@
  			parts.push(Buffer.from("\n"));
  		}
  	}

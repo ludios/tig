@@ -16,9 +16,7 @@ mkdir -p "$out" "$state"
 export TIG_SYNTAX_SOCKET=$sock XDG_STATE_HOME=$state
 
 kill_daemon() {
-	pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
-	sleep 0.3
-	rm -f "$sock"
+	"$(dirname "$0")/../kill-sock-daemon.sh" "$sock"
 }
 warm_daemon() {
 	: | "$client" > /dev/null
@@ -28,7 +26,7 @@ run_case() {
 	# $1 = case name, $2 = repo dir, $3 = sha, $4 = "cold" | "warm"
 	if [ "$4" = cold ]; then
 		hyperfine --runs 5 --export-json "$out/hyperfine-cold-$1.json" \
-			--prepare "pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' || true; sleep 0.3; rm -f $sock" \
+			--prepare "$(dirname "$0")/../kill-sock-daemon.sh $sock" \
 			"cd $2 && git show $3 | $client > /dev/null"
 	else
 		warm_daemon
@@ -48,15 +46,15 @@ medium-ts $repo 6c8431e2
 rename $repo ce03d41d
 large $repo 87009cb7
 giant $repo 5294f798
-synth-top $synth f2cd76d
-synth-mid $synth 74d67b9
-synth-eof $synth 1e05977
-synth-runs $synth 761f2df
+synth-top $synth 74e60f2
+synth-mid $synth 921bbbc
+synth-eof $synth ada2b4c
+synth-runs $synth 7bd8be8
 EOF
 }
 
 # 1. Cold starts (subset: daemon boot dominates; 5 runs each).
-for c in "small-c $repo d14279ea" "medium $repo ff8a7c3a" "giant $repo 5294f798" "synth-eof $synth 1e05977"; do
+for c in "small-c $repo d14279ea" "medium $repo ff8a7c3a" "giant $repo 5294f798" "synth-eof $synth ada2b4c"; do
 	set -- $c
 	kill_daemon
 	run_case "$1" "$2" "$3" cold

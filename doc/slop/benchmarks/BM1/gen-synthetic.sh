@@ -4,6 +4,14 @@
 # Usage: gen-synthetic.sh <target-dir>   (target must not exist)
 # Commits are deterministic (fixed author/committer/dates), so SHAs recorded
 # in bench-corpus.txt stay valid across regenerations.
+#
+# Sizing constraints (from tools/tig-syntax-filter/src/highlight.ts): the
+# daemon rejects documents whose content.split("\n") exceeds MAX_DOC_LINES
+# (100000) entries — a trailing newline adds one entry, so big.ts uses
+# 99000 lines — and any line over MAX_LINE_CHARS (20000) chars, so the
+# minified lines stay well under that.  The largest runs-per-line case
+# targets 3900 alternations, just under MAX_RUNS_PER_LINE (4000), so its
+# styles still reach tig instead of tripping the unstyled-emission guard.
 set -eu
 
 target=$1
@@ -15,10 +23,10 @@ git config user.name bench
 git config user.email bench@example.invalid
 export GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z'
 
-# big.ts: 100k lines of plausible TypeScript (varied tokens per line).
+# big.ts: 99k lines of plausible TypeScript (varied tokens per line).
 python3 - <<'EOF'
 lines = []
-for i in range(100_000):
+for i in range(99_000):
 	k = i % 4
 	if k == 0:
 		lines.append(f"export function fn_{i}(a: number, b: string): number {{")
@@ -32,7 +40,7 @@ with open("big.ts", "w") as f:
 	f.write("\n".join(lines) + "\n")
 EOF
 git add big.ts
-git commit -qm 'base: 100k-line TypeScript file'
+git commit -qm 'base: 99k-line TypeScript file'
 
 # One-line edits at three depths, one commit each (BM2/BM3/C5 hunk-position cases).
 edit_line() {
@@ -51,17 +59,19 @@ EOF
 }
 edit_line 10     'edit at line 10 of big.ts'
 edit_line 50000  'edit at line 50000 of big.ts'
-edit_line 99998  'edit at line 99998 of big.ts (near EOF)'
+edit_line 98998  'edit at line 98998 of big.ts (near EOF)'
 
 # minified.js: single long lines with ~N token-style alternations each
-# (BM8 runs-per-line cases).  One commit adding them, then one editing each
-# line so a diff shows them as changed lines.
+# (BM8 runs-per-line cases).  Units are compact ("a0=1;" is ~4 token runs
+# in 5 chars) so even the 3900 case is ~5000 chars, far below
+# MAX_LINE_CHARS.  One commit adding them, then one editing each line so
+# a diff shows them as changed lines.
 python3 - <<'EOF'
 def line(n):
-	# each unit is roughly: identifier, punctuation, number, punctuation
-	return "var " + ";".join(f"v{i}={i}*2" for i in range(n)) + ";"
+	# ~4 style runs per unit: identifier, "=", number, ";"
+	return "var " + "".join(f"a{i}={i};" for i in range(n // 4)) + "done=1;"
 with open("minified.js", "w") as f:
-	for n in (10, 100, 500, 1000, 4000):
+	for n in (10, 100, 500, 1000, 3900):
 		f.write(line(n) + "\n")
 EOF
 git add minified.js

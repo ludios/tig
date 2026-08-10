@@ -43,7 +43,7 @@ corpus() {
 	cat <<EOF
 medium $repo ff8a7c3a
 giant $repo 5294f798
-synth-eof $synth 1e05977
+synth-eof $synth ada2b4c
 EOF
 }
 
@@ -71,9 +71,16 @@ corpus | while read -r name dir sha; do
 		"cd $dir && git show $sha | $client > /dev/null"
 done
 
-# L4: full pipeline (same daemon build, tokenization on).
+# L4: full pipeline (same daemon build, tokenization on).  Prime each
+# case through the frame profiler, which waits for the E frame: the C
+# client's 15 s timeout would otherwise leave residual daemon work
+# running into the first timed samples.
 kill_daemons
 start_inst ""
+corpus | while read -r name dir sha; do
+	( cd "$dir" && git show "$sha" > /tmp/tigbench/bm10-prime.diff )
+	node "$here/../BM3/frame-profiler.mjs" "$sock" "$dir" /tmp/tigbench/bm10-prime.diff > /dev/null
+done
 corpus | while read -r name dir sha; do
 	hyperfine --warmup 1 --runs 5 --export-json "$out/hyperfine-L4-full-$name.json" \
 		"cd $dir && git show $sha | $client > /dev/null"

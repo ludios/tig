@@ -11,6 +11,7 @@ set -eu
 client=$1; input=$2; out=$3
 here=$(dirname "$0")
 sock=/tmp/tigbench/bm9.sock
+mkdir -p /tmp/tigbench
 in_sha=$(sha256sum "$input" | cut -d' ' -f1)
 in_bytes=$(wc -c < "$input")
 
@@ -19,10 +20,18 @@ for mode in never-read slow-read read-never-reply trickle huge-frame midframe-cl
 	rm -f "$sock"
 	node "$here/fake-daemon.mjs" "$sock" "$mode" > /tmp/tigbench/bm9-daemon.log 2>&1 &
 	daemon_pid=$!
+	ok=no
 	for _ in $(seq 100); do
-		[ -S "$sock" ] && break
+		if [ -S "$sock" ]; then
+			ok=yes
+			break
+		fi
 		sleep 0.05
 	done
+	if [ "$ok" = no ]; then
+		echo "fake daemon ($mode) never bound $sock" >&2
+		exit 1
+	fi
 
 	start=$(date +%s.%N)
 	set +e

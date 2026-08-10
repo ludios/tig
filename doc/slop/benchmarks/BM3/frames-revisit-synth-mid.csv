@@ -1,5 +1,5 @@
-frame,kind,consumed_bytes,out_bytes,ms_since_connect
-1,O,155,155,8.60
-2,O,505,505,27.21
-3,E,0,0,27.44
-# total_ms=27.64 connect_ms=4.16 frames=3 input_bytes=660
+frame,kind,consumed_bytes,out_bytes,line_aligned,ms_since_connect
+1,O,155,155,1,1.28
+2,O,505,3070,1,6.85
+3,E,0,0,-,6.99
+# total_ms=7.12 connect_ms=1.26 frames=3 input_bytes=660

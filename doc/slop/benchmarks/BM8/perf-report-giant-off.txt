@@ -4,77 +4,77 @@
 #
 # Total Lost Samples: 0
 #
-# Samples: 1K of event 'cpu_atom/cycles/P'
-# Event count (approx.): 524314435
+# Samples: 546  of event 'cpu_atom/cycles/P'
+# Event count (approx.): 145359557
 #
-# Children      Self  Shared Object          Symbol                                    
-# ........  ........  .....................  ..........................................
+# Children      Self  Shared Object              Symbol                                   
+# ........  ........  .........................  .........................................
 #
-    40.17%     0.00%  tig                    [.] _start
+    21.56%     0.00%  tig                        [.] _start
             |
             ---_start
                __libc_start_main@@GLIBC_2.34
                __libc_start_call_main
                main
                |          
-               |--33.68%--prompt_input
+               |--5.30%--init_display
                |          |          
-               |          |--33.10%--get_input
+               |          |--2.70%--keyok_sp
+               |          |          _nc_expand_try.localalias
+               |          |          _nc_expand_try.localalias
+               |          |          _nc_expand_try.localalias
                |          |          |          
-               |          |           --33.02%--update_view
+               |          |           --2.34%--_nc_expand_try.localalias
+               |          |                     _nc_expand_try.localalias
                |          |                     |          
-               |          |                     |--27.97%--pager_common_read
+               |          |                      --1.93%--_nc_expand_try.localalias
+               |          |                                |          
+               |          |                                 --1.22%--_nc_expand_try.localalias
+               |          |                                           |          
+               |          |                                            --0.41%--_nc_expand_try.localalias
+               |          |          
+               |          |--2.26%--initscr
+               |          |          |          
+               |          |           --2.00%--newterm
+               |          |                     newterm_sp
+               |          |                     |          
+               |          |                     |--1.53%--_nc_setupscreen_sp
                |          |                     |          |          
-               |          |                     |          |--14.23%--add_line_text_at_
+               |          |                     |          |--1.08%--newwin_sp
+               |          |                     |          |          __libc_calloc2
+               |          |                     |          |          _int_malloc
+               |          |                     |          |          asm_exc_page_fault
                |          |                     |          |          |          
-               |          |                     |          |          |--11.07%--view_column_info_update
-               |          |                     |          |          |          |          
-               |          |                     |          |          |           --10.77%--utf8_width_of
-               |          |                     |          |          |                     |          
-               |          |                     |          |          |                     |--7.38%--utf8_length
-               |          |                     |          |          |                     |          |          
-               |          |                     |          |          |                     |          |--2.83%--utf8proc_get_property
-               |          |                     |          |          |                     |          |          
-               |          |                     |          |          |                     |           --0.50%--utf8proc_charwidth
-               |          |                     |          |          |                     |          
-               |          |                     |          |          |                     |--2.43%--utf8proc_iterate
-               |          |                     |          |          |                     |          
-               |          |                     |          |          |                      --0.88%--utf8proc_charwidth
-               |          |                     |          |          |          
-               |          |                     |          |           --2.56%--add_line_at
+               |          |                     |          |           --0.66%--exc_page_fault
+               |          |                     |          |                     do_user_addr_fault
                |          |                     |          |                     |          
-               |          |                     |          |                     |--1.19%--__libc_calloc2
-               |          |                     |          |                     |          |          
-               |          |                     |          |                     |           --1.12%--_int_malloc
-               |          |                     |          |                     |                     |          
-               |          |                     |          |                     |                      --0.52%--asm_exc_page_fault
-               |          |                     |          |                     |                                exc_page_fault
-               |          |                     |          |                     |                                do_user_addr_fault
-               |          |                     |          |                     |                                |          
-               |          |                     |          |                     |                                 --0.37%--handle_mm_fault
-               |          |                     |          |                     |                                           __handle_mm_fault
-               |          |                     |          |                     |          
-               |          |                     |          |                      --0.94%--chunk_allocator
-               |          |                     |          |                                realloc
+               |          |                     |          |                      --0.54%--handle_mm_fault
+               |          |                     |          |                                __handle_mm_fault
                |          |                     |          |                                |          
-               |          |                     |          |                                 --0.72%--__memmove_avx_unaligned_erms
-               |          |                     |          |                                           asm_exc_page_fault
-               |          |                     |          |                                           |          
-               |          |                     |          |                                            --0.49%--exc_page_fault
-               |          |                     |          |                                                      |          
-               |          |                     |          |                                                       --0.45%--do_user_addr_fault
-               |          |                     |          |                                                                 |          
-               |          |                     |          |                                                                  --0.37%--handle_mm_fault
-               |          |                     |          |                                                                            __handle_mm_fault
+               |          |                     |          |                                 --0.40%--do_anonymous_page
                |          |                     |          |          
-               |          |                     |          |--9.38%--utf8_length
-               |          |                     |          |          |          
-               |          |                     |          |          |--3.46%--utf8proc_get_property
-               |          |                     |          |          |          
-               |          |                     |          |           --0.37%--asm_sysvec_apic_timer_interrupt
-               |          |                     |          |          
-               |          |                     |          |--2.37%--utf8proc_iterate
-               |          |                     |          |          
-               |          |                     |           --1.14%--utf8proc_charwidth
+               |          |                     |           --0.45%--__memset_avx2_unaligned_erms
                |          |                     |          
-               |          |                     |--1.76%--diff_common_read
+               |          |                      --0.47%--_nc_setupterm
+               |          |                                _nc_setup_tinfo
+               |          |                                _nc_read_entry2
+               |          |          
+               |           --0.34%--init_colors
+               |          
+               |--4.46%--filter_rev_parse
+               |          |          
+               |          |--3.59%--io_run_load
+               |          |          |          
+               |          |           --3.35%--io_exec
+               |          |                     |          
+               |          |                     |--1.70%--__execvpe
+               |          |                     |          __GI___execve
+               |          |                     |          entry_SYSCALL_64_after_hwframe
+               |          |                     |          do_syscall_64
+               |          |                     |          __x64_sys_execve
+               |          |                     |          |          
+               |          |                     |           --1.45%--do_execveat_common.isra.0
+               |          |                     |                     |          
+               |          |                     |                     |--0.80%--copy_strings.isra.0
+               |          |                     |                     |          |          
+               |          |                     |                     |           --0.56%--get_arg_page

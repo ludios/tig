@@ -22,10 +22,9 @@ mkdir -p "$out" "$state"
 out=$(realpath "$out")   # the import benchmarks cd into the package dir
 export TIG_SYNTAX_SOCKET=$sock XDG_STATE_HOME=$state
 
+here=$(CDPATH= cd -P "$(dirname "$0")" && pwd)   # absolute: survives the cd below
 kill_daemon() {
-	pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
-	sleep 0.3
-	rm -f "$sock"
+	"$here/../kill-sock-daemon.sh" "$sock"
 }
 
 # 1. node boot floor and import costs (hyperfine, from the package dir so

@@ -1,7 +1,7 @@
-frame,kind,consumed_bytes,out_bytes,ms_since_connect
-1,O,251,251,4.88
-2,O,3924,13682,5.63
-3,O,12617,23914,5.81
-4,O,4507550,29441224,3694.89
-5,E,0,0,3697.18
-# total_ms=3697.28 connect_ms=2.09 frames=5 input_bytes=4524342
+frame,kind,consumed_bytes,out_bytes,line_aligned,ms_since_connect
+1,O,251,251,1,2.34
+2,O,3924,13682,1,2.52
+3,O,12617,23914,1,2.87
+4,O,4507550,29441224,1,80.02
+5,E,0,0,-,80.18
+# total_ms=80.27 connect_ms=2.53 frames=5 input_bytes=4524342

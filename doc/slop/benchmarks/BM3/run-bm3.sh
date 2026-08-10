@@ -13,9 +13,7 @@ state=/tmp/tigbench/bm3-state
 mkdir -p "$out" "$state" /tmp/tigbench/diffs
 export TIG_SYNTAX_SOCKET=$sock XDG_STATE_HOME=$state
 
-pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
-sleep 0.3
-rm -f "$sock"
+"$here/../kill-sock-daemon.sh" "$sock"
 : | "$repo/tools/tig-syntax-filter/bin/tig-syntax-filter" > /dev/null
 
 corpus() {
@@ -26,10 +24,10 @@ medium $repo ff8a7c3a
 medium-ts $repo 6c8431e2
 large $repo 87009cb7
 giant $repo 5294f798
-synth-top $synth f2cd76d
-synth-mid $synth 74d67b9
-synth-eof $synth 1e05977
-synth-runs $synth 761f2df
+synth-top $synth 74e60f2
+synth-mid $synth 921bbbc
+synth-eof $synth ada2b4c
+synth-runs $synth 7bd8be8
 EOF
 }
 
@@ -41,5 +39,5 @@ corpus | while read -r name dir sha; do
 			> "$out/frames-$pass-$name.csv"
 	done
 done
-pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
+"$here/../kill-sock-daemon.sh" "$sock"
 echo BM3 done

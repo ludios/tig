@@ -29,9 +29,7 @@ color diff-add	default	rgb:22331f
 color diff-del	default	rgb:3b2626
 EOF
 
-pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
-sleep 0.3
-rm -f "$sock"
+"$here/../kill-sock-daemon.sh" "$sock"
 : | "$client" > /dev/null   # warm the daemon
 
 corpus() {
@@ -40,18 +38,24 @@ small-c $repo d14279ea
 many-small $repo 494a4085
 medium $repo ff8a7c3a
 giant $repo 5294f798
-synth-eof $synth 1e05977
-synth-runs $synth 761f2df
+synth-eof $synth ada2b4c
+synth-runs $synth 7bd8be8
 EOF
 }
 
 corpus | while read -r name dir sha; do
+	# Prime through the frame profiler: it waits for the E frame, so the
+	# daemon's caches are verifiably complete before any timed run (the C
+	# client's 15 s timeout would otherwise return early on giant first
+	# visits and leave residual daemon work running under the timer).
+	( cd "$dir" && git show "$sha" > /tmp/tigbench/bm7-prime.diff )
+	node "$here/../BM3/frame-profiler.mjs" "$sock" "$dir" /tmp/tigbench/bm7-prime.diff > /dev/null
 	for mode in off on; do
-		# one unmeasured priming run so "on" measures warm-cache state
+		# one unmeasured pty run per mode for page-cache/tty warmup
 		python3 "$here/pty-timer.py" 1 "$dir" "/tmp/tigbench/bm7-$mode.tigrc" "$tig" show "$sha" > /dev/null
 		python3 "$here/pty-timer.py" 5 "$dir" "/tmp/tigbench/bm7-$mode.tigrc" "$tig" show "$sha" \
 			> "$out/tig-$mode-$name.csv"
 	done
 done
-pkill -f 'tig-syntax-filter/(bin/[.][.]/)?src/daemon[.]ts' 2>/dev/null || true
+"$here/../kill-sock-daemon.sh" "$sock"
 echo BM7 done

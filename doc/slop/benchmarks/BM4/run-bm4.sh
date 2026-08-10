@@ -33,10 +33,10 @@ medium-ts $repo 6c8431e2
 rename $repo ce03d41d
 large $repo 87009cb7
 giant $repo 5294f798
-synth-top $synth f2cd76d
-synth-mid $synth 74d67b9
-synth-eof $synth 1e05977
-synth-runs $synth 761f2df
+synth-top $synth 74e60f2
+synth-mid $synth 921bbbc
+synth-eof $synth ada2b4c
+synth-runs $synth 7bd8be8
 EOF
 }
 

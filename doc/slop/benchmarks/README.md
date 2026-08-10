@@ -4,7 +4,10 @@ Model-output: Claude Fable 5
 
 Raw data collected 2026-08-10; machine and caveats in `environment.txt`.
 Benchmark definitions (what gates what) live in `../performance-ideas.md`.
-This directory is data + the scripts that produced it; analysis comes later.
+This directory is data + the scripts that produced it; the analysis lives
+in the "Measured results" section of `../performance-ideas.md`.
+`kill-sock-daemon.sh` kills only the daemon owning a given bench socket, so
+runners never touch an interactive tig session's daemon.
 
 - `BM1/` — corpus: `bench-corpus.txt` (the commit list used by every other
   benchmark), `tig-repo-diff-sizes.txt` (2000 tig commits ranked by diff
@@ -16,14 +19,15 @@ This directory is data + the scripts that produced it; analysis comes later.
   twice: first-visit vs revisit).
 - `BM3/` — per-frame latency: `frame-profiler.mjs` + `run-bm3.sh`;
   `frames-{first,revisit}-<case>.csv` = one row per protocol frame with ms
-  since connect, against the shipped daemon.
+  since connect and a `line_aligned` flag (E4 verification), against the
+  shipped daemon.
 - `BM4/` — daemon-internal stage breakdown: `instrumentation.patch` (applied
   to a copy of tools/tig-syntax-filter, at /tmp/tigbench/inst during
   collection), `run-bm4.sh`, `replay.csv` (wall per corpus commit, two
   passes), `sections.log` (per-section JSON: textconv/load/highlight/
   validate/emit ms), `connstats.log` (per-connection cache counters,
   event-loop delay, RSS).
-- `BM5/` — CPU profile: `daemon-replay.cpuprofile` (V8 format; load in
+- `BM5/` — CPU profile: `run-bm5.sh`, `daemon-replay.cpuprofile` (V8 format; load in
   Chrome DevTools or speedscope; covers giant×2 + medium + synth-eof
   replays on the shipped daemon), `top-self-time.txt` (flat self-time
   table extracted from it).
@@ -36,7 +40,7 @@ This directory is data + the scripts that produced it; analysis comes later.
   measures load-to-completion), `run-bm7.sh`, `tig-{off,on}-<case>.csv`
   (filter disabled vs enabled, warm daemon, 5 runs each after a priming
   run).
-- `BM8/` — perf on tig: `perf-report-{giant-on,giant-off,synth-runs-on}.txt`
+- `BM8/` — perf on tig: `run-bm8.sh`, `perf-report-{giant-on,giant-off,synth-runs-on}.txt`
   (`perf report --stdio --comms=tig`, call graph, warm daemon+caches),
   `pty-times-*.csv` (wall times of the profiled runs).
 - `BM9/` — protocol fault injection: `fake-daemon.mjs` (7 fault modes),

@@ -4,77 +4,77 @@
 #
 # Total Lost Samples: 0
 #
-# Samples: 450  of event 'cpu_atom/cycles/P'
-# Event count (approx.): 139792438
+# Samples: 564  of event 'cpu_atom/cycles/P'
+# Event count (approx.): 158359217
 #
-# Children      Self  Shared Object          Symbol                                  
-# ........  ........  .....................  ........................................
+# Children      Self  Shared Object              Symbol                                   
+# ........  ........  .........................  .........................................
 #
-    30.63%     0.00%  tig                    [.] _start
+    24.34%     0.00%  tig                        [.] _start
             |
             ---_start
                __libc_start_main@@GLIBC_2.34
                __libc_start_call_main
                main
                |          
-               |--11.53%--prompt_input
+               |--11.25%--prompt_input
                |          |          
-               |          |--9.71%--get_input
+               |          |--8.41%--get_input
                |          |          update_view
                |          |          |          
-               |          |          |--5.45%--pager_common_read
+               |          |          |--4.67%--diff_common_syntax
                |          |          |          |          
-               |          |          |          |--2.79%--add_line_text_at_
+               |          |          |          |--3.31%--diff_common_add_cell
                |          |          |          |          |          
-               |          |          |          |           --2.26%--view_column_info_update
-               |          |          |          |                     utf8_width_of
-               |          |          |          |                     |          
-               |          |          |          |                     |--1.20%--utf8_length
-               |          |          |          |                     |          
-               |          |          |          |                     |--0.54%--utf8proc_iterate
-               |          |          |          |                     |          
-               |          |          |          |                      --0.52%--utf8proc_charwidth
+               |          |          |          |           --3.23%--argv_size
                |          |          |          |          
-               |          |          |          |--1.16%--utf8proc_iterate
-               |          |          |          |          
-               |          |          |          |--1.00%--utf8_length
-               |          |          |          |          
-               |          |          |           --0.51%--utf8proc_charwidth
-               |          |          |          
-               |          |          |--1.63%--end_update
-               |          |          |          |          
-               |          |          |           --1.35%--diff_read
+               |          |          |           --0.98%--diff_common_add_line
                |          |          |                     |          
-               |          |          |                      --1.08%--begin_update
-               |          |          |                                view_exec
-               |          |          |                                io_exec
-               |          |          |                                |          
-               |          |          |                                 --0.71%--__execvpe
-               |          |          |                                           __GI___execve
-               |          |          |                                           entry_SYSCALL_64_after_hwframe
-               |          |          |                                           do_syscall_64
-               |          |          |                                           |          
-               |          |          |                                            --0.63%--__x64_sys_execve
-               |          |          |                                                      do_execveat_common.isra.0
-               |          |          |                                                      |          
-               |          |          |                                                       --0.38%--bprm_execve
+               |          |          |                     |--0.40%--add_line_text_at
+               |          |          |                     |          add_line_text_at_
+               |          |          |                     |          
+               |          |          |                      --0.34%--argv_to_string_alloc
+               |          |          |                                concat_argv
+               |          |          |                                string_nformat
+               |          |          |                                __vsnprintf_internal
+               |          |          |                                __printf_buffer_write
                |          |          |          
-               |          |          |--1.04%--redraw_view_from
+               |          |          |--1.14%--redraw_view_from
                |          |          |          draw_view_line
                |          |          |          view_column_draw
                |          |          |          draw_text_expanded
-               |          |          |          draw_chars.constprop.0
                |          |          |          |          
-               |          |          |           --0.63%--waddnstr
+               |          |          |           --0.98%--draw_chars.constprop.0
                |          |          |                     |          
-               |          |          |                      --0.45%--wcwidth
+               |          |          |                     |--0.38%--syntax_style_attr
+               |          |          |                     |          
+               |          |          |                      --0.35%--set_view_attr
+               |          |          |                                wchgat
                |          |          |          
-               |          |          |--0.55%--wnoutrefresh
+               |          |          |--0.57%--io_get_line
+               |          |          |          |          
+               |          |          |           --0.31%--chunk_allocator
+               |          |          |                     realloc
+               |          |          |                     __memmove_avx_unaligned_erms
+               |          |          |                     asm_exc_page_fault
+               |          |          |                     exc_page_fault
+               |          |          |                     do_user_addr_fault
+               |          |          |                     handle_mm_fault
+               |          |          |                     __handle_mm_fault
+               |          |          |                     do_anonymous_page
+               |          |          |                     folio_prealloc
+               |          |          |                     vma_alloc_folio_noprof
+               |          |          |                     alloc_pages_mpol
+               |          |          |                     __alloc_frozen_pages_noprof
+               |          |          |                     get_page_from_freelist
                |          |          |          
-               |          |           --0.52%--diff_common_read
-               |          |                     |          
-               |          |                      --0.32%--diff_common_read_diff_stat
-               |          |                                asm_exc_page_fault
-               |          |                                exc_page_fault
-               |          |                                do_user_addr_fault
-               |          |                                lock_mm_and_find_vma
+               |          |          |--0.47%--wnoutrefresh
+               |          |          |          
+               |          |          |--0.42%--end_update
+               |          |          |          diff_read
+               |          |          |          begin_update
+               |          |          |          view_exec
+               |          |          |          |          
+               |          |          |           --0.34%--io_exec
+               |          |          |          
+               |          |          |--0.41%--diff_common_read

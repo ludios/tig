@@ -4,77 +4,77 @@
 #
 # Total Lost Samples: 0
 #
-# Samples: 4K of event 'cpu_atom/cycles/P'
-# Event count (approx.): 1506493061
+# Samples: 882  of event 'cpu_atom/cycles/P'
+# Event count (approx.): 284141118
 #
-# Children      Self  Shared Object          Symbol                                   
-# ........  ........  .....................  .........................................
+# Children      Self  Shared Object              Symbol                                    
+# ........  ........  .........................  ..........................................
 #
-    74.74%     0.00%  tig                    [.] _start
+    20.87%     0.00%  tig                        [.] _start
             |
             ---_start
                __libc_start_main@@GLIBC_2.34
                __libc_start_call_main
                |          
-                --74.73%--main
+                --20.83%--main
                           |          
-                          |--72.77%--prompt_input
+                          |--14.00%--prompt_input
                           |          |          
-                          |           --72.58%--get_input
+                          |          |--12.87%--get_input
+                          |          |          update_view
+                          |          |          |          
+                          |          |          |--6.52%--__memset_avx2_unaligned_erms
+                          |          |          |          
+                          |          |          |--3.27%--diff_common_syntax
+                          |          |          |          |          
+                          |          |          |          |--1.39%--diff_common_add_line
+                          |          |          |          |          |          
+                          |          |          |          |          |--0.62%--add_line_text_at
+                          |          |          |          |          |          add_line_text_at_
+                          |          |          |          |          |          
+                          |          |          |          |           --0.44%--argv_to_string_alloc
+                          |          |          |          |                     concat_argv
+                          |          |          |          |                     string_nformat
+                          |          |          |          |          
+                          |          |          |          |--0.71%--syntax_style_get
+                          |          |          |          |          
+                          |          |          |           --0.44%--diff_common_add_cell
+                          |          |          |          
+                          |          |          |--1.03%--io_can_read
+                          |          |          |          __select
+                          |          |          |          __syscall_cancel
+                          |          |          |          __internal_syscall_cancel
+                          |          |          |          |          
+                          |          |          |           --0.89%--entry_SYSCALL_64_after_hwframe
+                          |          |          |                     do_syscall_64
+                          |          |          |                     __x64_sys_pselect6
+                          |          |          |                     do_pselect.constprop.0
+                          |          |          |                     core_sys_select
+                          |          |          |                     |          
+                          |          |          |                      --0.80%--do_select
+                          |          |          |                                |          
+                          |          |          |                                 --0.45%--poll_schedule_timeout.constprop.0
+                          |          |          |                                           schedule_hrtimeout_range_clock
+                          |          |          |                                           |          
+                          |          |          |                                            --0.41%--schedule
+                          |          |          |                                                      __schedule
+                          |          |          |                                                      |          
+                          |          |          |                                                       --0.32%--dequeue_task_fair
+                          |          |          |          
+                          |          |          |--0.46%--diff_common_read
+                          |          |          |          
+                          |          |          |--0.38%--redraw_view_from
+                          |          |          |          draw_view_line
+                          |          |          |          view_column_draw
+                          |          |          |          
+                          |          |           --0.32%--wnoutrefresh
+                          |          |          
+                          |           --1.01%--report_clear
+                          |                     doupdate_sp
                           |                     |          
-                          |                      --72.51%--update_view
+                          |                      --0.85%--TransformLine
                           |                                |          
-                          |                                |--34.73%--diff_common_syntax
-                          |                                |          |          
-                          |                                |          |--18.39%--diff_common_add_line
-                          |                                |          |          |          
-                          |                                |          |          |--8.82%--argv_to_string_alloc
-                          |                                |          |          |          |          
-                          |                                |          |          |           --8.45%--concat_argv
-                          |                                |          |          |                     |          
-                          |                                |          |          |                      --8.04%--string_nformat
-                          |                                |          |          |                                |          
-                          |                                |          |          |                                 --6.93%--__vsnprintf_internal
-                          |                                |          |          |                                           |          
-                          |                                |          |          |                                           |--4.39%--__printf_buffer
-                          |                                |          |          |                                           |          |          
-                          |                                |          |          |                                           |          |--1.22%--__printf_buffer_write
-                          |                                |          |          |                                           |          |          
-                          |                                |          |          |                                           |           --0.59%--__memmove_avx_unaligned_erms
-                          |                                |          |          |                                           |          
-                          |                                |          |          |                                           |--1.06%--__strchrnul_avx2
-                          |                                |          |          |                                           |          
-                          |                                |          |          |                                            --0.77%--__printf_buffer_write
-                          |                                |          |          |          
-                          |                                |          |          |--7.12%--add_line_text_at
-                          |                                |          |          |          |          
-                          |                                |          |          |           --7.07%--add_line_text_at_
-                          |                                |          |          |                     |          
-                          |                                |          |          |                     |--4.90%--view_column_info_update
-                          |                                |          |          |                     |          |          
-                          |                                |          |          |                     |           --4.85%--utf8_width_of
-                          |                                |          |          |                     |                     |          
-                          |                                |          |          |                     |                     |--3.31%--utf8_length
-                          |                                |          |          |                     |                     |          |          
-                          |                                |          |          |                     |                     |           --1.43%--utf8proc_get_property
-                          |                                |          |          |                     |                     |          
-                          |                                |          |          |                     |                     |--1.00%--utf8proc_iterate
-                          |                                |          |          |                     |                     |          
-                          |                                |          |          |                     |                      --0.47%--utf8proc_charwidth
-                          |                                |          |          |                     |          
-                          |                                |          |          |                      --2.07%--add_line_at
-                          |                                |          |          |                                |          
-                          |                                |          |          |                                 --1.84%--__libc_calloc2
-                          |                                |          |          |                                           |          
-                          |                                |          |          |                                            --1.82%--_int_malloc
-                          |                                |          |          |                                                      |          
-                          |                                |          |          |                                                       --1.16%--asm_exc_page_fault
-                          |                                |          |          |                                                                 |          
-                          |                                |          |          |                                                                  --1.05%--exc_page_fault
-                          |                                |          |          |                                                                            |          
-                          |                                |          |          |                                                                             --1.03%--do_user_addr_fault
-                          |                                |          |          |                                                                                       |          
-                          |                                |          |          |                                                                                        --0.90%--handle_mm_fault
-                          |                                |          |          |                                                                                                  |          
-                          |                                |          |          |                                                                                                   --0.85%--__handle_mm_fault
-                          |                                |          |          |                                                                                                             |          
+                          |                                 --0.52%--_nc_mvcur_sp
+                          |                                           |          
+                          |                                            --0.32%--_nc_flush_sp
+                          |                                                      __GI___libc_write

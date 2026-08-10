@@ -15,9 +15,9 @@ tig 6c8431e2 medium-ts       -- tig-syntax-filter: batch-FIFO sync; TypeScript-h
 tig ce03d41d rename          -- README.adoc -> README.md; rename with edits
 tig d14279ea small-c         -- truecolor: replay pairs on tier change; typical small C commit
 tig 87009cb7 large           -- 883,558-byte diff (9th largest of 2000)
-synth 3eee399 synth-base     -- base: 100k-line TypeScript file (creation diff)
-synth f2cd76d synth-top      -- 1-line edit at line 10 of big.ts
-synth 74d67b9 synth-mid      -- 1-line edit at line 50000 of big.ts
-synth 1e05977 synth-eof      -- 1-line edit at line 99998 of big.ts (the BM1 worst case: tiny hunk, full-file tokenization)
-synth 21ebc31 synth-runs-add -- add minified.js: single lines with ~10/100/500/1000/4000 token alternations
-synth 761f2df synth-runs     -- edit every minified.js line (BM8 runs-per-line case)
+synth ccfc022 synth-base     -- base: 99k-line TypeScript file (creation diff; 99k keeps split("\n") within the daemon's MAX_DOC_LINES)
+synth 74e60f2 synth-top      -- 1-line edit at line 10 of big.ts
+synth 921bbbc synth-mid      -- 1-line edit at line 50000 of big.ts
+synth ada2b4c synth-eof      -- 1-line edit at line 98998 of big.ts (the BM1 worst case: tiny hunk, full-file tokenization)
+synth 801b9b0 synth-runs-add -- add minified.js: single lines with ~10/100/500/1000/3900 token alternations (under MAX_LINE_CHARS and MAX_RUNS_PER_LINE)
+synth 7bd8be8 synth-runs     -- edit every minified.js line (BM8 runs-per-line case)
