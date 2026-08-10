@@ -1,0 +1,35 @@
+{
+  "results": [
+    {
+      "command": "cd /tmp/tigbench/synth && git show 1e05977 | /home/at/code/system/tig/tools/tig-syntax-filter/bin/tig-syntax-filter > /dev/null",
+      "mean": 0.34191734046000005,
+      "stddev": 0.06406148256434509,
+      "median": 0.37504705606,
+      "user": 0.03200564,
+      "system": 0.013938419999999998,
+      "min": 0.27343061706,
+      "max": 0.41126497706,
+      "times": [
+        0.41126497706,
+        0.27373262906,
+        0.37504705606,
+        0.37611142306,
+        0.27343061706
+      ],
+      "memory_usage_byte": [
+        25616384,
+        25616384,
+        25616384,
+        25616384,
+        25665536
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

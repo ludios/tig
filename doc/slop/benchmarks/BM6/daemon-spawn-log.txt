@@ -1,0 +1,10 @@
+2026-08-10 03:59:09.722 +00:00 [INF] tig-syntax·highlight: highlighter ready: theme fg='#bbbbbb' bg='#282c34'
+2026-08-10 03:59:09.730 +00:00 [INF] tig-syntax·daemon: listening on '/tmp/tigbench/bm6.sock' (pid 755280)
+2026-08-10 03:59:10.535 +00:00 [INF] tig-syntax·highlight: highlighter ready: theme fg='#bbbbbb' bg='#282c34'
+2026-08-10 03:59:10.542 +00:00 [INF] tig-syntax·daemon: listening on '/tmp/tigbench/bm6.sock' (pid 755362)
+2026-08-10 03:59:11.141 +00:00 [INF] tig-syntax·highlight: highlighter ready: theme fg='#bbbbbb' bg='#282c34'
+2026-08-10 03:59:11.147 +00:00 [INF] tig-syntax·daemon: listening on '/tmp/tigbench/bm6.sock' (pid 755476)
+2026-08-10 03:59:11.940 +00:00 [INF] tig-syntax·highlight: highlighter ready: theme fg='#bbbbbb' bg='#282c34'
+2026-08-10 03:59:11.949 +00:00 [INF] tig-syntax·daemon: listening on '/tmp/tigbench/bm6.sock' (pid 755608)
+2026-08-10 03:59:12.606 +00:00 [INF] tig-syntax·highlight: highlighter ready: theme fg='#bbbbbb' bg='#282c34'
+2026-08-10 03:59:12.617 +00:00 [INF] tig-syntax·daemon: listening on '/tmp/tigbench/bm6.sock' (pid 755701)

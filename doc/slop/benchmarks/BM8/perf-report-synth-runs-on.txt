@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+# comm: tig
+#
+# Total Lost Samples: 0
+#
+# Samples: 450  of event 'cpu_atom/cycles/P'
+# Event count (approx.): 139792438
+#
+# Children      Self  Shared Object          Symbol                                  
+# ........  ........  .....................  ........................................
+#
+    30.63%     0.00%  tig                    [.] _start
+            |
+            ---_start
+               __libc_start_main@@GLIBC_2.34
+               __libc_start_call_main
+               main
+               |          
+               |--11.53%--prompt_input
+               |          |          
+               |          |--9.71%--get_input
+               |          |          update_view
+               |          |          |          
+               |          |          |--5.45%--pager_common_read
+               |          |          |          |          
+               |          |          |          |--2.79%--add_line_text_at_
+               |          |          |          |          |          
+               |          |          |          |           --2.26%--view_column_info_update
+               |          |          |          |                     utf8_width_of
+               |          |          |          |                     |          
+               |          |          |          |                     |--1.20%--utf8_length
+               |          |          |          |                     |          
+               |          |          |          |                     |--0.54%--utf8proc_iterate
+               |          |          |          |                     |          
+               |          |          |          |                      --0.52%--utf8proc_charwidth
+               |          |          |          |          
+               |          |          |          |--1.16%--utf8proc_iterate
+               |          |          |          |          
+               |          |          |          |--1.00%--utf8_length
+               |          |          |          |          
+               |          |          |           --0.51%--utf8proc_charwidth
+               |          |          |          
+               |          |          |--1.63%--end_update
+               |          |          |          |          
+               |          |          |           --1.35%--diff_read
+               |          |          |                     |          
+               |          |          |                      --1.08%--begin_update
+               |          |          |                                view_exec
+               |          |          |                                io_exec
+               |          |          |                                |          
+               |          |          |                                 --0.71%--__execvpe
+               |          |          |                                           __GI___execve
+               |          |          |                                           entry_SYSCALL_64_after_hwframe
+               |          |          |                                           do_syscall_64
+               |          |          |                                           |          
+               |          |          |                                            --0.63%--__x64_sys_execve
+               |          |          |                                                      do_execveat_common.isra.0
+               |          |          |                                                      |          
+               |          |          |                                                       --0.38%--bprm_execve
+               |          |          |          
+               |          |          |--1.04%--redraw_view_from
+               |          |          |          draw_view_line
+               |          |          |          view_column_draw
+               |          |          |          draw_text_expanded
+               |          |          |          draw_chars.constprop.0
+               |          |          |          |          
+               |          |          |           --0.63%--waddnstr
+               |          |          |                     |          
+               |          |          |                      --0.45%--wcwidth
+               |          |          |          
+               |          |          |--0.55%--wnoutrefresh
+               |          |          |          
+               |          |           --0.52%--diff_common_read
+               |          |                     |          
+               |          |                      --0.32%--diff_common_read_diff_stat
+               |          |                                asm_exc_page_fault
+               |          |                                exc_page_fault
+               |          |                                do_user_addr_fault
+               |          |                                lock_mm_and_find_vma

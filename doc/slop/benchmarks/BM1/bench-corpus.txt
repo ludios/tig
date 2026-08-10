@@ -1,0 +1,23 @@
+# BM1 benchmark corpus.  Data collection 2026-08-10; see ../environment.txt.
+# Format: <repo> <sha> <category> -- <description>
+#
+# Repo "tig" = this repository at f404a4e5.
+# Repo "synth" = deterministic synthetic repo built by gen-synthetic.sh
+# (SHAs below are stable because the script pins author/committer dates).
+# Full diff-size ranking of 2000 tig commits: tig-repo-diff-sizes.txt
+# (built with: git rev-list HEAD | head -2000 | while read h;
+#   do printf '%s %s\n' "$(git show "$h" | wc -c)" "$h"; done | sort -rn)
+
+tig 5294f798 giant           -- Update utf8proc to v2.10.0; 4,524,342-byte diff, hunks to near-EOF of two ~17k-line C files; the stall reproducer
+tig 494a4085 many-small      -- Bump copyright year to 2026; 94 files x 1-line change; per-path/per-process overhead
+tig ff8a7c3a medium          -- tools: add tig-syntax-filter daemon; 16 files, 120,740-byte diff, TypeScript+C (also the expensive-grammar case)
+tig 6c8431e2 medium-ts       -- tig-syntax-filter: batch-FIFO sync; TypeScript-heavy medium commit
+tig ce03d41d rename          -- README.adoc -> README.md; rename with edits
+tig d14279ea small-c         -- truecolor: replay pairs on tier change; typical small C commit
+tig 87009cb7 large           -- 883,558-byte diff (9th largest of 2000)
+synth 3eee399 synth-base     -- base: 100k-line TypeScript file (creation diff)
+synth f2cd76d synth-top      -- 1-line edit at line 10 of big.ts
+synth 74d67b9 synth-mid      -- 1-line edit at line 50000 of big.ts
+synth 1e05977 synth-eof      -- 1-line edit at line 99998 of big.ts (the BM1 worst case: tiny hunk, full-file tokenization)
+synth 21ebc31 synth-runs-add -- add minified.js: single lines with ~10/100/500/1000/4000 token alternations
+synth 761f2df synth-runs     -- edit every minified.js line (BM8 runs-per-line case)

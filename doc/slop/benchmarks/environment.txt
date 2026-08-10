@@ -1,0 +1,48 @@
+# Benchmark environment snapshot, 2026-08-10 03:39:58 UTC
+# All benchmarks in BM*/ were collected in this environment unless noted otherwise.
+
+== uname -a
+Linux clank 6.18.43 #1-NixOS SMP PREEMPT_DYNAMIC Thu Aug  6 17:27:09 UTC 2026 x86_64 GNU/Linux
+== cpu
+model name	: 12th Gen Intel(R) Core(TM) i5-12600HX
+16
+governor: powersave
+== mem
+MemTotal:       131574344 kB
+== versions
+v26.7.0
+git version 2.54.0
+hyperfine 1.20.0
+perf version 7.1.7
+== tig binary
+-rwxr-xr-x 1 at at 775664 Aug  7 20:01 src/tig
+tig version 2.6.1-20-gff8a7c3a-dirty
+== filter client
+total 28
+drwxr-xr-x 1 at at    88 Aug  7 20:16 .
+drwxr-xr-x 1 at at   184 Aug  9 13:06 ..
+-rw-r--r-- 1 at at    18 Aug  7 19:55 .gitignore
+-rwxr-xr-x 1 at at   469 Aug  7 20:13 tig-syntax-daemon
+-rwxr-xr-x 1 at at 17672 Aug  7 20:16 tig-syntax-filter
+== repo HEAD
+f404a4e5ac83947c9abaf6aea7899d03861a463b
+== load at start
+ 03:39:58  up  16:54,  2 users,  load average: 10.43, 7.72, 5.96
+
+Bench sockets live in /tmp/tigbench/ (AF_UNIX sun_path length limit rules out the scratchpad path).
+
+== Collection caveats
+- A Triton nix build (-j8) was running during setup; all timing benchmarks
+  started only after it finished (load < 2, 03:53 UTC onward).
+- During collection the runner scripts' `pkill` daemon-kill pattern did not
+  match the launcher's actual argv (bin/../src/daemon.ts), so ~32 stale
+  daemons accumulated, idle, over the session (killed afterwards).  Data
+  validity is unaffected: every runner also unlinks the bench socket, which
+  detaches the old daemon and forces a genuinely fresh spawn — confirmed by
+  observed cold behavior (e.g. sequence.csv first-visit giant = 15227 ms,
+  vs 232 ms revisit; BM6 spawn log shows a distinct pid per sample).  The
+  committed scripts carry the corrected pattern; the leaked daemons were
+  idle (blocked in epoll) and consumed no measurable CPU during runs.
+- BM7/BM8 "on"-mode runs go through the 15 s client frame timeout when a
+  first visit exceeds it (tig receives the raw fallback); BM3 numbers show
+  the daemon-side cost without that client timeout.

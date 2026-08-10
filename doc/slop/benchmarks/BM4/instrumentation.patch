@@ -1,0 +1,331 @@
+Only in /tmp/tigbench/inst/src: bench_stats.ts
+diff -ru tools/tig-syntax-filter/src/daemon.ts /tmp/tigbench/inst/src/daemon.ts
+--- tools/tig-syntax-filter/src/daemon.ts	2026-08-07 20:13:20.120478689 +0000
++++ /tmp/tigbench/inst/src/daemon.ts	2026-08-10 03:50:03.571363283 +0000
+@@ -12,16 +12,22 @@
+  *	"E 0\n" on clean end of stream.
+  * The client keeps unacknowledged input spooled, so a daemon crash at any
+  * point lets it fall back to emitting the raw diff.
++ *
++ * BENCH: this copy logs "CONNSTATS {json}" per connection (counter deltas
++ * from bench_stats + event-loop delay percentiles, BM4/BM10) and runs the
++ * file log sink at debug level.  Logic is otherwise identical.
+  */
+ 
+ import * as net from "node:net";
+ import { unlink, mkdir, chmod } from "node:fs/promises";
+ import { join } from "node:path";
++import { monitorEventLoopDelay } from "node:perf_hooks";
+ import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
+ import { getFileSink } from "@logtape/file";
+ import { section_splitter, type diff_section } from "./diff_parser.ts";
+ import { init_highlighter } from "./highlight.ts";
+ import { process_section } from "./process.ts";
++import { snapshot, diff_since } from "./bench_stats.ts";
+ 
+ const logger = getLogger(["tig-syntax", "daemon"]);
+ 
+@@ -37,6 +43,10 @@
+ 		let closed = false;
+ 		let sections_served = 0;
+ 		const started = performance.now();
++		// BENCH: event-loop delay + counter deltas for this connection.
++		const eld = monitorEventLoopDelay({ resolution: 10 });
++		eld.enable();
++		const stats_base = snapshot();
+ 
+ 		const enqueue_sections = (sections: diff_section[]): void => {
+ 			for (const section of sections) {
+@@ -101,6 +111,20 @@
+ 
+ 		const finish = (): void => {
+ 			closed = true;
++			// BENCH: one summary line per connection, machine-parsable.
++			eld.disable();
++			const mem = process.memoryUsage();
++			logger.info("CONNSTATS {json}", { json: JSON.stringify({
++				cwd, sections: sections_served,
++				ms: Math.round(performance.now() - started),
++				eld_mean_ms: Math.round(eld.mean / 1e4) / 100,
++				eld_p99_ms: Math.round(eld.percentile(99) / 1e4) / 100,
++				eld_max_ms: Math.round(eld.max / 1e4) / 100,
++				rss_mb: Math.round(mem.rss / 1048576),
++				heap_mb: Math.round(mem.heapUsed / 1048576),
++				external_mb: Math.round(mem.external / 1048576),
++				stats: diff_since(stats_base),
++			}) });
+ 			resolve();
+ 		};
+ 		socket.on("close", finish);
+@@ -144,11 +168,11 @@
+ 	await mkdir(log_dir, { recursive: true });
+ 	await configure({
+ 		sinks: {
+-			file: getFileSink(join(log_dir, "daemon.log")),
++			file: getFileSink(join(log_dir, "daemon.log"), { bufferSize: 0 }),
+ 			console: getConsoleSink(),
+ 		},
+ 		loggers: [
+-			{ category: ["tig-syntax"], lowestLevel: "info", sinks: ["file"] },
++			{ category: ["tig-syntax"], lowestLevel: "debug", sinks: ["file"] },
+ 			{ category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console"] },
+ 		],
+ 	});
+diff -ru tools/tig-syntax-filter/src/git.ts /tmp/tigbench/inst/src/git.ts
+--- tools/tig-syntax-filter/src/git.ts	2026-08-07 20:19:31.678665261 +0000
++++ /tmp/tigbench/inst/src/git.ts	2026-08-10 03:46:07.138018011 +0000
+@@ -18,6 +18,8 @@
+ import { A } from "ayy";
+ import { getLogger } from "@logtape/logtape";
+ 
++import { stats } from "./bench_stats.ts";
++
+ const execfile_p = promisify(execFile);
+ const logger = getLogger(["tig-syntax", "git"]);
+ 
+@@ -156,6 +158,7 @@
+ 		return batcher;
+ 	}
+ 	batcher = new blob_batcher(cwd);
++	stats.batcher_spawn++;
+ 	batchers.set(cwd, batcher);
+ 	while (batchers.size > MAX_BATCHERS) {
+ 		const oldest = batchers.keys().next().value as string;
+@@ -170,11 +173,13 @@
+  * git cannot resolve one (bare repository, not a repository).
+  */
+ export async function get_toplevel(cwd: string): Promise<string | null> {
++	stats.toplevel_call++;
+ 	const cached = toplevel_cache.get(cwd);
+ 	if (cached !== undefined) {
+ 		return cached;
+ 	}
+ 	let result: string | null;
++	stats.toplevel_spawn++;
+ 	try {
+ 		const { stdout } = await execfile_p("git", ["-C", cwd, "rev-parse", "--show-toplevel"]);
+ 		result = stdout.trim() || null;
+@@ -193,12 +198,15 @@
+ 	const key = cwd + "\0" + oid;
+ 	const cached = blob_cache.get(key);
+ 	if (cached !== undefined) {
++		stats.blob_cache_hit++;
+ 		blob_cache.delete(key);
+ 		blob_cache.set(key, cached);
+ 		return cached;
+ 	}
++	stats.blob_cache_miss++;
+ 	const blob = await get_batcher(cwd).request(oid);
+ 	if (blob === null) {
++		stats.blob_batch_null++;
+ 		logger.debug("no blob {oid} in {cwd}", { oid, cwd });
+ 		return null;
+ 	}
+@@ -218,6 +226,7 @@
+  * unreadable or exceeding the size limit.
+  */
+ export async function read_worktree_file(cwd: string, path: string): Promise<Buffer | null> {
++	stats.worktree_read++;
+ 	const toplevel = await get_toplevel(cwd);
+ 	if (toplevel === null) {
+ 		return null;
+@@ -239,12 +248,14 @@
+  * content, so such files must not be highlighted from raw sources.
+  */
+ export async function has_textconv(cwd: string, path: string): Promise<boolean> {
++	stats.textconv_call++;
+ 	const key = cwd + "\0" + path;
+ 	const cached = textconv_cache.get(key);
+ 	if (cached !== undefined) {
+ 		return cached;
+ 	}
+ 	let result = false;
++	stats.textconv_spawn++;
+ 	try {
+ 		const { stdout } = await execfile_p("git", ["-C", cwd, "check-attr", "diff", "--", path]);
+ 		// Format: "<path>: diff: <value>"
+diff -ru tools/tig-syntax-filter/src/highlight.ts /tmp/tigbench/inst/src/highlight.ts
+--- tools/tig-syntax-filter/src/highlight.ts	2026-08-09 13:04:08.910529242 +0000
++++ /tmp/tigbench/inst/src/highlight.ts	2026-08-10 03:46:16.532756561 +0000
+@@ -18,6 +18,7 @@
+ import { getLogger } from "@logtape/logtape";
+ 
+ const logger = getLogger(["tig-syntax", "highlight"]);
++import { stats } from "./bench_stats.ts";
+ 
+ /**
+  * Bump when the emission format or an emitted color changes, to invalidate
+@@ -105,6 +106,7 @@
+ 	}
+ 	try {
+ 		await highlighter.loadLanguage(lang as never);
++		stats.lang_load++;
+ 		return true;
+ 	} catch (err) {
+ 		logger.warn("no grammar for {lang}: {err}", { lang, err: String(err) });
+@@ -205,11 +207,21 @@
+ export async function highlight_lines(identity: string, lang: string, content: string,
+ 					last_line: number): Promise<string[] | null> {
+ 	A(highlighter !== null, "highlighter not initialized");
++	// BENCH: BM10 layer 3 — everything but tokenization.
++	if (process.env.TIG_SYNTAX_STUB_TOKENIZE === "1") {
++		return null;
++	}
+ 	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
+ 	const cached = cache_get(key);
+ 	if (cached !== undefined && cached.length >= last_line) {
++		stats.line_cache_hit++;
+ 		return cached;
+ 	}
++	if (cached !== undefined) {
++		stats.line_cache_short++;
++	} else {
++		stats.line_cache_miss++;
++	}
+ 
+ 	const all_lines = content.split("\n");
+ 	if (all_lines.length > MAX_DOC_LINES) {
+@@ -229,6 +241,9 @@
+ 		theme: theme_name as never,
+ 	});
+ 	const elapsed = performance.now() - started;
++	stats.tokenize_call++;
++	stats.tokenize_ms += elapsed;
++	stats.tokenize_line += needed;
+ 	if (elapsed > 200) {
+ 		logger.info("tokenized {lines} lines of {lang} in {ms}ms", {
+ 			lines: needed, lang, ms: Math.round(elapsed),
+diff -ru tools/tig-syntax-filter/src/process.ts /tmp/tigbench/inst/src/process.ts
+--- tools/tig-syntax-filter/src/process.ts	2026-08-07 20:19:51.224718249 +0000
++++ /tmp/tigbench/inst/src/process.ts	2026-08-10 03:47:25.562297090 +0000
+@@ -8,6 +8,10 @@
+  *
+  * Output invariant: stripping injected SGR sequences and unescaping the
+  * literal-ESC marker yields the section's input bytes exactly.
++ *
++ * BENCH: this copy logs one "SECTION {json}" line per file section with a
++ * per-stage timing breakdown (BM4).  Logic is otherwise identical to the
++ * shipped process.ts.
+  */
+ 
+ import { createHash } from "node:crypto";
+@@ -19,6 +23,9 @@
+ 
+ const logger = getLogger(["tig-syntax", "process"]);
+ 
++/** BENCH: per-section stage timings, milliseconds. */
++type bench_timings = Record<string, number>;
++
+ /** Rebuild a section's original bytes, with literal ESC bytes framed. */
+ export function raw_section_output(section: diff_section): Buffer {
+ 	const parts: Buffer[] = [];
+@@ -117,7 +124,14 @@
+  * any correctness precondition fails and the raw bytes must be used.
+  */
+ async function highlight_file_section(cwd: string, section: diff_section,
+-				      info: file_info): Promise<Buffer | null> {
++				      info: file_info, t: bench_timings): Promise<Buffer | null> {
++	let mark = performance.now();
++	const stamp = (key: string): void => {
++		const now = performance.now();
++		t[key] = Math.round((now - mark) * 100) / 100;
++		mark = now;
++	};
++
+ 	if (info.hunks.length === 0) {
+ 		return null;
+ 	}
+@@ -126,12 +140,15 @@
+ 		logger.info("skipping {path}: textconv diff driver", { path: check_path });
+ 		return null;
+ 	}
++	stamp("ms_textconv");
+ 
+ 	// The old side always has a real OID when retrievable at all; the new
+ 	// side falls back to the worktree (all-zero OID for unstaged changes,
+ 	// and computed OIDs whose blobs exist in no object database).
+ 	const old_doc = await load_side(cwd, info.old_path, info.old_oid, false);
++	stamp("ms_load_old");
+ 	const new_doc = await load_side(cwd, info.new_path, info.new_oid, true);
++	stamp("ms_load_new");
+ 	if (old_doc === null && new_doc === null) {
+ 		logger.debug("no sources for {path}", { path: check_path });
+ 		return null;
+@@ -139,8 +156,10 @@
+ 
+ 	const old_sgr = old_doc === null ? null :
+ 		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line);
++	stamp("ms_hl_old");
+ 	const new_sgr = new_doc === null ? null :
+ 		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line);
++	stamp("ms_hl_new");
+ 
+ 	// Validate every hunk body line against the mapped source line before
+ 	// emitting anything; a single mismatch (racing worktree edit, an
+@@ -190,6 +209,7 @@
+ 			sgr_by_line.set(line_index, sgr_lines[doc_line - 1]);
+ 		}
+ 	}
++	stamp("ms_validate");
+ 
+ 	// All lines validated; rebuild the section.
+ 	const parts: Buffer[] = [];
+@@ -208,27 +228,54 @@
+ 			parts.push(Buffer.from("\n"));
+ 		}
+ 	}
+-	return Buffer.concat(parts);
++	const out = Buffer.concat(parts);
++	stamp("ms_emit");
++	return out;
+ }
+ 
+ /** Process one section into its output bytes (highlighted or raw). */
+ export async function process_section(cwd: string, section: diff_section): Promise<Buffer> {
++	const t0 = performance.now();
++	const t: bench_timings = {};
++	let outcome = "non-file";
++	let path: string | null = null;
++	let result: Buffer | null = null;
++
+ 	if (section.kind === "file") {
+ 		try {
+ 			const info = parse_file_section(section);
+ 			if (info !== null) {
+-				const highlighted = await highlight_file_section(cwd, section, info);
++				path = info.new_path ?? info.old_path;
++				const highlighted = await highlight_file_section(cwd, section, info, t);
+ 				if (highlighted !== null) {
+-					return highlighted;
++					outcome = "highlighted";
++					result = highlighted;
++				} else {
++					outcome = "raw-fallback";
+ 				}
+ 			} else {
++				outcome = "unparsed";
+ 				logger.debug("unparsed file section: {first}", {
+ 					first: section.lines[0].bytes.toString("utf8").slice(0, 80),
+ 				});
+ 			}
+ 		} catch (err) {
++			outcome = "error";
+ 			logger.error("section processing failed, passing through: {err}", { err: String(err) });
+ 		}
+ 	}
+-	return raw_section_output(section);
++	if (result === null) {
++		result = raw_section_output(section);
++	}
++	if (section.kind === "file") {
++		logger.info("SECTION {json}", { json: JSON.stringify({
++			path, outcome,
++			bytes: section.byte_length,
++			lines: section.lines.length,
++			out_bytes: result.length,
++			ms_total: Math.round((performance.now() - t0) * 100) / 100,
++			...t,
++		}) });
++	}
++	return result;
+ }

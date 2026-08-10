@@ -1,0 +1,35 @@
+{
+  "results": [
+    {
+      "command": "cd /home/at/code/system/tig && git show d14279ea | /home/at/code/system/tig/tools/tig-syntax-filter/bin/tig-syntax-filter > /dev/null",
+      "mean": 0.40336304666,
+      "stddev": 0.022954113086724078,
+      "median": 0.40740999046,
+      "user": 0.0028604959999999997,
+      "system": 0.0043976399999999995,
+      "min": 0.37865254046,
+      "max": 0.42872199546,
+      "times": [
+        0.40740999046,
+        0.42872199546,
+        0.42134364346,
+        0.38068706346,
+        0.37865254046
+      ],
+      "memory_usage_byte": [
+        6537216,
+        6537216,
+        6537216,
+        6537216,
+        6537216
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

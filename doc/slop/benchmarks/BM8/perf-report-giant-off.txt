@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+# comm: tig
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cpu_atom/cycles/P'
+# Event count (approx.): 524314435
+#
+# Children      Self  Shared Object          Symbol                                    
+# ........  ........  .....................  ..........................................
+#
+    40.17%     0.00%  tig                    [.] _start
+            |
+            ---_start
+               __libc_start_main@@GLIBC_2.34
+               __libc_start_call_main
+               main
+               |          
+               |--33.68%--prompt_input
+               |          |          
+               |          |--33.10%--get_input
+               |          |          |          
+               |          |           --33.02%--update_view
+               |          |                     |          
+               |          |                     |--27.97%--pager_common_read
+               |          |                     |          |          
+               |          |                     |          |--14.23%--add_line_text_at_
+               |          |                     |          |          |          
+               |          |                     |          |          |--11.07%--view_column_info_update
+               |          |                     |          |          |          |          
+               |          |                     |          |          |           --10.77%--utf8_width_of
+               |          |                     |          |          |                     |          
+               |          |                     |          |          |                     |--7.38%--utf8_length
+               |          |                     |          |          |                     |          |          
+               |          |                     |          |          |                     |          |--2.83%--utf8proc_get_property
+               |          |                     |          |          |                     |          |          
+               |          |                     |          |          |                     |           --0.50%--utf8proc_charwidth
+               |          |                     |          |          |                     |          
+               |          |                     |          |          |                     |--2.43%--utf8proc_iterate
+               |          |                     |          |          |                     |          
+               |          |                     |          |          |                      --0.88%--utf8proc_charwidth
+               |          |                     |          |          |          
+               |          |                     |          |           --2.56%--add_line_at
+               |          |                     |          |                     |          
+               |          |                     |          |                     |--1.19%--__libc_calloc2
+               |          |                     |          |                     |          |          
+               |          |                     |          |                     |           --1.12%--_int_malloc
+               |          |                     |          |                     |                     |          
+               |          |                     |          |                     |                      --0.52%--asm_exc_page_fault
+               |          |                     |          |                     |                                exc_page_fault
+               |          |                     |          |                     |                                do_user_addr_fault
+               |          |                     |          |                     |                                |          
+               |          |                     |          |                     |                                 --0.37%--handle_mm_fault
+               |          |                     |          |                     |                                           __handle_mm_fault
+               |          |                     |          |                     |          
+               |          |                     |          |                      --0.94%--chunk_allocator
+               |          |                     |          |                                realloc
+               |          |                     |          |                                |          
+               |          |                     |          |                                 --0.72%--__memmove_avx_unaligned_erms
+               |          |                     |          |                                           asm_exc_page_fault
+               |          |                     |          |                                           |          
+               |          |                     |          |                                            --0.49%--exc_page_fault
+               |          |                     |          |                                                      |          
+               |          |                     |          |                                                       --0.45%--do_user_addr_fault
+               |          |                     |          |                                                                 |          
+               |          |                     |          |                                                                  --0.37%--handle_mm_fault
+               |          |                     |          |                                                                            __handle_mm_fault
+               |          |                     |          |          
+               |          |                     |          |--9.38%--utf8_length
+               |          |                     |          |          |          
+               |          |                     |          |          |--3.46%--utf8proc_get_property
+               |          |                     |          |          |          
+               |          |                     |          |           --0.37%--asm_sysvec_apic_timer_interrupt
+               |          |                     |          |          
+               |          |                     |          |--2.37%--utf8proc_iterate
+               |          |                     |          |          
+               |          |                     |           --1.14%--utf8proc_charwidth
+               |          |                     |          
+               |          |                     |--1.76%--diff_common_read

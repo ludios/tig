@@ -1,0 +1,80 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+# comm: tig
+#
+# Total Lost Samples: 0
+#
+# Samples: 4K of event 'cpu_atom/cycles/P'
+# Event count (approx.): 1506493061
+#
+# Children      Self  Shared Object          Symbol                                   
+# ........  ........  .....................  .........................................
+#
+    74.74%     0.00%  tig                    [.] _start
+            |
+            ---_start
+               __libc_start_main@@GLIBC_2.34
+               __libc_start_call_main
+               |          
+                --74.73%--main
+                          |          
+                          |--72.77%--prompt_input
+                          |          |          
+                          |           --72.58%--get_input
+                          |                     |          
+                          |                      --72.51%--update_view
+                          |                                |          
+                          |                                |--34.73%--diff_common_syntax
+                          |                                |          |          
+                          |                                |          |--18.39%--diff_common_add_line
+                          |                                |          |          |          
+                          |                                |          |          |--8.82%--argv_to_string_alloc
+                          |                                |          |          |          |          
+                          |                                |          |          |           --8.45%--concat_argv
+                          |                                |          |          |                     |          
+                          |                                |          |          |                      --8.04%--string_nformat
+                          |                                |          |          |                                |          
+                          |                                |          |          |                                 --6.93%--__vsnprintf_internal
+                          |                                |          |          |                                           |          
+                          |                                |          |          |                                           |--4.39%--__printf_buffer
+                          |                                |          |          |                                           |          |          
+                          |                                |          |          |                                           |          |--1.22%--__printf_buffer_write
+                          |                                |          |          |                                           |          |          
+                          |                                |          |          |                                           |           --0.59%--__memmove_avx_unaligned_erms
+                          |                                |          |          |                                           |          
+                          |                                |          |          |                                           |--1.06%--__strchrnul_avx2
+                          |                                |          |          |                                           |          
+                          |                                |          |          |                                            --0.77%--__printf_buffer_write
+                          |                                |          |          |          
+                          |                                |          |          |--7.12%--add_line_text_at
+                          |                                |          |          |          |          
+                          |                                |          |          |           --7.07%--add_line_text_at_
+                          |                                |          |          |                     |          
+                          |                                |          |          |                     |--4.90%--view_column_info_update
+                          |                                |          |          |                     |          |          
+                          |                                |          |          |                     |           --4.85%--utf8_width_of
+                          |                                |          |          |                     |                     |          
+                          |                                |          |          |                     |                     |--3.31%--utf8_length
+                          |                                |          |          |                     |                     |          |          
+                          |                                |          |          |                     |                     |           --1.43%--utf8proc_get_property
+                          |                                |          |          |                     |                     |          
+                          |                                |          |          |                     |                     |--1.00%--utf8proc_iterate
+                          |                                |          |          |                     |                     |          
+                          |                                |          |          |                     |                      --0.47%--utf8proc_charwidth
+                          |                                |          |          |                     |          
+                          |                                |          |          |                      --2.07%--add_line_at
+                          |                                |          |          |                                |          
+                          |                                |          |          |                                 --1.84%--__libc_calloc2
+                          |                                |          |          |                                           |          
+                          |                                |          |          |                                            --1.82%--_int_malloc
+                          |                                |          |          |                                                      |          
+                          |                                |          |          |                                                       --1.16%--asm_exc_page_fault
+                          |                                |          |          |                                                                 |          
+                          |                                |          |          |                                                                  --1.05%--exc_page_fault
+                          |                                |          |          |                                                                            |          
+                          |                                |          |          |                                                                             --1.03%--do_user_addr_fault
+                          |                                |          |          |                                                                                       |          
+                          |                                |          |          |                                                                                        --0.90%--handle_mm_fault
+                          |                                |          |          |                                                                                                  |          
+                          |                                |          |          |                                                                                                   --0.85%--__handle_mm_fault
+                          |                                |          |          |                                                                                                             |          

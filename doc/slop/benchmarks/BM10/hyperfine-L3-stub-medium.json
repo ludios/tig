@@ -1,0 +1,35 @@
+{
+  "results": [
+    {
+      "command": "cd /home/at/code/system/tig && git show ff8a7c3a | /home/at/code/system/tig/tools/tig-syntax-filter/bin/tig-syntax-filter > /dev/null",
+      "mean": 0.04255291262,
+      "stddev": 0.004019038763884383,
+      "median": 0.04481427902,
+      "user": 0.00639902,
+      "system": 0.005173379999999999,
+      "min": 0.03687198302,
+      "max": 0.045911734020000004,
+      "times": [
+        0.04481427902,
+        0.03976012702,
+        0.04540644002,
+        0.045911734020000004,
+        0.03687198302
+      ],
+      "memory_usage_byte": [
+        6873088,
+        6873088,
+        6873088,
+        6873088,
+        6873088
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

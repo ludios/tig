@@ -1,0 +1,5 @@
+frame,kind,consumed_bytes,out_bytes,ms_since_connect
+1,O,166,166,8.50
+2,O,447,447,31.17
+3,E,0,0,31.39
+# total_ms=31.52 connect_ms=4.04 frames=3 input_bytes=613
