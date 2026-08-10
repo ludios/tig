@@ -20,6 +20,7 @@
 #include "tig/draw.h"
 #include "tig/display.h"
 #include "tig/watch.h"
+#include "tig/prefetch.h"
 
 #ifdef HAVE_READLINE
 #include <readline/readline.h>
@@ -818,8 +819,12 @@ get_input(int prompt_position, struct key *key)
 			}
 		}
 
-		if (update_views())
+		bool views_loading = update_views();
+
+		if (views_loading)
 			delay = 0;
+		else
+			delay = prefetch_adjust_delay(delay);
 
 		/* Update the cursor position. */
 		if (prompt_position) {
@@ -849,6 +854,10 @@ get_input(int prompt_position, struct key *key)
 		/* wgetch() with nodelay() enabled returns ERR when
 		 * there's no input. */
 		if (key_value == ERR) {
+			/* Note: script mode never reaches here, so prefetch
+			 * stays inert under the test harness. */
+			if (!views_loading)
+				prefetch_idle();
 
 		} else if (key_value == KEY_RESIZE) {
 			int height, width;

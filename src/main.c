@@ -23,6 +23,7 @@
 #include "tig/status.h"
 #include "tig/stage.h"
 #include "tig/main.h"
+#include "tig/prefetch.h"
 #include "tig/diff.h"
 #include "tig/search.h"
 
@@ -670,6 +671,29 @@ main_select(struct view *view, struct line *line)
 	}
 	string_copy_rev(view->env->commit, commit->id);
 	view->env->blob[0] = 0;
+
+	if (line->type == LINE_MAIN_COMMIT || line->type == LINE_MAIN_ANNOTATED) {
+		/* Ask for the two commits after the selection to be prefetched
+		 * once the cursor settles, so navigating onto them hits the
+		 * syntax filter daemon's warm caches. */
+		const char *ids[2];
+		size_t found = 0;
+		size_t pos = line - view->line;
+		size_t i;
+
+		for (i = pos + 1; i < view->lines && found < ARRAY_SIZE(ids); i++) {
+			struct line *next = &view->line[i];
+			struct commit *next_commit = next->data;
+
+			if (next->type != LINE_MAIN_COMMIT &&
+			    next->type != LINE_MAIN_ANNOTATED)
+				continue;
+			if (!*next_commit->id)
+				continue;
+			ids[found++] = next_commit->id;
+		}
+		prefetch_request(ids, found);
+	}
 }
 
 static struct view_ops main_ops = {

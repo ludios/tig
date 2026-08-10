@@ -757,22 +757,32 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
 
 ### D. Prefetch the next commit
 
-- **D0. First measure how much comes free from content-addressed caching.**
-  One commit's new side is often the next one's old side, so once caches
-  are keyed by full OID (C4) and resumable (C5), plain j/k navigation may
-  hit warm state for many sections.  But don't over-assume: the daemon
-  only ever requests OIDs for *changed* paths, so unchanged files generate
-  no requests at all, and consecutive commits touching disjoint paths
-  share nothing.  Measure the overlap of *requested* full OIDs between
-  consecutive diffs (BM4 counters) before building explicit prefetch; D1
-  is only worth its complexity for the residual misses.
-- **D1. tig-driven adjacent-commit prefetch.**  The daemon can't guess the
+- **D0. First measure how much comes free from content-addressed caching.
+  [SKIPPED 2026-08-10, by decision]** — the user's adjacent commits
+  usually touch different files, so natural cross-commit reuse is
+  expected to be low and the measurement wouldn't change the decision;
+  D1 was built directly.
+- **D1. tig-driven adjacent-commit prefetch.
+  [IMPLEMENTED 2026-08-10, two ahead]** — new `src/prefetch.c` +
+  `set diff-prefetch = yes` (documented in tigrc(5), enabled in
+  `contrib/tig-syntax.tigrc`).  `main_select` records the **two commits
+  after** the selection (per the user's navigation pattern; no −1);
+  after the cursor rests 150 ms with no view loading (`get_input` clamps
+  its poll timeout so the debounce can fire; rapid j/k only restarts the
+  clock, and script mode never triggers it, keeping the test harness
+  deterministic), each candidate is spawned as a
+  `git show … | tig-syntax-filter > /dev/null` pipeline in its own
+  process group.  A moved selection SIGKILLs no-longer-wanted pipelines
+  (the daemon's keepalive probe then cancels the abandoned tokenization
+  — the A2/A5 machinery composing), and completed prefetches are
+  memoized per slot so re-selects don't respawn them.  Measured (pty
+  session, daemon log): while the cursor rested, HEAD~1/HEAD~2 were
+  prefetched in the background (~680 ms of cold work each); opening the
+  prefetched commit's diff then served in **115 ms vs 692 ms cold, ~6×**.
+  Original idea text: the daemon can't guess the
   next commit (it only ever sees diff text), so prefetch must come from tig.
-  In the main view, when the selection settles (debounce ~150 ms) and the
-  current diff finished loading, spawn in the background:
-  `git show <next-sha> --patch-with-stat … | tig-syntax-filter >/dev/null`
-  for selection+1 (and −1), mirroring the diff view's argv.  This warms the
-  daemon's blob + line caches, so the subsequent j/k lands on the 3–6 ms
+  This warms the
+  daemon's blob + line caches, so the subsequent j/k lands on the warm
   path.  Gate behind an option (`set diff-prefetch = yes`) and kill the
   prefetch child when the selection moves again.  C work: `src/main.c`
   selection hook + a small background-io helper.  Caveat: killing or
@@ -852,10 +862,9 @@ fake daemon is ready to become the CI regression test for A0.
    485 ms → 55 ms; a never-reading client's accepted input 32 MB → 8.4 MB.
    A3 (workers) not needed for responsiveness; remains a throughput-only
    option.
-6. **D0/D1 prefetch** — first visits cost 0.2–1.1 s on ordinary commits vs
-   10–50 ms revisits; once tokenization is interruptible, prefetching
-   selection±1 makes j/k feel like the revisit numbers.  Measure D0's
-   natural reuse first.
+6. **D1 prefetch — DONE (2026-08-10; D0 skipped by decision)** — two
+   commits ahead of the selection, debounced, cancellable, memoized.
+   Measured ~6× on prefetched navigation (115 ms vs 692 ms cold).
 7. **C5/C5b + C8(b) — checkpoint/resume, visible-lines-only rendering,
    cross-side memoization** — three extensions of the same A1 chunk loop.
    C5's grammar-state checkpoints turn the linear-in-depth cost (89 ms →

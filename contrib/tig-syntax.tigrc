@@ -9,6 +9,10 @@
 set diff-syntax-filter = tig-syntax-filter
 set truecolor = auto
 
+# Warm the daemon's caches for the next two commits while the cursor rests,
+# so j/k navigation renders at revisit speed.
+set diff-prefetch = yes
+
 # Colors from your git config (color.diff.new etc.) would override the
 # row tints below, so keep them out.
 set git-colors = no

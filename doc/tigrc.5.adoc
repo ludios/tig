@@ -311,6 +311,16 @@ The following variables can be set:
 	found the plain diff is shown. Takes precedence over
 	'diff-highlight'; ignored when 'word-diff' is enabled.
 
+'diff-prefetch' (bool)::
+
+	Warm the 'diff-syntax-filter' daemon's caches for the two commits
+	after the main view's selection: once the cursor has been idle
+	briefly, their diffs are piped through the filter in the background
+	(output discarded), so navigating onto them renders with the
+	latency of a revisit. Off by default. Only active when
+	'diff-syntax-filter' is set and 'word-diff' is disabled; moving the
+	selection cancels prefetches that are no longer adjacent.
+
 'truecolor' (enum) [no|auto|palette]::
 
 	How `rgb:RRGGBB` colors are realized. 'auto' (the default) passes
