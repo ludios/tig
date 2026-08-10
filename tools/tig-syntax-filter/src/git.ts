@@ -327,13 +327,17 @@ class blob_batcher {
 const batchers = new Map<string, blob_batcher>();
 
 async function get_batcher(dir: string): Promise<blob_batcher> {
+	// Resolve the probe BEFORE the map check: an await between check and
+	// insert would let concurrent first fetches each spawn a child and
+	// orphan all but the last one.
+	const mode = await batch_command_supported() ? "command" : "batch";
 	let batcher = batchers.get(dir);
 	if (batcher !== undefined && !batcher.broken) {
 		batchers.delete(dir);
 		batchers.set(dir, batcher);
 		return batcher;
 	}
-	batcher = new blob_batcher(dir, await batch_command_supported() ? "command" : "batch");
+	batcher = new blob_batcher(dir, mode);
 	batchers.set(dir, batcher);
 	while (batchers.size > MAX_BATCHERS) {
 		const oldest = batchers.keys().next().value as string;
@@ -474,6 +478,38 @@ class attr_batcher {
 /** Worktree root -> live check-attr child. */
 const attr_batchers = new Map<string, attr_batcher>();
 
+/** Attributes and diff-driver config are editable mid-session, and a
+ * persistent check-attr child never re-reads them (per-call spawning used
+ * to observe changes instantly).  Expire each root's child and cached
+ * verdicts on this interval: at most one respawn per repo per minute, in
+ * exchange for edits taking effect promptly. */
+const ATTR_TTL_MS = 60 * 1000;
+const attr_fresh_since = new Map<string, number>();
+
+function expire_stale_attr_state(root: string): void {
+	const since = attr_fresh_since.get(root);
+	if (since !== undefined && performance.now() - since < ATTR_TTL_MS) {
+		return;
+	}
+	attr_fresh_since.set(root, performance.now());
+	if (since === undefined) {
+		return;
+	}
+	attr_batchers.get(root)?.kill();
+	attr_batchers.delete(root);
+	const prefix = root + "\0";
+	for (const key of [...textconv_cache.keys()]) {
+		if (key.startsWith(prefix)) {
+			textconv_cache.delete(key);
+		}
+	}
+	for (const key of [...driver_cache.keys()]) {
+		if (key.startsWith(prefix)) {
+			driver_cache.delete(key);
+		}
+	}
+}
+
 function get_attr_batcher(root: string): attr_batcher {
 	let batcher = attr_batchers.get(root);
 	if (batcher !== undefined && !batcher.broken) {
@@ -500,6 +536,7 @@ function get_attr_batcher(root: string): attr_batcher {
 export async function has_textconv(cwd: string, path: string): Promise<boolean> {
 	const info = await repo_info(cwd);
 	const root = info?.toplevel ?? cwd;
+	expire_stale_attr_state(root);
 	const key = root + "\0" + path;
 	const cached = textconv_cache.get(key);
 	if (cached !== undefined) {
@@ -546,4 +583,7 @@ export function shed_git_state(): void {
 		batcher.kill();
 	}
 	attr_batchers.clear();
+	textconv_cache.clear();
+	driver_cache.clear();
+	attr_fresh_since.clear();
 }

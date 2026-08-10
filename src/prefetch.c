@@ -199,7 +199,7 @@ prefetch_warmup_filter(void)
 	struct app_external *app;
 	pid_t pid;
 
-	if (!opt_diff_syntax_filter || !*opt_diff_syntax_filter)
+	if (opt_word_diff || !opt_diff_syntax_filter || !*opt_diff_syntax_filter)
 		return;
 	app = app_syntax_filter_load(opt_diff_syntax_filter);
 	if (!*app->argv)

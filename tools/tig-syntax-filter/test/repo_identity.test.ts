@@ -12,7 +12,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configure } from "@logtape/logtape";
-import { repo_info, has_textconv } from "../src/git.ts";
+import { repo_info, has_textconv, shed_git_state } from "../src/git.ts";
 import { ByteLRU } from "../src/lru.ts";
 
 let repo: string;
@@ -75,6 +75,18 @@ describe("has_textconv from a subdirectory", () => {
 		// relative to cwd; the attribute must still be found.
 		expect(await has_textconv(subdir, "sub/dir/keys.secret")).toBe(true);
 		expect(await has_textconv(subdir, "sub/dir/plain.c")).toBe(false);
+	});
+
+	it("observes .gitattributes and config edits after attr state resets", async () => {
+		// Persistent check-attr children and verdict caches must not pin
+		// stale rules forever; shedding is one reset boundary (the 60 s
+		// TTL is the other, not exercised here for test speed).
+		await writeFile(join(repo, ".gitattributes"), "");
+		shed_git_state();
+		expect(await has_textconv(repo, "sub/dir/keys.secret")).toBe(false);
+		await writeFile(join(repo, ".gitattributes"), "*.secret diff=hexdump\n");
+		shed_git_state();
+		expect(await has_textconv(repo, "sub/dir/keys.secret")).toBe(true);
 	});
 });
 
