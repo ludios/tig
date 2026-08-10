@@ -194,9 +194,16 @@ try_connect(const char *path)
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, path);
 	if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
+		if (errno == EAGAIN) {
+			/* Full accept backlog: a daemon exists but is not
+			 * accepting right now.  Distinct from absence, so the
+			 * caller retries without spawning a competitor (whose
+			 * liveness probe could hit the same full backlog and
+			 * steal the live daemon's socket path). */
+			close(fd);
+			return -2;
+		}
 		if (errno != EINPROGRESS) {
-			/* EAGAIN here means a full accept backlog; the caller's
-			 * retry loop handles it like any failed attempt. */
 			close(fd);
 			return -1;
 		}
@@ -301,8 +308,9 @@ connect_daemon(void)
 	if (fd >= 0) {
 		return fd;
 	}
-
-	spawn_daemon();
+	if (fd != -2) {
+		spawn_daemon();
+	}
 	for (attempt = 0; attempt < CONNECT_TRIES; attempt++) {
 		struct timespec wait = { 0, CONNECT_WAIT_MS * 1000000L };
 
@@ -384,6 +392,12 @@ drain_frames(struct buf *inbox, size_t *acked, size_t sent)
 			}
 		}
 		if (out_len > MAX_FRAME_BYTES) {
+			return -1;
+		}
+		/* A frame that consumes no input is not progress (a stream of
+		 * them must not re-arm the deadline) and any payload on it
+		 * would be output corresponding to no input; reject both. */
+		if (consumed == 0) {
 			return -1;
 		}
 		if (consumed > (unsigned long long) (sent - *acked)) {

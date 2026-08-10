@@ -15,6 +15,8 @@
 //                    frame sequence (tests deadline vs. correct-but-late)
 //   ack-overrun      immediately acknowledge more input bytes than were
 //                    ever sent (tests the client's consumed validation)
+//   zero-frames      spam no-op "O 0 0" frames faster than any deadline
+//                    (tests that frames without progress cannot re-arm it)
 // The process prints "listening" once ready and serves exactly one
 // connection; the runner kills it afterwards.
 
@@ -55,6 +57,10 @@ const server = net.createServer({ allowHalfOpen: true }, (sock) => {
 	case "ack-overrun":
 		sock.on("data", () => {});
 		sock.write("O 99999999999 4\nabcd");
+		break;
+	case "zero-frames":
+		sock.on("data", () => {});
+		setInterval(() => sock.write("O 0 0\n"), 200);
 		break;
 	case "midframe-close":
 		sock.on("data", () => {});

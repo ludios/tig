@@ -16,7 +16,7 @@ in_sha=$(sha256sum "$input" | cut -d' ' -f1)
 in_bytes=$(wc -c < "$input")
 
 echo "mode,wall_s,exit_code,timed_out,stdout_bytes,lossless" > "$out"
-for mode in never-read slow-read read-never-reply trickle huge-frame midframe-close late-reply ack-overrun; do
+for mode in never-read slow-read read-never-reply trickle huge-frame midframe-close late-reply ack-overrun zero-frames; do
 	rm -f "$sock"
 	node "$here/fake-daemon.mjs" "$sock" "$mode" > /tmp/tigbench/bm9-daemon.log 2>&1 &
 	daemon_pid=$!
