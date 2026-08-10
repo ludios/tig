@@ -14,6 +14,7 @@
 #define WARN_MISSING_CURSES_CONFIGURATION
 
 #include "tig/tig.h"
+#include "tig/prefetch.h"
 #include "tig/types.h"
 #include "tig/util.h"
 #include "tig/parse.h"
@@ -837,6 +838,10 @@ main(int argc, const char *argv[])
 	die_if_failed(load_repo_info(), "Failed to load repo info.");
 	die_if_failed(load_options(), "Failed to load user config.");
 	die_if_failed(load_git_config(), "Failed to load repo config.");
+
+	/* Warm the diff-syntax-filter daemon while the user is still looking
+	 * at their first view; a diff is rarely more than seconds away. */
+	prefetch_warmup_filter();
 
 	init_tty();
 

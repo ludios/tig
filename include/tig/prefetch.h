@@ -40,5 +40,10 @@ int prefetch_adjust_delay(int delay);
  * loading. */
 void prefetch_idle(void);
 
+/* Start the diff-syntax-filter daemon in the background at tig startup so
+ * the first diff view skips its cold start; a no-op when no filter is
+ * configured. */
+void prefetch_warmup_filter(void);
+
 #endif
 /* vim: set ts=8 sw=8 noexpandtab: */

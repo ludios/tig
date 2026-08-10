@@ -191,6 +191,45 @@ prefetch_spawn(const char *id, struct app_external *app)
 	}
 }
 
+/* Run the filter once with empty, discarded input: it spawns the daemon
+ * (if needed) and exits.  Detached via double fork so no reaping is owed. */
+void
+prefetch_warmup_filter(void)
+{
+	struct app_external *app;
+	pid_t pid;
+
+	if (!opt_diff_syntax_filter || !*opt_diff_syntax_filter)
+		return;
+	app = app_syntax_filter_load(opt_diff_syntax_filter);
+	if (!*app->argv)
+		return;
+
+	pid = fork();
+	if (pid != 0) {
+		if (pid > 0)
+			while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+				;
+		return;
+	}
+	if (fork() != 0)
+		_exit(0);
+	setsid();
+	{
+		int devnull = open("/dev/null", O_RDWR);
+
+		if (devnull >= 0) {
+			dup2(devnull, STDIN_FILENO);
+			dup2(devnull, STDOUT_FILENO);
+			dup2(devnull, STDERR_FILENO);
+			if (devnull > STDERR_FILENO)
+				close(devnull);
+		}
+	}
+	execvp(app->argv[0], (char *const *) app->argv);
+	_exit(127);
+}
+
 void
 prefetch_request(const char *ids[], size_t ids_len)
 {
