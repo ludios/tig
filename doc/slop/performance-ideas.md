@@ -242,8 +242,10 @@ everything else" that A2/A3 must drive to ~zero.
   pathological section starts rendering *raw* within a few hundred ms (p95).
 - Rapid j/j/j navigation cancels stale daemon work promptly (A2/A3), and
   speculative work never increases foreground p95 (D-items).
-- Warm small/medium commits don't regress; stripping the SGR from output
-  stays byte-identical to the input diff (the existing invariant).
+- Warm small/medium commits don't regress; stripping the injected SGR *and*
+  unescaping the literal-ESC marker yields the input bytes exactly (the
+  invariant documented in `process.ts` — plain SGR-stripping alone would
+  eat the `ESC[999m` markers that stand in for literal ESC bytes).
 
 ## Ideas
 
@@ -260,7 +262,10 @@ everything else" that A2/A3 must drive to ~zero.
   raw.  Once reliable, the deadline should drop from 15 s toward hundreds
   of milliseconds for foreground use.  Add the missing protocol bounds
   while in there: max declared frame length, max inbox size, max
-  unacknowledged bytes.  This is the single highest-priority change in
+  unacknowledged bytes — and validate each frame's `consumed` count
+  (overflow-safe `consumed <= sent - acked`) so a buggy or version-skewed
+  daemon can't push `acked` past the spool and make the fallback silently
+  drop input; give BM9 a fault case for exactly that.  This is the single highest-priority change in
   this document — it is a correctness fix that no daemon-side improvement
   can substitute for, and it makes every later budget actually enforceable
   from the client's side.
@@ -347,7 +352,10 @@ everything else" that A2/A3 must drive to ~zero.
   hunk headers-so-far); when a threshold trips, don't keep buffering:
   flush the already-buffered prefix as raw output, switch the splitter into
   a passthrough mode that streams chunks unchanged until the next
-  `diff --git` boundary, then resume normal parsing.  Turns the 4.5 MB
+  `diff --git` boundary, then resume normal parsing.  Passthrough frames
+  must stay *line-aligned*: hold back a trailing partial line until its
+  newline (or EOF) arrives, or the client hands tig a partial line and
+  trips the E4 blocking-read hazard.  Turns the 4.5 MB
   `5294f798` section into a fast raw render with flat memory, instead of a
   silent buffer-up followed by a doomed (or budget-aborted) highlight
   attempt.  Also cache the negative decision keyed by content identity +
@@ -518,16 +526,22 @@ everything else" that A2/A3 must drive to ~zero.
   index instead; validation building a per-line body string and `Map` per
   hunk line; per-line `Buffer.from("\n")` allocations and one giant
   `Buffer.concat` per section in emission; quadratic carry growth in
-  `diff_parser.ts` when a huge section never yields a boundary (each `feed`
-  re-concats the whole carry — same fix as A8's passthrough mode);
+  `diff_parser.ts` when a single *line* spans many chunks with no newline
+  (complete lines are consumed per `feed`, so only an unterminated line —
+  e.g. a giant minified one — accumulates and gets re-concatenated per
+  chunk; cap the carry size);
   `pending.shift()` and `Buffer.subarray` retaining large backing buffers
   in `blob_batcher`; the client never compacting its acknowledged spool
   prefix (the 64 MB cap counts total bytes, not unacknowledged bytes).
 - **C10. Negative cache + in-flight coalescing.**  Cache the *decisions*,
-  not just the data: oversize / budget-exceeded / invalid-UTF-8 / textconv /
-  no-grammar verdicts keyed by content identity (+ budget version), so
-  reopening a pathological or unhighlightable file doesn't rediscover the
-  failure.  And keep promise maps for in-flight blob fetches, language
+  not just the data, so reopening a pathological or unhighlightable file
+  doesn't rediscover the failure — but key each verdict by what it actually
+  depends on: invalid-UTF-8/binary is content-global (identity alone);
+  budget-exceeded depends on the *requested prefix* too (a hunk near EOF
+  blowing the budget must not suppress a later cheap hunk near the top of
+  the same file — key by identity + last-line bucket + budget version);
+  no-grammar depends on language + grammar version; textconv on repo +
+  path + config, as already cached.  And keep promise maps for in-flight blob fetches, language
   loads, and document tokenizations so two views (or two tig instances)
   requesting the same thing share one computation instead of both missing
   the cache.  Minor cousin: `ensure_lang` calls
@@ -538,8 +552,13 @@ everything else" that A2/A3 must drive to ~zero.
   memoize `(color, fontStyle) → sequence` (a handful of distinct values per
   theme).  Then benchmark *differential* emission — emit only what changed
   (using 22/23/24 attribute resets) instead of a full reset + set per run.
-  Fewer output bytes means less socket traffic, less C-side SGR parsing,
-  and fewer tig cells; weigh against decoder complexity on the tig side.
+  This shortens each escape and its C-side parse but does *not* reduce the
+  number of escapes or tig cells: the emitter already writes one sequence
+  per style change, and tig makes one cell per inter-escape span.  Cell
+  count only drops via run *coalescing* (merging adjacent runs whose
+  rendered style is identical, e.g. colors that quantize to the same
+  terminal color — which only tig's side of the pipeline can know).  Weigh
+  both against decoder complexity.
 - **C12. `cat-file --batch-command` preflight.**  Switch the batcher to
   `--batch-command` and issue `info` before `contents`: oversized blobs get
   rejected from the size in the info reply *without* transferring or —
@@ -550,12 +569,14 @@ everything else" that A2/A3 must drive to ~zero.
 ### D. Prefetch the next commit
 
 - **D0. First measure how much comes free from content-addressed caching.**
-  Adjacent commits share most blobs: one commit's new side is often the
-  next one's old side, and unchanged files keep identical OIDs.  Once
-  caches are keyed by full OID (C4) and resumable (C5), plain j/k
-  navigation may already hit warm state for most sections — measure that
-  reuse rate (BM4 counters) before building explicit prefetch; D1 is only
-  worth its complexity for the residual misses.
+  One commit's new side is often the next one's old side, so once caches
+  are keyed by full OID (C4) and resumable (C5), plain j/k navigation may
+  hit warm state for many sections.  But don't over-assume: the daemon
+  only ever requests OIDs for *changed* paths, so unchanged files generate
+  no requests at all, and consecutive commits touching disjoint paths
+  share nothing.  Measure the overlap of *requested* full OIDs between
+  consecutive diffs (BM4 counters) before building explicit prefetch; D1
+  is only worth its complexity for the residual misses.
 - **D1. tig-driven adjacent-commit prefetch.**  The daemon can't guess the
   next commit (it only ever sees diff text), so prefetch must come from tig.
   In the main view, when the selection settles (debounce ~150 ms) and the
