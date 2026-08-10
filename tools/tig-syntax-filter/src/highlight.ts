@@ -291,10 +291,18 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	// The union-typed method needs a cast to its element overload.
 	const get_state = highlighter.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
 	let state: unknown;
+	// Store-time length comparisons re-read the cache: after yields, a
+	// concurrent call for the same identity may have cached a longer
+	// prefix than the snapshot taken at entry, and it must survive.
+	const keep_if_longer = (lines: string[]): void => {
+		const current = line_cache.get(key);
+		if (current === undefined || lines.length > current.length) {
+			line_cache.set(key, lines);
+		}
+	};
 	const keep_partial = (): void => {
-		if (token_lines.length > 0 &&
-		    (cached === undefined || token_lines.length > cached.length)) {
-			line_cache.set(key, emit_sgr_lines(token_lines));
+		if (token_lines.length > 0) {
+			keep_if_longer(emit_sgr_lines(token_lines));
 		}
 	};
 	for (let start = 0; start < needed; start += CHUNK_LINES) {
@@ -333,6 +341,6 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	}
 
 	const result = emit_sgr_lines(token_lines);
-	line_cache.set(key, result);
+	keep_if_longer(result);
 	return result;
 }

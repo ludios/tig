@@ -17,6 +17,9 @@
 //                    ever sent (tests the client's consumed validation)
 //   zero-frames      spam no-op "O 0 0" frames faster than any deadline
 //                    (tests that frames without progress cannot re-arm it)
+//   keepalives       send "P 0" keepalives while slowly echoing the input
+//                    back correctly (tests that the client ignores P
+//                    frames without acking or treating them as progress)
 // The process prints "listening" once ready and serves exactly one
 // connection; the runner kills it afterwards.
 
@@ -61,6 +64,21 @@ const server = net.createServer({ allowHalfOpen: true }, (sock) => {
 	case "zero-frames":
 		sock.on("data", () => {});
 		setInterval(() => sock.write("O 0 0\n"), 200);
+		break;
+	case "keepalives":
+		sock.on("data", (c) => input.push(c));
+		setInterval(() => sock.write("P 0\n"), 100);
+		sock.on("end", () => {
+			setTimeout(() => {
+				const all = Buffer.concat(input);
+				const nl = all.indexOf(0x0a);
+				const cwd_len = parseInt(all.subarray(8, nl).toString(), 10);
+				const body = all.subarray(nl + 1 + cwd_len);
+				sock.write(`O ${body.length} ${body.length}\n`);
+				sock.write(body);
+				sock.end("E 0\n");
+			}, 2000);
+		});
 		break;
 	case "midframe-close":
 		sock.on("data", () => {});

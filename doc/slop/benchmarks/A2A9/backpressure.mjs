@@ -54,9 +54,12 @@ function pump() {
 }
 
 function daemon_rss_mb() {
+	// Resolve the daemon actually listening on OUR socket (pgrep by name
+	// could sample an unrelated interactive daemon from the same checkout).
 	try {
-		const pid = execFileSync("pgrep", ["-f", "bin/[.][.]/src/daemon[.]ts"],
-			{ encoding: "utf8" }).trim().split("\n")[0];
+		const ss = execFileSync("ss", ["-xlp"], { encoding: "utf8" })
+			.split("\n").find((line) => line.includes(socket_path));
+		const pid = /pid=(\d+)/.exec(ss)[1];
 		const status = readFileSync(`/proc/${pid}/status`, "utf8");
 		return Math.round(parseInt(/VmRSS:\s+(\d+)/.exec(status)[1], 10) / 1024);
 	} catch {

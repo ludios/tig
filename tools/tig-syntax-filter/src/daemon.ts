@@ -124,11 +124,28 @@ function handle_connection(socket: net.Socket): Promise<void> {
 			enqueue_sections(splitter.feed(chunk));
 		});
 
+		let heartbeat: ReturnType<typeof setInterval> | null = null;
+		const stop_heartbeat = (): void => {
+			if (heartbeat !== null) {
+				clearInterval(heartbeat);
+				heartbeat = null;
+			}
+		};
+
 		socket.on("end", () => {
 			if (cwd !== null) {
 				enqueue_sections(splitter.finish());
 			}
+			// The client half-closes after sending its diff, so from here
+			// on a kill leaves the connection indistinguishable from a
+			// patient client — until a write fails.  Probe with keepalive
+			// frames (harmless to a live client, EPIPE from a dead one)
+			// so abandoned tokenization gets cancelled between chunks.
+			heartbeat = setInterval(() => {
+				socket.write("P 0\n");
+			}, 500);
 			queue = queue.then(() => {
+				stop_heartbeat();
 				if (!closed) {
 					socket.end("E 0\n");
 					logger.info("served {sections} sections for {cwd} in {ms}ms", {
@@ -140,6 +157,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		});
 
 		const finish = (): void => {
+			stop_heartbeat();
 			closed = true;
 			resolve();
 		};

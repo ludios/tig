@@ -456,10 +456,15 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   sections" variant would receive `O` frames for input already emitted raw
   and duplicate it in tig — that variant needs explicit frame-discard
   semantics in the protocol, it is not a small tweak.)
-- **A5. Heartbeat / progress frames.**  Add a `P` keepalive frame the daemon
-  emits between line batches (needs A2) so the client can distinguish
-  slow-but-alive from dead and apply a *total* budget (e.g. "if the whole
-  diff isn't done in 10 s, go raw for the rest") instead of a per-frame one.
+- **A5. Heartbeat / progress frames. [PARTIALLY DONE 2026-08-10]**  The
+  `P` keepalive frame now exists: the daemon probes half-closed
+  connections with it every 500 ms (so a killed client EPIPEs the probe
+  and cancels its abandoned tokenization — implemented as part of the
+  A2/A9 follow-up), and the client accepts and ignores it without acking
+  or re-arming its deadline.  Still open: emitting keepalives between
+  line batches generally and using them client-side for a *total* budget
+  (e.g. "if the whole diff isn't done in 10 s, go raw for the rest")
+  instead of a per-frame one.
   Important: a heartbeat must **not** carry/advance the consumed-input count
   — `acked` may only advance when the corresponding output bytes have
   actually been emitted, otherwise a later fallback would skip those input

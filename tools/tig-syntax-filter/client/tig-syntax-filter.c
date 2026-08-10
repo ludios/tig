@@ -387,6 +387,15 @@ drain_frames(struct buf *inbox, size_t *acked, size_t sent)
 			} else if (sscanf(header, "%c %llu", &kind, &consumed) == 2
 				   && kind == 'E') {
 				return 1;
+			} else if (sscanf(header, "%c %llu", &kind, &consumed) == 2
+				   && kind == 'P') {
+				/* Keepalive: the daemon probes whether we are still
+				 * here.  No payload, acknowledges nothing, and is
+				 * NOT progress — it must never re-arm the deadline. */
+				memmove(inbox->data, inbox->data + header_len,
+					inbox->len - header_len);
+				inbox->len -= header_len;
+				continue;
 			} else {
 				return -1;
 			}
