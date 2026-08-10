@@ -2,10 +2,12 @@
 
 Model-output: Claude Fable 5
 
-Status: 2026-08-10 — ideas collected AND all gating benchmarks (BM1–BM10)
-run; raw data in `benchmarks/`, findings in "Measured results" below, and
-the implementation order at the end is now data-ranked.  No optimization
-itself is implemented yet; each idea names the code it would touch.
+Status: 2026-08-10 — ideas collected, all gating benchmarks (BM1–BM10)
+run (raw data in `benchmarks/`, findings in "Measured results" below, the
+implementation order at the end is data-ranked), and **A0 is implemented**
+(nonblocking client with an absolute frame deadline; BM9 now shows every
+fault mode ending in a lossless raw fallback within the deadline).  The
+other ideas are not yet implemented; each names the code it would touch.
 
 Incorporates the strongest findings from the independent review in
 `raw-proposals/alt-performance-ideas.md` (notably the empirically-reproduced
@@ -72,16 +74,14 @@ tokenized.  It is also the *last* section of the diff, which triggers cause
    file starves every later (possibly tiny) section in the same commit.
    And because tokenization blocks the event loop, one pathological
    *connection* starves every other tig instance sharing the daemon.
-4. **The client's 15 s timeout is not actually a hard timeout.**  The
-   `FRAME_TIMEOUT_MS` poll only covers *waiting for frames*; the client's
-   writes to the daemon go through blocking `write_all()`
-   (`client/tig-syntax-filter.c`, the daemon write in the poll loop).  When
-   the daemon's event loop is busy tokenizing it stops reading its socket;
-   once the kernel socket buffer fills, the client blocks *inside
-   `write()`* and never reaches its timeout.  The alt-review reproduced
-   this: against a same-UID fake daemon that accepts but never reads, the
-   client was still blocked after 18 s.  This is a correctness-level
-   responsiveness bug, not a tuning problem.
+4. **[FIXED by A0] The client's 15 s timeout was not actually a hard
+   timeout.**  The `FRAME_TIMEOUT_MS` poll only covered *waiting for
+   frames*; writes to the daemon went through blocking `write_all()`, so a
+   daemon wedged in tokenization stopped reading, the socket buffer
+   filled, and the client blocked *inside `write()`* forever (BM9
+   reproduced it: >60 s with zero output).  A0's rewrite makes the socket
+   nonblocking with an absolute deadline; BM9 now measures a lossless raw
+   fallback at the deadline for every stall mode.
 5. **Even when the timeout does fire, fallback is all-or-nothing**: blank
    diff pane for 15 s, then the whole raw diff dumps in.  And if each
    section completes in under 15 s, the timeout never fires and a 50-file
@@ -358,7 +358,15 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
 
 ### A. Kill the giant-commit hang (highest priority)
 
-- **A0. Nonblocking client socket with an absolute deadline.**  Fixes hang
+- **A0. Nonblocking client socket with an absolute deadline.
+  [IMPLEMENTED 2026-08-10]** — `client/tig-syntax-filter.c` rewritten as
+  described below; the deadline is `TIG_SYNTAX_DEADLINE_MS` (default
+  15000).  BM9 after: never-read / slow-read / trickle fall back
+  losslessly at 15.03–15.05 s (previously blocked past 60 s with zero
+  output); oversized-frame and ack-overrun protocol faults fall back in
+  0.03 s; happy-path output is byte-identical (verified on five corpus
+  commits incl. the giant) and `test/diff/diff-syntax-test` passes.
+  Original idea text: fixes hang
   cause 4, the verified write-stall.  Set the daemon socket `O_NONBLOCK` and
   drive *both* directions through the existing `poll()` loop: request
   `POLLOUT` while spool bytes remain unsent (tracking an offset instead of
@@ -748,10 +756,10 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
 The benchmarks (step 1 of the original order) are done; BM9's never-reads
 fake daemon is ready to become the CI regression test for A0.
 
-1. **A0** — nonblocking client writes with an absolute, non-restarting
-   deadline.  BM9 proved both the indefinite write-stall and that a
-   trickling daemon defeats any per-frame timeout.  This is the hang's
-   correctness half.
+1. **A0 — DONE (2026-08-10)** — nonblocking client writes with an
+   absolute, non-restarting deadline; see the A0 entry for the measured
+   before/after.  The daemon can no longer block tig, only delay
+   highlighting until the deadline lands the raw fallback.
 2. **A1 + A6 + A8** — the per-section time budget (default ~300–500 ms ≈
    1–6k prefix lines at the measured 75–440 µs/line), cheap preflight
    limits, and streaming raw passthrough for oversized sections.  With A0

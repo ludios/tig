@@ -10,8 +10,20 @@
  * stays spooled, so if the daemon is missing, dies, or stalls, the client
  * emits the raw diff from the spool instead — tig always gets output.
  *
- * Daemon protocol: see src/daemon.ts.  In fallback output, literal ESC
- * bytes are framed as ESC[999m so tig's SGR decoder restores them.
+ * The daemon socket is nonblocking and both directions are driven through
+ * one poll() loop, under an ABSOLUTE deadline: whenever input bytes are
+ * outstanding (sent or ready to send, but not yet acknowledged by a
+ * complete frame), the daemon has FRAME_DEADLINE_MS to complete a frame.
+ * Only a completed frame re-arms the deadline — partial writes, partial
+ * reads, or a daemon trickling bytes do not.  A wedged daemon therefore
+ * can never block tig: neither in write() (the socket buffer filling up
+ * no longer matters) nor by dribbling just enough traffic to look alive.
+ *
+ * Daemon protocol: see src/daemon.ts.  Frames are validated: a declared
+ * payload above MAX_FRAME_BYTES or an acknowledgment for more bytes than
+ * are actually outstanding is a protocol error and triggers fallback.
+ * In fallback output, literal ESC bytes are framed as ESC[999m so tig's
+ * SGR decoder restores them.
  *
  * Exit status is always 0: tig renders whatever arrives on the pipe.
  */
@@ -35,7 +47,13 @@
 #define SPOOL_MAX	(64u * 1024 * 1024)
 #define CONNECT_TRIES	60
 #define CONNECT_WAIT_MS	50
-#define FRAME_TIMEOUT_MS 15000
+/* Bounded wait for an in-progress nonblocking connect (rare on AF_UNIX;
+ * happens when the daemon's accept backlog is full). */
+#define CONNECT_POLL_MS	500
+/* Default frame deadline; overridable via TIG_SYNTAX_DEADLINE_MS. */
+#define FRAME_DEADLINE_MS 15000
+/* Sanity bound on a frame's declared payload size. */
+#define MAX_FRAME_BYTES	(1ull << 30)
 
 /* Growable byte buffer for spooled input and daemon output parsing. */
 struct buf {
@@ -66,7 +84,35 @@ buf_append(struct buf *buf, const unsigned char *data, size_t len)
 	return true;
 }
 
-/* Write all of data to fd, retrying on short writes and EINTR. */
+/* Milliseconds on the monotonic clock. */
+static long long
+now_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* The configured frame deadline in ms ($TIG_SYNTAX_DEADLINE_MS or default). */
+static long long
+frame_deadline_ms(void)
+{
+	const char *env = getenv("TIG_SYNTAX_DEADLINE_MS");
+
+	if (env != NULL && *env != '\0') {
+		char *end = NULL;
+		long val = strtol(env, &end, 10);
+
+		if (end != NULL && *end == '\0' && val >= 100 && val <= 600000) {
+			return val;
+		}
+	}
+	return FRAME_DEADLINE_MS;
+}
+
+/* Write all of data to fd, retrying on short writes and EINTR.  Only for
+ * stdout, which may legitimately block until tig reads. */
 static bool
 write_all(int fd, const unsigned char *data, size_t len)
 {
@@ -140,12 +186,30 @@ try_connect(const char *path)
 	if (fd < 0) {
 		return -1;
 	}
+	if (fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
+		close(fd);
+		return -1;
+	}
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, path);
 	if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
-		close(fd);
-		return -1;
+		if (errno != EINPROGRESS) {
+			/* EAGAIN here means a full accept backlog; the caller's
+			 * retry loop handles it like any failed attempt. */
+			close(fd);
+			return -1;
+		}
+		struct pollfd pfd = { fd, POLLOUT, 0 };
+		int err = 0;
+		socklen_t err_len = sizeof(err);
+
+		if (poll(&pfd, 1, CONNECT_POLL_MS) <= 0 ||
+		    getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0 ||
+		    err != 0) {
+			close(fd);
+			return -1;
+		}
 	}
 #ifdef SO_PEERCRED
 	/* The socket path can be predictable (/tmp fallback); never hand the
@@ -278,12 +342,16 @@ fallback_passthrough(struct buf *spool, size_t acked, bool stdin_open)
 
 /*
  * Parse and emit complete daemon frames from `inbox`.  Advances *acked by
- * each frame's consumed-input count and compacts the inbox.  Returns 1 on
- * clean end frame, 0 to continue, -1 on protocol error.
+ * each frame's consumed-input count and compacts the inbox.  A frame may
+ * only acknowledge bytes that were actually sent and are still
+ * unacknowledged.  Returns 1 on clean end frame, 0 to continue, -1 on
+ * protocol error.
  */
 static int
-drain_frames(struct buf *inbox, size_t *acked)
+drain_frames(struct buf *inbox, size_t *acked, size_t sent)
 {
+	int progressed = 0;
+
 	while (true) {
 		unsigned char *newline = memchr(inbox->data, '\n', inbox->len);
 		size_t header_len;
@@ -294,7 +362,7 @@ drain_frames(struct buf *inbox, size_t *acked)
 			if (inbox->len > 128) {
 				return -1;
 			}
-			return 0;
+			return progressed;
 		}
 		header_len = (size_t) (newline - inbox->data) + 1;
 		{
@@ -315,13 +383,20 @@ drain_frames(struct buf *inbox, size_t *acked)
 				return -1;
 			}
 		}
+		if (out_len > MAX_FRAME_BYTES) {
+			return -1;
+		}
+		if (consumed > (unsigned long long) (sent - *acked)) {
+			return -1;
+		}
 		if (inbox->len - header_len < out_len) {
-			return 0;
+			return progressed;
 		}
 		if (!write_all(STDOUT_FILENO, inbox->data + header_len, out_len)) {
 			return -1;
 		}
 		*acked += consumed;
+		progressed = 2;
 		{
 			size_t total = header_len + out_len;
 
@@ -336,9 +411,15 @@ main(void)
 {
 	struct buf spool = { NULL, 0, 0 };
 	struct buf inbox = { NULL, 0, 0 };
-	size_t acked = 0;
-	size_t sent = 0;
+	size_t acked = 0;		/* spool bytes emitted via daemon frames */
+	size_t sent = 0;		/* spool bytes written to the daemon */
 	bool stdin_open = true;
+	bool wr_shutdown = false;
+	char header[PATH_MAX + 32];
+	size_t header_len;
+	size_t header_sent = 0;
+	long long deadline = 0;		/* 0 = disarmed */
+	const long long deadline_ms = frame_deadline_ms();
 	int daemon_fd;
 
 	signal(SIGPIPE, SIG_IGN);
@@ -350,26 +431,22 @@ main(void)
 
 	{
 		char cwd[PATH_MAX];
-		char header[PATH_MAX + 32];
-		int header_len;
 
 		if (getcwd(cwd, sizeof(cwd)) == NULL) {
 			strcpy(cwd, "/");
 		}
-		header_len = snprintf(header, sizeof(header), "TIGSYN1 %zu\n%s",
-				      strlen(cwd), cwd);
-		if (!write_all(daemon_fd, (unsigned char *) header, (size_t) header_len)) {
-			close(daemon_fd);
-			return fallback_passthrough(&spool, 0, true);
-		}
+		header_len = (size_t) snprintf(header, sizeof(header), "TIGSYN1 %zu\n%s",
+					       strlen(cwd), cwd);
 	}
 
 	while (true) {
 		struct pollfd fds[2];
 		int nfds = 0;
-		int stdin_slot = -1, daemon_slot = -1;
+		int stdin_slot = -1, daemon_slot;
+		bool want_write = header_sent < header_len || sent < spool.len;
+		int timeout = -1;
 
-		if (stdin_open && sent == spool.len) {
+		if (stdin_open) {
 			stdin_slot = nfds;
 			fds[nfds].fd = STDIN_FILENO;
 			fds[nfds].events = POLLIN;
@@ -377,23 +454,112 @@ main(void)
 		}
 		daemon_slot = nfds;
 		fds[nfds].fd = daemon_fd;
-		fds[nfds].events = POLLIN;
+		fds[nfds].events = POLLIN | (want_write ? POLLOUT : 0);
 		nfds++;
 
-		int ready = poll(fds, (nfds_t) nfds, FRAME_TIMEOUT_MS);
+		if (deadline != 0) {
+			long long remain = deadline - now_ms();
 
-		if (ready < 0 && errno == EINTR) {
-			continue;
+			if (remain < 0) {
+				remain = 0;
+			}
+			timeout = remain > INT_MAX ? INT_MAX : (int) remain;
 		}
-		if (ready == 0) {
-			/* The daemon stalled with work outstanding. */
-			if (acked < spool.len || stdin_open) {
+
+		int ready = poll(fds, (nfds_t) nfds, timeout);
+
+		if (ready < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			close(daemon_fd);
+			return fallback_passthrough(&spool, acked, stdin_open);
+		}
+
+		if (fds[daemon_slot].revents & (POLLIN | POLLHUP | POLLERR)) {
+			unsigned char chunk[65536];
+			ssize_t got = read(daemon_fd, chunk, sizeof(chunk));
+
+			if (got < 0 && (errno == EINTR || errno == EAGAIN ||
+					errno == EWOULDBLOCK)) {
+				/* nothing readable after all */
+			} else if (got <= 0) {
+				close(daemon_fd);
+				return fallback_passthrough(&spool, acked, stdin_open);
+			} else {
+				if (!buf_append(&inbox, chunk, (size_t) got)) {
+					close(daemon_fd);
+					return fallback_passthrough(&spool, acked, stdin_open);
+				}
+				int state = drain_frames(&inbox, &acked, sent);
+
+				if (state == 1) {
+					return 0;
+				}
+				if (state == -1) {
+					close(daemon_fd);
+					return fallback_passthrough(&spool, acked, stdin_open);
+				}
+				if (state == 2) {
+					/* A complete frame is progress: re-arm.
+					 * With everything acknowledged and stdin
+					 * still open there is no outstanding work
+					 * (a slow git must not trip the deadline),
+					 * so disarm until more input arrives. */
+					if (acked == spool.len && stdin_open) {
+						deadline = 0;
+					} else {
+						deadline = now_ms() + deadline_ms;
+					}
+				}
+			}
+		}
+
+		if (fds[daemon_slot].revents & POLLOUT) {
+			bool write_failed = false;
+
+			while (header_sent < header_len) {
+				ssize_t n = write(daemon_fd, header + header_sent,
+						  header_len - header_sent);
+
+				if (n < 0) {
+					if (errno == EINTR) {
+						continue;
+					}
+					if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						break;
+					}
+					write_failed = true;
+					break;
+				}
+				header_sent += (size_t) n;
+			}
+			while (!write_failed && header_sent == header_len &&
+			       sent < spool.len) {
+				ssize_t n = write(daemon_fd, spool.data + sent,
+						  spool.len - sent);
+
+				if (n < 0) {
+					if (errno == EINTR) {
+						continue;
+					}
+					if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						break;
+					}
+					write_failed = true;
+					break;
+				}
+				sent += (size_t) n;
+			}
+			if (write_failed) {
 				close(daemon_fd);
 				return fallback_passthrough(&spool, acked, stdin_open);
 			}
-			/* Everything is emitted and only the end frame is
-			 * missing; there is nothing left to recover. */
-			return 0;
+			if (!stdin_open && !wr_shutdown &&
+			    header_sent == header_len && sent == spool.len) {
+				shutdown(daemon_fd, SHUT_WR);
+				wr_shutdown = true;
+			}
 		}
 
 		if (stdin_slot >= 0 && (fds[stdin_slot].revents & (POLLIN | POLLHUP))) {
@@ -405,7 +571,15 @@ main(void)
 			}
 			if (got == 0) {
 				stdin_open = false;
-				shutdown(daemon_fd, SHUT_WR);
+				if (header_sent == header_len && sent == spool.len &&
+				    !wr_shutdown) {
+					shutdown(daemon_fd, SHUT_WR);
+					wr_shutdown = true;
+				}
+				/* Still owed acknowledgments and the end frame. */
+				if (deadline == 0) {
+					deadline = now_ms() + deadline_ms;
+				}
 			} else if (got > 0) {
 				if (!buf_append(&spool, chunk, (size_t) got)) {
 					/* The chunk is already consumed from
@@ -422,37 +596,21 @@ main(void)
 					close(daemon_fd);
 					return fallback_passthrough(&spool, acked, stdin_open);
 				}
-				if (!write_all(daemon_fd, chunk, (size_t) got)) {
-					return fallback_passthrough(&spool, acked, stdin_open);
+				if (deadline == 0) {
+					deadline = now_ms() + deadline_ms;
 				}
-				sent = spool.len;
 			}
 		}
 
-		if (fds[daemon_slot].revents & (POLLIN | POLLHUP | POLLERR)) {
-			unsigned char chunk[65536];
-			ssize_t got = read(daemon_fd, chunk, sizeof(chunk));
-
-			if (got < 0 && errno == EINTR) {
-				continue;
-			}
-			if (got <= 0) {
-				close(daemon_fd);
+		if (deadline != 0 && now_ms() >= deadline) {
+			/* The daemon failed to complete a frame in time. */
+			close(daemon_fd);
+			if (acked < spool.len || stdin_open) {
 				return fallback_passthrough(&spool, acked, stdin_open);
 			}
-			if (!buf_append(&inbox, chunk, (size_t) got)) {
-				close(daemon_fd);
-				return fallback_passthrough(&spool, acked, stdin_open);
-			}
-			int state = drain_frames(&inbox, &acked);
-
-			if (state == 1) {
-				return 0;
-			}
-			if (state == -1) {
-				close(daemon_fd);
-				return fallback_passthrough(&spool, acked, stdin_open);
-			}
+			/* Everything is emitted and only the end frame is
+			 * missing; there is nothing left to recover. */
+			return 0;
 		}
 	}
 }

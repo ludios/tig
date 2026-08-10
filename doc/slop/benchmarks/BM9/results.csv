@@ -1,9 +1,10 @@
 mode,wall_s,exit_code,timed_out,stdout_bytes,lossless
-never-read,60.01,124,yes,0,no
-slow-read,60.01,124,yes,0,no
-read-never-reply,15.06,0,no,4524342,yes
-trickle,60.02,124,yes,0,no
-huge-frame,15.05,0,no,4524342,yes
-midframe-close,0.13,0,no,4524342,yes
-late-reply,15.05,0,no,4524342,yes
+never-read,15.03,0,no,4524342,yes
+slow-read,15.05,0,no,4524342,yes
+read-never-reply,15.04,0,no,4524342,yes
+trickle,15.03,0,no,4524342,yes
+huge-frame,0.03,0,no,4524342,yes
+midframe-close,0.14,0,no,4524342,yes
+late-reply,15.04,0,no,4524342,yes
+ack-overrun,0.03,0,no,4524342,yes
 # input_bytes=4524342 input_sha256=abfc89cf5ea15d971d33ac92c212d029d524b63f25bf6b85a99e4722d98ca8c1

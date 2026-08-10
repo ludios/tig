@@ -13,6 +13,8 @@
 //   midframe-close   send an O header + half its payload, then close
 //   late-reply       after 20 s, echo the whole input back as one valid
 //                    frame sequence (tests deadline vs. correct-but-late)
+//   ack-overrun      immediately acknowledge more input bytes than were
+//                    ever sent (tests the client's consumed validation)
 // The process prints "listening" once ready and serves exactly one
 // connection; the runner kills it afterwards.
 
@@ -49,6 +51,10 @@ const server = net.createServer({ allowHalfOpen: true }, (sock) => {
 	case "huge-frame":
 		sock.on("data", () => {});
 		sock.write("O 10 100000000000\n");
+		break;
+	case "ack-overrun":
+		sock.on("data", () => {});
+		sock.write("O 99999999999 4\nabcd");
 		break;
 	case "midframe-close":
 		sock.on("data", () => {});

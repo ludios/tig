@@ -40,6 +40,11 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
 - `TIG_SYNTAX_SOCKET` — socket path (default
   `$XDG_RUNTIME_DIR/tig-syntax.sock`).
 - `TIG_SYNTAX_DAEMON` — daemon launcher the client should spawn.
+- `TIG_SYNTAX_DEADLINE_MS` — how long the daemon may go without completing
+  a frame while input is outstanding before the client falls back to the
+  raw diff (100–600000; default 15000).  The deadline is absolute: partial
+  reads, partial writes, or trickled bytes do not extend it — only a
+  completed frame does.
 
 ## Guarantees
 
