@@ -10,9 +10,10 @@
  *
  * Blob reads go through a persistent `git cat-file --batch` child per
  * object store plus a byte-budgeted LRU, so that revisiting commits while
- * navigating in tig costs no process spawns.  Responses carry the full
- * OID git echoes, so callers can key caches content-addressably even when
- * the diff only gave an abbreviated OID.
+ * navigating in tig costs no process spawns.  Responses carry a
+ * content-derived identity computed once per fetch, so callers can key
+ * shared caches content-addressably even when the diff only gave an
+ * abbreviated OID.
  */
 
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
@@ -22,7 +23,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
+import { resolve } from "node:path";
 import { byte_lru } from "./lru.ts";
+import { content_identity } from "./highlight.ts";
 import { config } from "./config.ts";
 
 const execfile_p = promisify(execFile);
@@ -31,9 +34,13 @@ const logger = getLogger(["tig-syntax", "git"]);
 const MAX_BLOB_BYTES = 8 * 1024 * 1024;
 const MAX_BATCHERS = 8;
 
-/** A blob response: git's echoed full OID and the content. */
+/** A blob response: git's echoed full OID, a content-derived cache
+ * identity (computed once per fetch; the echoed OID must NOT key shared
+ * caches because `refs/replace` makes git serve different bytes under the
+ * same OID), and the content. */
 export interface blob_result {
 	oid: string;
+	identity: string;
 	content: Buffer;
 }
 
@@ -41,8 +48,8 @@ export interface blob_result {
 export interface repo_identity {
 	/** Absolute common git directory: identifies the object store. */
 	common_dir: string;
-	/** "sha1" or "sha256". */
-	object_format: string;
+	/** "sha1" or "sha256", or null when git predates --show-object-format. */
+	object_format: string | null;
 	/** Absolute worktree top level, or null for a bare repository. */
 	toplevel: string | null;
 }
@@ -57,33 +64,45 @@ const textconv_cache = new Map<string, boolean>();
 const blob_cache = new byte_lru<blob_result>(config.blob_cache_mb * 1048576,
 	(blob) => blob.content.length + 128);
 
+/** Run one single-value rev-parse query; null on failure or no output.
+ * The value is everything before the final newline git appends, so paths
+ * containing newlines survive (which is also why the queries run one per
+ * spawn: multi-value output has no unambiguous delimiter). */
+async function rev_parse_one(cwd: string, flag: string): Promise<string | null> {
+	try {
+		const { stdout } = await execfile_p("git", ["-C", cwd, "rev-parse", flag]);
+		const value = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+		return value === "" ? null : value;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Resolve the canonical identity of the repository containing `cwd`, or
- * null when cwd is not inside one.  One git spawn per distinct cwd, cached
- * for the daemon's lifetime.
+ * null when cwd is not inside one.  A few git spawns per distinct cwd,
+ * cached for the daemon's lifetime.  Every field is validated: old git
+ * versions ECHO unknown rev-parse options with exit status 0, so raw
+ * output can never be trusted to be the requested value.
  */
 export async function repo_info(cwd: string): Promise<repo_identity | null> {
 	const cached = repo_cache.get(cwd);
 	if (cached !== undefined) {
 		return cached;
 	}
+	// --git-common-dir (git >= 2.5) may print a cwd-relative path.
+	const common_raw = await rev_parse_one(cwd, "--git-common-dir");
 	let result: repo_identity | null = null;
-	try {
-		// --show-toplevel prints nothing in a bare repository, so it goes
-		// last where a missing line is detectable.
-		const { stdout } = await execfile_p("git", ["-C", cwd, "rev-parse",
-			"--path-format=absolute", "--git-common-dir",
-			"--show-object-format", "--show-toplevel"]);
-		const lines = stdout.split("\n").filter((line) => line !== "");
-		if (lines.length >= 2) {
-			result = {
-				common_dir: lines[0],
-				object_format: lines[1],
-				toplevel: lines.length >= 3 ? lines[2] : null,
-			};
-		}
-	} catch {
-		result = null;
+	if (common_raw !== null && !common_raw.startsWith("--")) {
+		const format_raw = await rev_parse_one(cwd, "--show-object-format");
+		const toplevel_raw = await rev_parse_one(cwd, "--show-toplevel");
+		result = {
+			common_dir: resolve(cwd, common_raw),
+			object_format: format_raw === "sha1" || format_raw === "sha256"
+				? format_raw : null,
+			toplevel: toplevel_raw !== null && toplevel_raw.startsWith("/")
+				? toplevel_raw : null,
+		};
 	}
 	repo_cache.set(cwd, result);
 	return result;
@@ -196,7 +215,7 @@ class blob_batcher {
 			this.consume(this.expecting.size + 1);
 			this.expecting = null;
 			this.pending.shift()?.resolve(
-				is_blob ? { oid, content: Buffer.from(content) } : null);
+				is_blob ? { oid, identity: "", content: Buffer.from(content) } : null);
 		}
 	}
 
@@ -260,6 +279,8 @@ export async function cat_blob(cwd: string, oid: string): Promise<blob_result | 
 		logger.debug("no blob {oid} in {store}", { oid, store });
 		return null;
 	}
+	// Hash once per fetch; cache hits reuse the stored identity.
+	blob.identity = content_identity(blob.content);
 	blob_cache.set(key, blob);
 	return blob;
 }

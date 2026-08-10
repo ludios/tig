@@ -54,7 +54,7 @@ describe("repo_info", () => {
 	});
 
 	it("resolves a linked worktree to the shared object store", async () => {
-		const wt = join(repo, "..", "tig-syntax-repo-test-wt");
+		const wt = `${repo}-wt`;   // unique per run: derived from mkdtemp
 		git("worktree", "add", "-q", wt);
 		const main = await repo_info(repo);
 		const linked = await repo_info(wt);

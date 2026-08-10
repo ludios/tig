@@ -603,9 +603,11 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   (worktrees sharing an object store share them), attribute checks run
   from — and cache by — the toplevel (the subdir wrong-path bug was real;
   now unit-tested), `content_matches_oid` hashes only the repo's actual
-  algorithm, and the line cache keys on the **full OID echoed by
-  cat-file** (never the diff's abbreviated one), making tokenization
-  results shared across worktrees, clones, and repositories.  Measured: a
+  algorithm, and the line cache keys on a **content hash computed once per
+  fetched blob** (never the diff's abbreviated OID — and not even the
+  echoed full OID, which `refs/replace` can alias to different bytes),
+  making tokenization results shared across worktrees, clones, and
+  repositories.  Measured: a
   linked worktree's "first visit" of the medium commit costs 196 ms vs
   597 ms for a true first visit — blobs and tokenization are shared; the
   residual is the per-worktree textconv spawns (C1's territory, and

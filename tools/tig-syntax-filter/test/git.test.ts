@@ -55,5 +55,6 @@ describe("cat_blob under a batcher kill", () => {
 		expect(again).not.toBeNull();
 		expect(again!.content.toString("utf8")).toBe("hello blob\n");
 		expect(again!.oid).toBe(small_oid);
+		expect(again!.identity).toMatch(/^sha256:/);
 	});
 });

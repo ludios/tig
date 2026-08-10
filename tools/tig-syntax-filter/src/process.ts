@@ -61,7 +61,7 @@ interface side_doc {
  * repository's algorithm could not be resolved). */
 async function content_matches_oid(cwd: string, content: Buffer, oid: string): Promise<boolean> {
 	const info = await repo_info(cwd);
-	const algorithms = info !== null ? [info.object_format] : ["sha1", "sha256"];
+	const algorithms = info?.object_format != null ? [info.object_format] : ["sha1", "sha256"];
 	const header = Buffer.from(`blob ${content.length}\0`);
 	for (const algorithm of algorithms) {
 		const hex = createHash(algorithm).update(header).update(content).digest("hex");
@@ -92,10 +92,11 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 		const blob = await cat_blob(cwd, oid);
 		if (blob !== null) {
 			content = blob.content;
-			// Key by the FULL OID git echoed, never the diff's
-			// abbreviated one: content-addressed, so shared across
-			// worktrees, clones, and repositories.
-			identity = content_identity(blob.oid);
+			// The identity is a hash of the actual bytes, computed once
+			// at fetch time — safe to share across worktrees, clones,
+			// and repositories, unlike the echoed OID (refs/replace can
+			// serve different bytes under the same OID).
+			identity = blob.identity;
 		}
 	}
 	if (content === null && worktree_fallback) {
