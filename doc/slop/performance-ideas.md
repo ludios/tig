@@ -586,9 +586,10 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   `git check-attr --stdin -z diff` child per repo (same pattern as
   `blob_batcher`), and cache driver-name → has-textconv per *repo* (one
   `config` call per driver, not per path).
-- **C2. Fetch both sides in parallel.**  `highlight_file_section()`
-  (`process.ts`) awaits `load_side(old)` then `load_side(new)` sequentially;
-  make it `Promise.all`.  Two-line change.
+- **C2. Fetch both sides in parallel. [IMPLEMENTED 2026-08-10]**
+  `highlight_file_section()` now fetches both sides via `Promise.all`
+  (loads measured at ~1.5 % of section time, so this is hygiene, not a
+  headline win).
 - **C3. Overlap stages across sections.**  The per-connection queue
   serializes everything; instead, kick off blob fetch + textconv for *every*
   parsed section as soon as it arrives (they're I/O-bound and cheap to run
@@ -653,16 +654,23 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   with B4/B5 so even a cold daemon serves repeat commits instantly.  Needs an
   eviction story (LRU by mtime, size cap) and the usual concurrent-writer
   care (sqlite gives this cheaply).
-- **C8. Load and tokenize only the sides a hunk actually needs.**  Both
-  sides of a modified file are ~99 % identical, yet each is tokenized fully
-  — and BM4 measured the old side at **51 % of all tokenization time**, so
-  this is worth up to ~2× on first visits.  The precise need (context
-  lines already map to `new_doc` in `process.ts`): the old side serves only
-  `-` lines, so (a) set its `last_line` to the last *deleted* row, not the
-  end of the last old hunk — and skip fetching the old blob entirely for
-  addition-only sections (and the new side for pure deletions); (b) with
-  the A1 loop, memoize per (line text, entry-state) across the two sides so
-  shared prefixes tokenize once.
+- **C8. Load and tokenize only the sides a hunk actually needs.
+  [(a) IMPLEMENTED 2026-08-10; (b) still open.]**  The parser now records
+  the deepest row each side actually styles (old = last `-` row, new =
+  last `+`/context row; 0 = side unused), and `process.ts` skips fetching
+  a side entirely at 0 — a pure-addition section never touches the old
+  blob.  **Measured honestly: wall-clock on the corpus is neutral to
+  slightly better** (small-c 90 → 81 ms first visit; pathological cases
+  unchanged because A1's budget already caps them).  The original "~2×
+  from the old side's 51 %" billing over-credited (a): in replace-heavy
+  diffs the last deleted row ≈ the hunk end anyway, and in addition-heavy
+  hunks the old header range was already small.  Recovering the 51 %
+  needs (b) — memoize per (line text, entry-state) across the two sides
+  with the A1 chunk loop so the ~99 %-identical sides tokenize once —
+  which stays gated on a profitability check against real navigation
+  traces.  What (a) does deliver: the section budget reaches deeper on
+  mixed content, addition-only sections skip a blob fetch + decode, and
+  the side-need accounting (b) requires now exists.
 - **C9. Memory traffic / micro-allocations.**  Only touch what BM5 shows,
   but the alt-review's inventory is worth keeping: double `split("\n")` of
   the same text (`load_side` and `highlight_lines`) — one newline-offset
@@ -790,9 +798,11 @@ fake daemon is ready to become the CI regression test for A0.
    default), env knobs, and streaming passthrough.  Measured: giant
    15.2 s → 318 ms, synth-eof 14.8 s → 629 ms, failed-budget revisits
    ~43 ms, sub-second commits untouched; "raw within ~0.5 s" achieved.
-3. **C8 + C2** — old-side reduction (measured 51 % of tokenization; up to
-   ~2× on first visits) and parallel side fetches.  Now ahead of C1,
-   which measured at only 3 %.
+3. **C8(a) + C2 — DONE (2026-08-10)** — precise per-side needs (skip
+   unused sides, bound old at the last deleted row) and parallel fetches.
+   Measured neutral-to-slightly-better wall clock; the 51 %-of-tokenization
+   recovery turns out to require C8(b) (cross-side memoization), which
+   remains open and gated on a profitability check.
 4. **C6 + C4** — byte-bounded caches (RSS 1.4 GB measured) and
    toplevel/full-OID cache keys.
 5. **A2 (or A3) + A9** — interruptible tokenization (the event loop

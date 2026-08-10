@@ -128,11 +128,16 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		return null;
 	}
 
+	// Fetch only the sides the hunks actually style — the old side serves
+	// "-" lines alone (context maps to the new side), so a pure-addition
+	// section never touches the old blob — and fetch both concurrently.
 	// The old side always has a real OID when retrievable at all; the new
 	// side falls back to the worktree (all-zero OID for unstaged changes,
 	// and computed OIDs whose blobs exist in no object database).
-	const old_doc = await load_side(cwd, info.old_path, info.old_oid, false);
-	const new_doc = await load_side(cwd, info.new_path, info.new_oid, true);
+	const [old_doc, new_doc] = await Promise.all([
+		info.old_last_line === 0 ? null : load_side(cwd, info.old_path, info.old_oid, false),
+		info.new_last_line === 0 ? null : load_side(cwd, info.new_path, info.new_oid, true),
+	]);
 	if (old_doc === null && new_doc === null) {
 		logger.debug("no sources for {path}", { path: check_path });
 		return null;

@@ -137,7 +137,10 @@ export interface file_info {
 	old_oid: string | null;		/* null = unusable (absent or all-zero) */
 	new_oid: string | null;
 	hunks: hunk[];
-	/** Highest old/new source line any hunk touches (1-based). */
+	/** Deepest old row occupied by a "-" line and deepest new row occupied
+	 * by a "+" or context line, across all hunks (1-based).  0 means that
+	 * side is never used for styling — context lines map to the new side —
+	 * so it need not be fetched or tokenized at all. */
 	old_last_line: number;
 	new_last_line: number;
 }
@@ -305,6 +308,8 @@ export function parse_file_section(section: diff_section): file_info | null {
 		const body: number[] = [];
 		let old_left = header.old_count;
 		let new_left = header.new_count;
+		let old_row = header.old_start;
+		let new_row = header.new_start;
 
 		for (i++; i < section.lines.length && (old_left > 0 || new_left > 0); i++) {
 			const line = section.lines[i];
@@ -316,12 +321,20 @@ export function parse_file_section(section: diff_section): file_info | null {
 				continue;
 			}
 			if (first === 0x2d) {
+				old_last_line = Math.max(old_last_line, old_row);
+				old_row++;
 				old_left--;
 			} else if (first === 0x2b) {
+				new_last_line = Math.max(new_last_line, new_row);
+				new_row++;
 				new_left--;
 			} else if (first === 0x20 || line.bytes.length === 0) {
 				// An entirely empty line is a context line whose single
-				// space some tools trim.
+				// space some tools trim.  Context is styled from the
+				// new side.
+				new_last_line = Math.max(new_last_line, new_row);
+				old_row++;
+				new_row++;
 				old_left--;
 				new_left--;
 			} else {
@@ -340,8 +353,6 @@ export function parse_file_section(section: diff_section): file_info | null {
 			return null;
 		}
 		hunks.push({ old_start: header.old_start, new_start: header.new_start, body });
-		old_last_line = Math.max(old_last_line, header.old_start + header.old_count - 1);
-		new_last_line = Math.max(new_last_line, header.new_start + header.new_count - 1);
 	}
 
 	return { old_path, new_path, old_oid, new_oid, hunks, old_last_line, new_last_line };

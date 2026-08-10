@@ -171,6 +171,53 @@ describe("parse_file_section", () => {
 		]))).toBe(null);
 	});
 
+	it("tracks per-side needs precisely: pure additions never need the old side", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -10,2 +10,4 @@",
+			" context a",
+			"+added one",
+			"+added two",
+			" context b",
+		]));
+		expect(info?.old_last_line).toBe(0);   // no "-" lines: skip the old blob
+		expect(info?.new_last_line).toBe(13);  // trailing context row
+	});
+
+	it("bounds the old side at the last deleted row, not the hunk end", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -100,5 +100,4 @@",
+			"-old first",
+			" ctx1",
+			" ctx2",
+			" ctx3",
+			" ctx4",
+		]));
+		expect(info?.old_last_line).toBe(100); // deletion at the hunk top
+		expect(info?.new_last_line).toBe(103); // last context row (new side)
+	});
+
+	it("never needs the new side for a context-free pure deletion", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -7,2 +6,0 @@",
+			"-gone one",
+			"-gone two",
+		]));
+		expect(info?.old_last_line).toBe(8);
+		expect(info?.new_last_line).toBe(0);
+	});
+
 	it("rejects hunks whose counts do not match the body", () => {
 		expect(parse_file_section(file_section([
 			"diff --git a/foo.c b/foo.c",
