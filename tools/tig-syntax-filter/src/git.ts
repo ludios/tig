@@ -47,6 +47,8 @@ class blob_batcher {
 	private buffered = 0;
 	/** Size and blobness of the payload the last header announced. */
 	private expecting: { size: number, is_blob: boolean } | null = null;
+	/** Bytes of an oversized payload still being discarded. */
+	private discard_left = 0;
 	broken = false;
 
 	constructor(cwd: string) {
@@ -91,11 +93,22 @@ class blob_batcher {
 	 * Parse complete responses, resolving strictly in request order.  Every
 	 * announced payload is consumed even for non-blob objects (commits and
 	 * trees, e.g. submodule OIDs), since leaving it would desynchronize the
-	 * FIFO.  A payload above the blob limit kills the child instead: memory
-	 * stays bounded and all pending requests degrade to null.
+	 * FIFO.  A payload above the blob limit resolves null and is discarded
+	 * incrementally as it arrives — never accumulated (memory stays
+	 * bounded) and never fatal (requests pipelined behind it, e.g. the
+	 * other side of the same diff, must not be taken down with it).
 	 */
 	private drain(): void {
-		while (this.pending.length > 0) {
+		while (this.pending.length > 0 || this.discard_left > 0) {
+			if (this.discard_left > 0) {
+				const take = Math.min(this.discard_left, this.buffered);
+				if (take === 0) {
+					return;
+				}
+				this.consume(take);
+				this.discard_left -= take;
+				continue;
+			}
 			if (this.expecting === null) {
 				const data = this.contiguous();
 				const nl = data.indexOf(0x0a);
@@ -112,9 +125,10 @@ class blob_batcher {
 				}
 				const size = parseInt(m[2], 10);
 				if (size > MAX_BLOB_BYTES) {
-					this.kill();
-					this.fail();
-					return;
+					this.pending.shift()?.resolve(null);
+					// Payload plus the trailing newline git appends.
+					this.discard_left = size + 1;
+					continue;
 				}
 				this.expecting = { size, is_blob: m[1] === "blob" };
 			}
@@ -197,7 +211,16 @@ export async function cat_blob(cwd: string, oid: string): Promise<Buffer | null>
 		blob_cache.set(key, cached);
 		return cached;
 	}
-	const blob = await get_batcher(cwd).request(oid);
+	const batcher = get_batcher(cwd);
+	let blob = await batcher.request(oid);
+	if (blob === null && batcher.broken) {
+		// The batcher died mid-flight — typically another pipelined
+		// request's payload tripped the size limit and killed the child,
+		// taking this innocent request with it.  One retry on a fresh
+		// batcher; if this oid is itself the culprit, the retry fails
+		// the same way and null stands.
+		blob = await get_batcher(cwd).request(oid);
+	}
 	if (blob === null) {
 		logger.debug("no blob {oid} in {cwd}", { oid, cwd });
 		return null;
