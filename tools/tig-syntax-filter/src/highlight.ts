@@ -52,21 +52,44 @@ export const MAX_RUNS_PER_LINE = 4000;
 const CHUNK_LINES = 128;
 
 /** identity|lang -> shallowest requested depth whose tokenization has
- * exceeded the budget.  Requests at least that deep fail fast; shallower
- * hunks in the same document still get a fresh attempt (the budget verdict
- * depends on the requested prefix, so the key alone must not damn the
- * whole document). */
-const budget_fail_cache = new Map<string, number>();
+ * exceeded the budget, with the time of the verdict.  Requests at least
+ * that deep fail fast; shallower hunks in the same document still get a
+ * fresh attempt (the budget verdict depends on the requested prefix, so
+ * the key alone must not damn the whole document).  Verdicts expire after
+ * FAIL_TTL_MS: a failure can reflect transient contention (the deadline
+ * is wall time shared with concurrent sections, e.g. a prefetch burst),
+ * and even a deterministic one deserves an occasional retry — otherwise
+ * one bad first visit leaves a document permanently raw.  The retry cost
+ * is bounded at one budget per document per TTL. */
+const budget_fail_cache = new Map<string, { depth: number, at: number }>();
 const FAIL_CACHE_MAX = 512;
+const FAIL_TTL_MS = 60 * 1000;
 
 function fail_cache_put(key: string, last_line: number): void {
 	const prev = budget_fail_cache.get(key);
 	budget_fail_cache.delete(key);
-	budget_fail_cache.set(key, prev === undefined ? last_line : Math.min(prev, last_line));
+	budget_fail_cache.set(key, {
+		depth: prev === undefined ? last_line : Math.min(prev.depth, last_line),
+		at: performance.now(),
+	});
 	while (budget_fail_cache.size > FAIL_CACHE_MAX) {
 		const oldest = budget_fail_cache.keys().next().value as string;
 		budget_fail_cache.delete(oldest);
 	}
+}
+
+/** The depth at which `key` is known to exceed the budget, or undefined
+ * when unknown or the verdict has expired. */
+function fail_cache_depth(key: string): number | undefined {
+	const entry = budget_fail_cache.get(key);
+	if (entry === undefined) {
+		return undefined;
+	}
+	if (performance.now() - entry.at > FAIL_TTL_MS) {
+		budget_fail_cache.delete(key);
+		return undefined;
+	}
+	return entry.depth;
 }
 
 /** The private SGR parameter marking a literal ESC byte of content. */
@@ -312,7 +335,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	}
 
 	const fail_key = `${identity}|${lang}`;
-	const failed_at = budget_fail_cache.get(fail_key);
+	const failed_at = fail_cache_depth(fail_key);
 	if (failed_at !== undefined && last_line >= failed_at) {
 		return null;
 	}
@@ -331,7 +354,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		if (after !== undefined && after.length >= last_line) {
 			return after;
 		}
-		const failed_after = budget_fail_cache.get(fail_key);
+		const failed_after = fail_cache_depth(fail_key);
 		if (failed_after !== undefined && last_line >= failed_after) {
 			return null;
 		}

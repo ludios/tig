@@ -173,6 +173,20 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		logger.debug("no sources for {path}", { path: check_path });
 		return null;
 	}
+	// One side loading while the other does not is an anomaly worth a log
+	// line: the failed side's lines render raw next to highlighted ones
+	// (e.g. an old blob missing from a shallow/partial clone), which a
+	// user reports as "the before code is not highlighted".
+	if (old_doc === null && info.old_last_line !== 0 && info.old_path !== null) {
+		logger.info("old side of {path} unavailable ({oid}); its lines will be raw", {
+			path: check_path, oid: info.old_oid,
+		});
+	}
+	if (new_doc === null && info.new_last_line !== 0 && info.new_path !== null) {
+		logger.info("new side of {path} unavailable ({oid}); its lines will be raw", {
+			path: check_path, oid: info.new_oid,
+		});
+	}
 
 	// One tokenization budget for the whole section, shared by both sides;
 	// blob fetching and grammar loading above deliberately do not count.

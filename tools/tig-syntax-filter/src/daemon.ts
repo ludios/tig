@@ -16,6 +16,7 @@
 
 import * as net from "node:net";
 import { unlink, mkdir, chmod } from "node:fs/promises";
+import { statSync, accessSync, constants as fs_constants } from "node:fs";
 import { join } from "node:path";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
@@ -176,17 +177,38 @@ function handle_connection(socket: net.Socket): Promise<void> {
 	});
 }
 
-/** The daemon's unix socket path, honoring $TIG_SYNTAX_SOCKET. */
+/** Whether `dir` is a directory this process owns and can create a
+ * socket in.  $XDG_RUNTIME_DIR can name another user's directory (e.g. a
+ * session su'd from root keeps /run/user/0), where listening fails with
+ * EACCES — such a value must be ignored, not obeyed into a spawn loop
+ * that never serves anyone. */
+function usable_socket_dir(dir: string): boolean {
+	try {
+		const st = statSync(dir);
+		if (!st.isDirectory() || st.uid !== (process.geteuid?.() ?? st.uid)) {
+			return false;
+		}
+		accessSync(dir, fs_constants.W_OK | fs_constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The daemon's unix socket path, honoring $TIG_SYNTAX_SOCKET; must stay
+ * in agreement with socket_path() in the C client for any environment. */
 export function socket_path(): string {
 	const override = process.env.TIG_SYNTAX_SOCKET;
 	if (override !== undefined && override !== "") {
 		return override;
 	}
 	const runtime_dir = process.env.XDG_RUNTIME_DIR;
-	if (runtime_dir !== undefined && runtime_dir !== "") {
+	if (runtime_dir !== undefined && runtime_dir !== "" && usable_socket_dir(runtime_dir)) {
 		return join(runtime_dir, "tig-syntax.sock");
 	}
-	return `/tmp/tig-syntax-${process.getuid?.() ?? 0}.sock`;
+	const tmpdir = process.env.TMPDIR !== undefined && process.env.TMPDIR !== "" ?
+		process.env.TMPDIR : "/tmp";
+	return join(tmpdir, `tig-syntax-${process.geteuid?.() ?? 0}.sock`);
 }
 
 /** True when another live daemon already listens on `path`. */

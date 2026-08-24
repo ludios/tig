@@ -157,19 +157,41 @@ write_framed(const unsigned char *data, size_t len)
 	return true;
 }
 
-/* The daemon socket path, mirroring socket_path() in daemon.ts. */
+/* Whether `dir` is a directory we own and can create a socket in.
+ * $XDG_RUNTIME_DIR can name another user's directory (e.g. a session
+ * su'd from root keeps /run/user/0), where both connecting and
+ * listening fail with EACCES — such a value must be ignored, not
+ * obeyed into permanent raw passthrough. */
+static bool
+usable_socket_dir(const char *dir)
+{
+	struct stat st;
+
+	return stat(dir, &st) == 0 && S_ISDIR(st.st_mode) &&
+	       st.st_uid == geteuid() && access(dir, W_OK | X_OK) == 0;
+}
+
+/* The daemon socket path, mirroring socket_path() in daemon.ts (the two
+ * must agree in any environment, or the spawned daemon listens where no
+ * client looks). */
 static void
 socket_path(char *dest, size_t destlen)
 {
 	const char *override = getenv("TIG_SYNTAX_SOCKET");
 	const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	const char *tmpdir = getenv("TMPDIR");
 
 	if (override != NULL && *override != '\0') {
 		snprintf(dest, destlen, "%s", override);
-	} else if (runtime_dir != NULL && *runtime_dir != '\0') {
+	} else if (runtime_dir != NULL && *runtime_dir != '\0' &&
+		   usable_socket_dir(runtime_dir)) {
 		snprintf(dest, destlen, "%s/tig-syntax.sock", runtime_dir);
 	} else {
-		snprintf(dest, destlen, "/tmp/tig-syntax-%ld.sock", (long) getuid());
+		if (tmpdir == NULL || *tmpdir == '\0') {
+			tmpdir = "/tmp";
+		}
+		snprintf(dest, destlen, "%s/tig-syntax-%ld.sock", tmpdir,
+			 (long) geteuid());
 	}
 }
 
