@@ -206,8 +206,11 @@ export function socket_path(): string {
 	if (runtime_dir !== undefined && runtime_dir !== "" && usable_socket_dir(runtime_dir)) {
 		return join(runtime_dir, "tig-syntax.sock");
 	}
-	const tmpdir = process.env.TMPDIR !== undefined && process.env.TMPDIR !== "" ?
-		process.env.TMPDIR : "/tmp";
+	// $TMPDIR gets the same scrutiny: a stale or unwritable value must
+	// not regress the plain-/tmp case that always worked.
+	const env_tmpdir = process.env.TMPDIR;
+	const tmpdir = env_tmpdir !== undefined && env_tmpdir !== "" &&
+		usable_socket_dir(env_tmpdir) ? env_tmpdir : "/tmp";
 	return join(tmpdir, `tig-syntax-${process.geteuid?.() ?? 0}.sock`);
 }
 

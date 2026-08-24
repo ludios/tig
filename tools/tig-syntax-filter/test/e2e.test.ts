@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, chmodSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,10 +55,18 @@ function run_filter(input: Buffer, env: Record<string, string>): Buffer {
 }
 
 /** PIDs of daemon processes whose environment contains `marker` (a
- * test-unique path), for cleanup: the client spawns daemons detached. */
+ * test-unique path), for cleanup: the client spawns daemons detached.
+ * Empty where procfs is unavailable (e.g. macOS) — spawned daemons then
+ * outlive the suite but idle-exit on their own. */
 function daemon_pids(marker: string): number[] {
 	const pids: number[] = [];
-	for (const entry of readdirSync("/proc")) {
+	let entries: string[];
+	try {
+		entries = readdirSync("/proc");
+	} catch {
+		return pids;
+	}
+	for (const entry of entries) {
 		if (!/^\d+$/.test(entry)) {
 			continue;
 		}
@@ -157,11 +165,12 @@ describe("client + daemon end to end", () => {
 	}, 60000);
 
 	it("falls back to the $TMPDIR socket when $XDG_RUNTIME_DIR is unusable", () => {
-		// Owned by us but not writable: the same verdict a foreign
-		// /run/user/<other-uid> produces, achievable without root.
+		// A regular file, not a directory: unusable as a socket home
+		// no matter the privileges (a mode-0500 directory would look
+		// writable when the suite runs as root), producing the same
+		// verdict a foreign /run/user/<other-uid> does.
 		const bad_runtime = join(work, "bad-runtime");
-		mkdirSync(bad_runtime);
-		chmodSync(bad_runtime, 0o500);
+		writeFileSync(bad_runtime, "");
 		const fallback_tmp = join(work, "fallback-tmp");
 		mkdirSync(fallback_tmp);
 		const output = run_filter(show_output, filter_env({
@@ -173,7 +182,10 @@ describe("client + daemon end to end", () => {
 		expect(readdirSync(fallback_tmp)).toContain(`tig-syntax-${uid}.sock`);
 		// The daemon really is on the fallback socket (not some
 		// pre-existing one): its environment carries our unique TMPDIR.
-		expect(daemon_pids(fallback_tmp).length).toBeGreaterThan(0);
+		// procfs-only evidence, so asserted only where procfs exists.
+		if (process.platform === "linux") {
+			expect(daemon_pids(fallback_tmp).length).toBeGreaterThan(0);
+		}
 	}, 60000);
 
 	it("emits the raw diff unchanged when no daemon can run", () => {

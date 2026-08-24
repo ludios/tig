@@ -187,7 +187,10 @@ socket_path(char *dest, size_t destlen)
 		   usable_socket_dir(runtime_dir)) {
 		snprintf(dest, destlen, "%s/tig-syntax.sock", runtime_dir);
 	} else {
-		if (tmpdir == NULL || *tmpdir == '\0') {
+		/* $TMPDIR gets the same scrutiny: a stale or unwritable value
+		 * must not regress the plain-/tmp case that always worked. */
+		if (tmpdir == NULL || *tmpdir == '\0' ||
+		    !usable_socket_dir(tmpdir)) {
 			tmpdir = "/tmp";
 		}
 		snprintf(dest, destlen, "%s/tig-syntax-%ld.sock", tmpdir,
