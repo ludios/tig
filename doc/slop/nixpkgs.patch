@@ -1,5 +1,5 @@
 diff --git a/pkgs/by-name/ti/tig/package.nix b/pkgs/by-name/ti/tig/package.nix
-index 0142d364f284..d3f4a9722964 100644
+index 0142d364f284..717a16daf3a2 100644
 --- a/pkgs/by-name/ti/tig/package.nix
 +++ b/pkgs/by-name/ti/tig/package.nix
 @@ -2,6 +2,7 @@
@@ -22,7 +22,7 @@ index 0142d364f284..d3f4a9722964 100644
  stdenv.mkDerivation (finalAttrs: {
    pname = "tig";
 -  version = "2.6.1";
-+  version = "2.6.1-syntax-unstable-2026-08-10";
++  version = "2.6.1-syntax-unstable-2026-08-24";
  
    src = fetchFromGitHub {
 -    owner = "jonas";
@@ -30,8 +30,8 @@ index 0142d364f284..d3f4a9722964 100644
      repo = "tig";
 -    rev = "tig-${finalAttrs.version}";
 -    sha256 = "sha256-Zfmt2rpnH5sxiay1LAsXxvtvqvwEG4MbNI+p0GWJsMc=";
-+    rev = "d7e52cd835e3eef8e7a4aa2e0e8ce4568b96f844";
-+    hash = "sha256-lnNEJbo2EsxkO6Bqic62wVno6QWEPQO9lAw5JU3xm9o=";
++    rev = "d0dd665178971c765830fd2f276e702ec42eacfc";
++    hash = "sha256-dPKRAkU5d6mTI0/HgZ+EtAS9oXyhWlzZNLr7B5twi80=";
    };
  
    nativeBuildInputs = [
