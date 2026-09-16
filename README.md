@@ -2,6 +2,8 @@ This is an LLM-authored fork of [tig](https://github.com/jonas/tig) but with
 vscode-style syntax highlighting powered by a TypeScript backend with
 [shiki](https://github.com/shikijs/shiki).
 
+![screenshot](screenshot.png)
+
 ## What is Tig?
 
 Tig is an ncurses-based text-mode interface for git. It functions mainly
