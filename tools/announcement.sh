@@ -17,7 +17,7 @@
 
 root="$(git rev-parse --show-cdup)"
 NEWS="${root}NEWS.adoc"
-README="${root}README.adoc"
+README="${root}README.md"
 from="$(sed -n '7,/^tig-/p' < "$NEWS" | tail -n 1 | cut -d' ' -f 1)"
 to="${1-HEAD}"
 short=

@@ -2,7 +2,7 @@
   "gitbook": "3.2.x",
   "title": "Tig - Text-mode interface for Git",
   "structure": {
-     "readme": "README.adoc",
+     "readme": "README.md",
      "summary": "book.md"
   },
   "links": {
