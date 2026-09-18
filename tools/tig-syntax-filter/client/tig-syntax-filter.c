@@ -213,6 +213,13 @@ socket_path(char *dest, size_t destlen)
 	}
 }
 
+/* try_connect() verdicts besides a connected fd. */
+#define CONNECT_ABSENT	-1	/* nothing listens (or the socket is unusable) */
+#define CONNECT_BACKLOG	-2	/* a daemon listens but its accept backlog is full */
+#define CONNECT_FOREIGN	-3	/* another user's listener owns the path */
+
+/* Connect to the daemon at `path` without blocking; a connected,
+ * nonblocking fd or one of the verdicts above. */
 static int
 try_connect(const char *path)
 {
@@ -220,15 +227,15 @@ try_connect(const char *path)
 	int fd;
 
 	if (strlen(path) >= sizeof(addr.sun_path)) {
-		return -1;
+		return CONNECT_ABSENT;
 	}
 	fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0) {
-		return -1;
+		return CONNECT_ABSENT;
 	}
 	if (fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
 		close(fd);
-		return -1;
+		return CONNECT_ABSENT;
 	}
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
@@ -241,11 +248,11 @@ try_connect(const char *path)
 			 * liveness probe could hit the same full backlog and
 			 * steal the live daemon's socket path). */
 			close(fd);
-			return -2;
+			return CONNECT_BACKLOG;
 		}
 		if (errno != EINPROGRESS) {
 			close(fd);
-			return -1;
+			return CONNECT_ABSENT;
 		}
 		struct pollfd pfd = { fd, POLLOUT, 0 };
 		int err = 0;
@@ -255,20 +262,25 @@ try_connect(const char *path)
 		    getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0 ||
 		    err != 0) {
 			close(fd);
-			return -1;
+			return CONNECT_ABSENT;
 		}
 	}
 #ifdef SO_PEERCRED
 	/* The socket path can be predictable (/tmp fallback); never hand the
-	 * repository's diff to a daemon owned by another user. */
+	 * repository's diff to a daemon owned by another user.  Such a
+	 * listener is a distinct verdict: a daemon we spawn yields to any
+	 * live listener, so nothing of ours can ever take the path. */
 	{
 		struct ucred cred;
 		socklen_t cred_len = sizeof(cred);
 
-		if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
-		    cred.uid != geteuid()) {
+		if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0) {
 			close(fd);
-			return -1;
+			return CONNECT_ABSENT;
+		}
+		if (cred.uid != geteuid()) {
+			close(fd);
+			return CONNECT_FOREIGN;
 		}
 	}
 #endif
@@ -384,7 +396,8 @@ spawn_lock(const char *sock_path)
  * yielded, or daemonized on its own), so the retries continue.  When
  * another client holds the spawn lock its daemon is on the way, so this
  * one only retries — and spawns itself later should the lock free up
- * without a daemon appearing.
+ * without a daemon appearing.  A listener owned by another user ends the
+ * wait at once: no daemon of ours can take that path.
  */
 static int
 connect_daemon(void)
@@ -403,10 +416,10 @@ connect_daemon(void)
 		return fd;
 	}
 	give_up = now_ms() + wait_ms;
-	while (true) {
+	while (fd != CONNECT_FOREIGN) {
 		struct timespec wait = { 0, CONNECT_WAIT_MS * 1000000L };
 
-		if (!spawned && fd != -2) {
+		if (!spawned && fd == CONNECT_ABSENT) {
 			lock_fd = spawn_lock(path);
 			if (lock_fd != LOCK_BUSY) {
 				child = spawn_daemon();
