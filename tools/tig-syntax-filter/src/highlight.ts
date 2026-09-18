@@ -100,10 +100,27 @@ let theme_name = "one-monokai";
 let theme_fg = "#bbbbbb";
 let theme_bg = "#282c34";
 
-/** Byte-budgeted LRU: content identity -> SGR-ready lines (no trailing
- * newline).  Sized by approximate JS string memory. */
-const line_cache = new ByteLRU<string[]>(config.line_cache_mb * 1048576,
-	(lines) => lines.reduce((n, line) => n + line.length * 2 + 48, 64));
+/** A cached tokenization prefix: SGR-ready lines (no trailing newline)
+ * plus the grammar state after the last of them, so a deeper request
+ * for the same document continues from there instead of re-tokenizing
+ * from line 1 — which is also what makes a budget miss recoverable: each
+ * retry advances the prefix. */
+interface cached_prefix {
+	lines: string[],
+	state: unknown,
+}
+
+/** Byte-budgeted LRU: content identity -> cached prefix.  Sized by
+ * approximate JS string memory (the grammar state, a small immutable
+ * stack sharing structure with the grammar, is not counted). */
+const line_cache = new ByteLRU<cached_prefix>(config.line_cache_mb * 1048576,
+	(entry) => entry.lines.reduce((n, line) => n + line.length * 2 + 48, 64));
+
+/** Running counters for diagnostics and tests. */
+export const stats = {
+	/** Source lines run through the grammar (cache hits excluded). */
+	tokenized_lines: 0,
+};
 
 /** In-flight tokenizations by cache key, so concurrent requests for the
  * same document (e.g. a prefetch racing the foreground view, possible
@@ -316,7 +333,8 @@ export function emit_sgr_lines(token_lines: ThemedToken[][]): string[] {
  * timestamp, or null for none) is checked between batches; it is wall
  * time, so under contention concurrent sections abort a little earlier —
  * the latency-focused reading of the budget.  On exceeding it the lines
- * tokenized so far are still cached — a valid prefix that serves
+ * tokenized so far are still cached with their grammar state, and the
+ * next request for the document resumes from there — a valid prefix that serves
  * shallower hunks — the failure depth is remembered for fail-fast, and
  * null is returned so the section goes raw.  `cancelled` (e.g. "did the
  * client hang up") also stops between batches, keeping the partial but
@@ -330,8 +348,8 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	A(highlighter !== null, "highlighter not initialized");
 	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
 	const cached = line_cache.get(key);
-	if (cached !== undefined && cached.length >= last_line) {
-		return cached;
+	if (cached !== undefined && cached.lines.length >= last_line) {
+		return cached.lines;
 	}
 
 	const fail_key = `${identity}|${lang}`;
@@ -351,8 +369,8 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		// They aborted or fell short; their partial or failure depth may
 		// still answer for us.
 		const after = line_cache.get(key);
-		if (after !== undefined && after.length >= last_line) {
-			return after;
+		if (after !== undefined && after.lines.length >= last_line) {
+			return after.lines;
 		}
 		const failed_after = fail_cache_depth(fail_key);
 		if (failed_after !== undefined && last_line >= failed_after) {
@@ -375,26 +393,32 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	}
 
 	const started = performance.now();
+	// A shorter cached prefix is a head start: its lines are reused as
+	// they are and tokenization resumes from its grammar state.
+	const resume = line_cache.get(key);
+	const prefix = resume === undefined ? [] : resume.lines;
+	A(prefix.length < last_line, "cached prefix already covers the request");
+	A(resume === undefined || resume.state !== undefined, "cached prefix lacks its grammar state");
 	const token_lines: ThemedToken[][] = [];
 	// The union-typed method needs a cast to its element overload.
 	const get_state = hl.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
-	let state: unknown;
+	let state: unknown = resume === undefined ? undefined : resume.state;
 	// Store-time length comparisons re-read the cache: after yields, a
 	// concurrent call for the same identity may have cached a longer
 	// prefix than the snapshot taken at entry, and it must survive.
 	const keep_if_longer = (lines: string[]): void => {
 		const current = line_cache.get(key);
-		if (current === undefined || lines.length > current.length) {
-			line_cache.set(key, lines);
+		if (current === undefined || lines.length > current.lines.length) {
+			line_cache.set(key, { lines, state });
 		}
 	};
 	const keep_partial = (): void => {
 		if (token_lines.length > 0) {
-			keep_if_longer(emit_sgr_lines(token_lines));
+			keep_if_longer(prefix.concat(emit_sgr_lines(token_lines)));
 		}
 	};
-	for (let start = 0; start < needed; start += CHUNK_LINES) {
-		if (start > 0) {
+	for (let start = prefix.length; start < needed; start += CHUNK_LINES) {
+		if (start > prefix.length) {
 			await setImmediate();
 		}
 		if (cancelled !== undefined && cancelled()) {
@@ -420,15 +444,16 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		});
 		state = get_state(chunk_tokens);
 		token_lines.push(...chunk_tokens);
+		stats.tokenized_lines += chunk_tokens.length;
 	}
 	const elapsed = performance.now() - started;
 	if (elapsed > 200) {
-		logger.info("tokenized {lines} lines of {lang} in {ms}ms", {
-			lines: needed, lang, ms: Math.round(elapsed),
+		logger.info("tokenized lines {from}-{to} of {lang} in {ms}ms", {
+			from: prefix.length + 1, to: needed, lang, ms: Math.round(elapsed),
 		});
 	}
 
-	const result = emit_sgr_lines(token_lines);
+	const result = prefix.concat(emit_sgr_lines(token_lines));
 	keep_if_longer(result);
 	return result;
 	};

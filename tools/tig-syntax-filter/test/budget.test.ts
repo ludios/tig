@@ -15,7 +15,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configure } from "@logtape/logtape";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
-import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines } from "../src/highlight.ts";
+import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +59,24 @@ describe("chunked tokenization", () => {
 			theme: "one-monokai" as never,
 		}) as ThemedToken[][];
 		expect(ours).toEqual(emit_sgr_lines(one_shot));
+	}, 60000);
+
+	it("resumes a deeper request from the cached prefix, token-identically", async () => {
+		const content = await readFile(join(HERE, "..", "src", "git.ts"), "utf8");
+		const lines = content.split("\n");
+		// 100 is not a chunk multiple: the resume starts mid-chunk.
+		const shallow = await highlight_lines("test|resume", "typescript", content, 100, null);
+		expect(shallow!.length).toBe(100);
+		const before = stats.tokenized_lines;
+		const deep = await highlight_lines("test|resume", "typescript", content,
+						   lines.length, null);
+		expect(deep!.length).toBe(lines.length);
+		expect(stats.tokenized_lines - before).toBe(lines.length - 100);
+		const one_shot = reference.codeToTokensBase(content, {
+			lang: "typescript",
+			theme: "one-monokai" as never,
+		}) as ThemedToken[][];
+		expect(deep).toEqual(emit_sgr_lines(one_shot));
 	}, 60000);
 });
 

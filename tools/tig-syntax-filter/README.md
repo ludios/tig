@@ -40,15 +40,25 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
 - `TIG_SYNTAX_SOCKET` — socket path (default
   `$XDG_RUNTIME_DIR/tig-syntax.sock`).
 - `TIG_SYNTAX_DAEMON` — daemon launcher the client should spawn.
+- `TIG_SYNTAX_SPAWN_WAIT_MS` — how long the client waits for a daemon it
+  just spawned to start listening before falling back to the raw diff
+  (100–600000; default 60000).  Generous on purpose: a cold start on a
+  slow or cache-cold machine can take seconds.  A launcher that exits
+  with a failure (no node, a crashing daemon) ends the wait immediately,
+  so a broken install still degrades fast.  Concurrent clients hitting a
+  cold socket take a lock next to it so only one of them spawns.
 - `TIG_SYNTAX_DEADLINE_MS` — how long the daemon may go without completing
   a frame while input is outstanding before the client falls back to the
-  raw diff (100–600000; default 15000).  The deadline is absolute: partial
+  raw diff (100–600000; default 60000).  The deadline is absolute: partial
   reads, partial writes, or trickled bytes do not extend it — only a
   completed frame does.
 - `TIG_SYNTAX_BUDGET_MS` — daemon-side tokenization budget per file
-  section, shared by the old and new side (50–600000; default 500).  A
+  section, shared by the old and new side (50–600000; default 10000).  A
   section that exceeds it renders raw; the lines tokenized within budget
-  stay cached for shallower hunks and revisits.
+  stay cached, and a later request for the same document — deeper, or a
+  retry after the failure verdict expires (60 s) — continues from that
+  cached prefix rather than starting over, so no document stays raw
+  forever.
 - `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
   the section is not highlighted (100–1000000; default 100000).
 - `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this are not
@@ -59,7 +69,8 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   default 64 each).
 
 The daemon knobs are read once at daemon startup (restart the daemon after
-changing them); the client's `TIG_SYNTAX_DEADLINE_MS` is read per run.
+changing them); the client's `TIG_SYNTAX_SPAWN_WAIT_MS` and
+`TIG_SYNTAX_DEADLINE_MS` are read per run.
 
 ## Guarantees
 

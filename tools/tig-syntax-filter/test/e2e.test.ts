@@ -11,8 +11,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,20 +45,57 @@ function filter_env(overrides: Record<string, string>): Record<string, string> {
 	return { ...env, ...overrides };
 }
 
-/** Run the client on `input` in the scratch repo; returns stdout. */
-function run_filter(input: Buffer, env: Record<string, string>): Buffer {
+/** Run the client on `input` in the scratch repo; returns stdout and
+ * the wall time the run took. */
+function run_filter_timed(input: Buffer, env: Record<string, string>): { output: Buffer, ms: number } {
+	const started = performance.now();
 	const result = spawnSync(client_bin, [], {
 		cwd: repo, env, input, maxBuffer: 64 * 1048576,
 	});
+	const ms = performance.now() - started;
 	expect(result.status).toBe(0);
-	return result.stdout;
+	return { output: result.stdout, ms };
 }
 
-/** PIDs of daemon processes whose environment contains `marker` (a
- * test-unique path), for cleanup: the client spawns daemons detached.
+/** Run the client on `input` in the scratch repo; returns stdout. */
+function run_filter(input: Buffer, env: Record<string, string>): Buffer {
+	return run_filter_timed(input, env).output;
+}
+
+/** Run the client asynchronously; resolves to stdout once it exits. */
+function run_filter_async(input: Buffer, env: Record<string, string>): Promise<Buffer> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(client_bin, [], { cwd: repo, env });
+		const chunks: Buffer[] = [];
+		child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+		child.on("error", reject);
+		child.on("close", (status) => {
+			if (status !== 0) {
+				reject(new Error(`client exited with ${status}`));
+				return;
+			}
+			resolve(Buffer.concat(chunks));
+		});
+		child.stdin.end(input);
+	});
+}
+
+/** Write an executable daemon launcher script `name` into the work dir
+ * with the given shell body; returns its path. */
+function write_launcher(name: string, body: string): string {
+	const path = join(work, name);
+	writeFileSync(path, `#!/bin/sh\n${body}\n`);
+	chmodSync(path, 0o755);
+	return path;
+}
+
+/** PIDs of processes whose environment contains `marker` (a test-unique
+ * path) and whose command line contains `cmdline_needle`: daemons by
+ * default, or with "" every process the tests spawned detached (a
+ * launcher still sleeping before it execs the daemon, for cleanup).
  * Empty where procfs is unavailable (e.g. macOS) — spawned daemons then
  * outlive the suite but idle-exit on their own. */
-function daemon_pids(marker: string): number[] {
+function daemon_pids(marker: string, cmdline_needle = "daemon.ts"): number[] {
 	const pids: number[] = [];
 	let entries: string[];
 	try {
@@ -73,7 +110,8 @@ function daemon_pids(marker: string): number[] {
 		try {
 			const cmdline = readFileSync(`/proc/${entry}/cmdline`, "latin1");
 			const environ = readFileSync(`/proc/${entry}/environ`, "latin1");
-			if (cmdline.includes("daemon.ts") && environ.includes(marker)) {
+			if (Number(entry) !== process.pid && cmdline.includes(cmdline_needle) &&
+			    environ.includes(marker)) {
 				pids.push(Number(entry));
 			}
 		} catch {
@@ -84,7 +122,7 @@ function daemon_pids(marker: string): number[] {
 }
 
 function kill_daemons(marker: string): void {
-	for (const pid of daemon_pids(marker)) {
+	for (const pid of daemon_pids(marker, "")) {
 		try {
 			process.kill(pid, "SIGTERM");
 		} catch {
@@ -188,11 +226,62 @@ describe("client + daemon end to end", () => {
 		}
 	}, 60000);
 
-	it("emits the raw diff unchanged when no daemon can run", () => {
-		const output = run_filter(show_output, filter_env({
+	it("emits the raw diff unchanged, and promptly, when no daemon can run", () => {
+		// The launcher exits with a failure: no waiting out the spawn
+		// window (60 s by default) for a daemon that will never listen.
+		const { output, ms } = run_filter_timed(show_output, filter_env({
 			TIG_SYNTAX_SOCKET: join(work, "no-such-dir", "absent.sock"),
 			TIG_SYNTAX_DAEMON: "/bin/false",
 		}));
 		expect(output.equals(show_output)).toBe(true);
+		expect(ms).toBeLessThan(2000);
+	}, 60000);
+
+	it("waits for a slow daemon start rather than falling back", () => {
+		// Slower than the 3 s the client used to allow: a cold start on a
+		// slow or cache-cold machine.
+		const launcher = write_launcher("slow-daemon.sh",
+			`sleep 3.5\nexec ${JSON.stringify(daemon_script)}`);
+		const { output, ms } = run_filter_timed(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "slow.sock"),
+			TIG_SYNTAX_DAEMON: launcher,
+		}));
+		expect_highlighted(output);
+		expect(ms).toBeGreaterThanOrEqual(3400);
+	}, 60000);
+
+	it("keeps waiting after a launcher exits successfully, up to the spawn wait", () => {
+		// Exit 0 means "yielded to a live daemon" or "daemonized on its
+		// own" — not conclusive — so the wait continues to the limit.
+		const launcher = write_launcher("yield-daemon.sh", "exit 0");
+		const { output, ms } = run_filter_timed(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "yield.sock"),
+			TIG_SYNTAX_DAEMON: launcher,
+			TIG_SYNTAX_SPAWN_WAIT_MS: "600",
+		}));
+		expect(output.equals(show_output)).toBe(true);
+		expect(ms).toBeGreaterThanOrEqual(550);
+		expect(ms).toBeLessThan(3000);
+	}, 60000);
+
+	it("starts one daemon for concurrent clients on a cold socket", async () => {
+		const launcher = write_launcher("herd-daemon.sh",
+			`sleep 1.5\nexec ${JSON.stringify(daemon_script)}`);
+		const marker = join(work, "herd-state");
+		mkdirSync(marker);
+		const env = filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "herd.sock"),
+			TIG_SYNTAX_DAEMON: launcher,
+			XDG_STATE_HOME: marker,
+		});
+		const runs = [1, 2, 3].map(() => run_filter_async(show_output, env));
+		// Mid-startup: the launchers are still sleeping, so count them.
+		await new Promise((resolve) => setTimeout(resolve, 700));
+		if (process.platform === "linux") {
+			expect(daemon_pids(marker, "herd-daemon.sh").length).toBe(1);
+		}
+		for (const output of await Promise.all(runs)) {
+			expect_highlighted(output);
+		}
 	}, 60000);
 });

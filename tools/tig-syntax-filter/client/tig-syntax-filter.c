@@ -19,6 +19,12 @@
  * can never block tig: neither in write() (the socket buffer filling up
  * no longer matters) nor by dribbling just enough traffic to look alive.
  *
+ * A daemon that is not running gets spawned and waited for: a cold start
+ * on a slow or cache-cold machine can take seconds, and raw output is the
+ * worse outcome, so the wait is long (SPAWN_WAIT_MS) — but a launcher that
+ * exits with a failure (no node, a crashing daemon) ends it at once, and
+ * a spawn lock keeps a burst of clients from starting a herd of daemons.
+ *
  * Daemon protocol: see src/daemon.ts.  Frames are validated: a declared
  * payload above MAX_FRAME_BYTES or an acknowledgment for more bytes than
  * are actually outstanding is a protocol error and triggers fallback.
@@ -37,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -45,13 +52,19 @@
 #include <unistd.h>
 
 #define SPOOL_MAX	(64u * 1024 * 1024)
-#define CONNECT_TRIES	60
+/* Interval between connect() attempts while a spawned daemon starts. */
 #define CONNECT_WAIT_MS	50
+/* Default limit on waiting for a spawned daemon to start listening;
+ * overridable via TIG_SYNTAX_SPAWN_WAIT_MS.  Only a daemon that neither
+ * listens nor exits runs into it (see connect_daemon). */
+#define SPAWN_WAIT_MS	60000
 /* Bounded wait for an in-progress nonblocking connect (rare on AF_UNIX;
  * happens when the daemon's accept backlog is full). */
 #define CONNECT_POLL_MS	500
-/* Default frame deadline; overridable via TIG_SYNTAX_DEADLINE_MS. */
-#define FRAME_DEADLINE_MS 15000
+/* Default frame deadline; overridable via TIG_SYNTAX_DEADLINE_MS.  A
+ * section's tokenization budget (daemon side) plus contention from other
+ * connections must fit comfortably inside it. */
+#define FRAME_DEADLINE_MS 60000
 /* Sanity bound on a frame's declared payload size. */
 #define MAX_FRAME_BYTES	(1ull << 30)
 
@@ -94,21 +107,23 @@ now_ms(void)
 	return (long long) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* The configured frame deadline in ms ($TIG_SYNTAX_DEADLINE_MS or default). */
+/* The value of environment variable `name` when it parses as an integer
+ * within [min, max]; `fallback` otherwise (a typo must not disable a
+ * bound). */
 static long long
-frame_deadline_ms(void)
+env_ms(const char *name, long long fallback, long long min, long long max)
 {
-	const char *env = getenv("TIG_SYNTAX_DEADLINE_MS");
+	const char *env = getenv(name);
 
 	if (env != NULL && *env != '\0') {
 		char *end = NULL;
 		long val = strtol(env, &end, 10);
 
-		if (end != NULL && *end == '\0' && val >= 100 && val <= 600000) {
+		if (end != NULL && *end == '\0' && val >= min && val <= max) {
 			return val;
 		}
 	}
-	return FRAME_DEADLINE_MS;
+	return fallback;
 }
 
 /* Write all of data to fd, retrying on short writes and EINTR.  Only for
@@ -261,24 +276,22 @@ try_connect(const char *path)
 }
 
 /*
- * Start the daemon, detached: double-fork so it survives us, stdio to
- * /dev/null (it logs to a file itself).  The launcher is found via
- * $TIG_SYNTAX_DAEMON, next to this executable, or on $PATH.
+ * Start the daemon as a direct child in its own session (setsid: signals
+ * and process-group kills aimed at us never reach it), stdio to /dev/null
+ * (it logs to a file itself).  Returns the child's pid, or -1 when fork
+ * fails.  On the happy path the child is never reaped: it outlives us and
+ * is reparented when we exit.  Being a direct child is what lets
+ * connect_daemon() see a launcher exit without ever listening.  The
+ * launcher is found via $TIG_SYNTAX_DAEMON, next to this executable, or
+ * on $PATH.
  */
-static void
+static pid_t
 spawn_daemon(void)
 {
 	pid_t pid = fork();
 
 	if (pid != 0) {
-		if (pid > 0) {
-			waitpid(pid, NULL, 0);
-		}
-		return;
-	}
-
-	if (fork() != 0) {
-		_exit(0);
+		return pid;
 	}
 	setsid();
 	int devnull = open("/dev/null", O_RDWR);
@@ -320,32 +333,112 @@ spawn_daemon(void)
 	_exit(127);
 }
 
-/* Connect to the daemon, spawning it if needed; -1 when unavailable. */
+/* spawn_lock() verdicts besides a held lock fd. */
+#define LOCK_BUSY	-2	/* another client is spawning right now */
+#define LOCK_UNUSABLE	-1	/* no usable lock file; spawn regardless */
+
+/*
+ * Take the spawn lock, a flock()ed file next to the socket, so that a
+ * burst of clients hitting a cold socket (tig's warm-up, the diff view,
+ * prefetches) starts one daemon rather than a herd that all load their
+ * grammars before every one but the first loses the socket and exits.
+ * Returns the held fd (released by the kernel when we exit, so a crashed
+ * holder leaves no stale lock), LOCK_BUSY, or LOCK_UNUSABLE.  The lock is
+ * an optimization only: the daemon itself settles socket ownership.
+ */
+static int
+spawn_lock(const char *sock_path)
+{
+	char path[PATH_MAX];
+	struct stat st;
+	int fd;
+
+	if (snprintf(path, sizeof(path), "%s.lock", sock_path) >= (int) sizeof(path)) {
+		return LOCK_UNUSABLE;
+	}
+	fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		return LOCK_UNUSABLE;
+	}
+	/* A lock file planted by another user (possible in the /tmp
+	 * fallback) must not be able to stall every client. */
+	if (fstat(fd, &st) != 0 || st.st_uid != geteuid()) {
+		close(fd);
+		return LOCK_UNUSABLE;
+	}
+	if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+		int busy = errno == EWOULDBLOCK || errno == EAGAIN;
+
+		close(fd);
+		return busy ? LOCK_BUSY : LOCK_UNUSABLE;
+	}
+	return fd;
+}
+
+/*
+ * Connect to the daemon, spawning it when nothing listens; -1 when no
+ * daemon becomes reachable.  connect() is retried every CONNECT_WAIT_MS
+ * for up to the spawn wait — unless the launcher we started exits with a
+ * failure status, which ends the wait at once.  A launcher exiting
+ * successfully is not conclusive (it may have found a live daemon and
+ * yielded, or daemonized on its own), so the retries continue.  When
+ * another client holds the spawn lock its daemon is on the way, so this
+ * one only retries — and spawns itself later should the lock free up
+ * without a daemon appearing.
+ */
 static int
 connect_daemon(void)
 {
 	char path[512];
-	int fd = -1;
-	int attempt;
+	const long long wait_ms = env_ms("TIG_SYNTAX_SPAWN_WAIT_MS", SPAWN_WAIT_MS, 100, 600000);
+	long long give_up;
+	int lock_fd = LOCK_UNUSABLE;
+	bool spawned = false;
+	pid_t child = 0;
+	int fd;
 
 	socket_path(path, sizeof(path));
 	fd = try_connect(path);
 	if (fd >= 0) {
 		return fd;
 	}
-	if (fd != -2) {
-		spawn_daemon();
-	}
-	for (attempt = 0; attempt < CONNECT_TRIES; attempt++) {
+	give_up = now_ms() + wait_ms;
+	while (true) {
 		struct timespec wait = { 0, CONNECT_WAIT_MS * 1000000L };
 
+		if (!spawned && fd != -2) {
+			lock_fd = spawn_lock(path);
+			if (lock_fd != LOCK_BUSY) {
+				child = spawn_daemon();
+				spawned = true;
+				if (child < 0) {
+					break;
+				}
+			}
+		}
+		if (child > 0) {
+			int status;
+
+			if (waitpid(child, &status, WNOHANG) == child) {
+				child = 0;
+				if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+					break;
+				}
+			}
+		}
+		if (now_ms() >= give_up) {
+			break;
+		}
 		nanosleep(&wait, NULL);
 		fd = try_connect(path);
 		if (fd >= 0) {
-			return fd;
+			break;
 		}
 	}
-	return -1;
+	if (lock_fd >= 0) {
+		close(lock_fd);
+	}
+	return fd >= 0 ? fd : -1;
 }
 
 /* Emit spool[acked..] framed, then stream the rest of stdin framed. */
@@ -467,7 +560,7 @@ main(void)
 	size_t header_len;
 	size_t header_sent = 0;
 	long long deadline = 0;		/* 0 = disarmed */
-	const long long deadline_ms = frame_deadline_ms();
+	const long long deadline_ms = env_ms("TIG_SYNTAX_DEADLINE_MS", FRAME_DEADLINE_MS, 100, 600000);
 	int daemon_fd;
 
 	signal(SIGPIPE, SIG_IGN);

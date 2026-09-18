@@ -902,6 +902,20 @@ fake daemon is ready to become the CI regression test for A0.
      older git keeps the `--batch` + incremental-discard path): every
      request is `info`-preflighted, so missing/non-blob/oversized objects
      never transfer payloads.
+9. **Timeouts and cold start — DONE (2026-09-18)**, prompted by a
+   field report (nixpkgs on a second machine: "took ~3 s and stayed
+   raw").  The 3 s was the client's spawn window (60 × 50 ms), a cold
+   start that overran it fell back to raw, and the daemon that eventually
+   came up served only later views.  Client: spawn wait 3 s → 60 s
+   (`TIG_SYNTAX_SPAWN_WAIT_MS`), with the launcher a direct child so a
+   failing exit ends the wait immediately, plus a flock()ed spawn lock
+   next to the socket (B3's thundering-herd hole, closed client-side);
+   frame deadline 15 → 60 s.  Daemon: budget 500 ms → 10 s per section,
+   and the tokenized-line cache now keeps the grammar state so deeper
+   or retried requests resume from the prefix instead of restarting at
+   line 1 — a budget miss can no longer be permanent.  B8's readiness
+   pipe was not needed: the connect poll stays at 50 ms.
+
 9. **A3 workers / A7 style spans** — only if the above leaves giant
    commits feeling bad; tig's own giant-on cost is 384 ms (BM7), so A7(b)
    is a last-mile improvement, not a necessity.  E5 (`argv_size` at 3.2 %

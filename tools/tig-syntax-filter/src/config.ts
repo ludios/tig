@@ -9,6 +9,10 @@
  * - TIG_SYNTAX_BUDGET_MS: per-section tokenization budget shared by both
  *   sides of a file diff.  Exceeding it makes the section fall back to raw
  *   (see highlight.ts); grammar loading and blob fetching do not count.
+ *   Generous by default: the work is cached per document and resumable,
+ *   so a big budget costs one wait per document per daemon lifetime,
+ *   whereas a small one leaves slow-grammar files raw.  Must fit inside
+ *   the client's frame deadline with room for contention.
  * - TIG_SYNTAX_MAX_LINES: deepest source line a hunk may require before the
  *   section is not highlighted at all (bounds tokenization memory).
  * - TIG_SYNTAX_MAX_SECTION_BYTES: file sections larger than this stop being
@@ -33,7 +37,7 @@ function int_env(name: string, fallback: number, min: number, max: number): numb
 }
 
 export const config = {
-	budget_ms: int_env("TIG_SYNTAX_BUDGET_MS", 500, 50, 600000),
+	budget_ms: int_env("TIG_SYNTAX_BUDGET_MS", 10000, 50, 600000),
 	max_lines: int_env("TIG_SYNTAX_MAX_LINES", 100000, 100, 1000000),
 	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 20, 1 << 16, 1 << 26),
 	line_cache_mb: int_env("TIG_SYNTAX_LINE_CACHE_MB", 64, 1, 4096),
