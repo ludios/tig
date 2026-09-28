@@ -96,9 +96,10 @@ void string_copy_rev_from_commit_line(char *dst, const char *src);
 	string_format(dst, !*path1 || path1[strlen(path1) - 1] == '/' ? "%s%s" : "%s/%s", path1, path2)
 
 /* Expand tabs to spaces and blank out other whitespace and control
- * characters.  `col` is the column at which `src` starts, so that text
- * expanded in pieces gets the same tab stops as when expanded whole.
- * Returns the number of bytes consumed from `src`. */
+ * characters.  `col` is the display column at which `src` starts, so that
+ * text expanded in pieces gets the same tab stops as when expanded whole.
+ * Returns the number of bytes consumed from `src`: short of `srclen` when
+ * `dst` fills up, in which case the rest continues in another call. */
 size_t string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col);
 
 char *string_trim_end(char *name);

@@ -355,8 +355,9 @@ diff_syntax_unframe(const char *data)
 	if (size > bufsize) {
 		char *tmp = realloc(buf, size);
 
-		if (!tmp)
+		if (!tmp) {
 			return NULL;
+		}
 		buf = tmp;
 		bufsize = size;
 	}
@@ -538,8 +539,9 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 
 	if (state->syntax && strchr(data, 0x1b) && diff_syntax_only_markers(data)) {
 		data = diff_syntax_unframe(data);
-		if (!data)
+		if (!data) {
 			return false;
+		}
 		unframed = true;
 	}
 
@@ -621,8 +623,9 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 	    !state->stage)
 		data += state->parents;
 
-	if (unframed)
+	if (unframed) {
 		return pager_common_read(view, data, type, NULL);
+	}
 
 	if (state->syntax && strchr(data, 0x1b))
 		return diff_common_syntax(view, data, type);

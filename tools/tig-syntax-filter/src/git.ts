@@ -28,9 +28,9 @@
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { promisify } from "node:util";
-import { open, type FileHandle } from "node:fs/promises";
+import { open, realpath, type FileHandle } from "node:fs/promises";
 import { constants as fs_constants } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
 import { ByteLRU } from "./lru.ts";
@@ -401,27 +401,40 @@ export async function cat_blob(cwd: string, oid: string): Promise<blob_result | 
  * The worktree file content for repository-relative `path`, or null when
  * it is not a readable regular file within the size limit.  `path` comes
  * from the diff text, which pager mode reads from arbitrary stdin, so it
- * must not escape the worktree, and a symlink, FIFO, device, or huge file
+ * must not escape the worktree (git never records a path through a ".."
+ * or a symlinked directory), and a symlink, FIFO, device, or huge file
  * must not be followed, block, or be read whole.
  */
 export async function read_worktree_file(cwd: string, path: string): Promise<Buffer | null> {
 	const info = await repo_info(cwd);
-	if (info === null || info.toplevel === null) {
-		return null;
-	}
-	if (isAbsolute(path) || path.includes("\0") || path.split("/").includes("..")) {
+	if (info === null || info.toplevel === null || path.split("/").includes("..")) {
 		return null;
 	}
 	let file: FileHandle | undefined;
 	try {
-		file = await open(join(info.toplevel, path),
+		const top = await realpath(info.toplevel);
+		const dir = await realpath(join(top, dirname(path)));
+		if (dir !== top && !dir.startsWith(top + sep)) {
+			return null;
+		}
+		file = await open(join(dir, basename(path)),
 				  fs_constants.O_RDONLY | fs_constants.O_NOFOLLOW | fs_constants.O_NONBLOCK);
 		const st = await file.stat();
 		if (!st.isFile() || st.size > MAX_BLOB_BYTES) {
 			return null;
 		}
-		const content = await file.readFile();
-		return content.length > MAX_BLOB_BYTES ? null : content;
+		// Read no more than fstat promised, plus one byte to notice a file
+		// growing meanwhile; such a file would fail the OID check anyway.
+		const content = Buffer.alloc(st.size + 1);
+		let length = 0;
+		while (length < content.length) {
+			const { bytesRead } = await file.read(content, length, content.length - length, length);
+			if (bytesRead === 0) {
+				break;
+			}
+			length += bytesRead;
+		}
+		return length > st.size ? null : content.subarray(0, length);
 	} catch {
 		return null;
 	} finally {

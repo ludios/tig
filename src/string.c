@@ -93,22 +93,53 @@ string_copy_rev_from_commit_line(char *dst, const char *src)
 size_t
 string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col)
 {
-	size_t size, pos;
+	size_t end = srclen == -1 ? strlen(src) : (size_t) srclen;
+	size_t size = 0, pos = 0;
 
-	for (size = pos = 0; size < dstlen - 1 && (srclen == -1 || pos < srclen) && src[pos]; pos++) {
-		const char c = src[pos];
+	while (pos < end && src[pos] && size < dstlen - 1) {
+		const unsigned char c = src[pos];
 
 		if (c == '\t') {
-			size_t expanded = tabsize - ((col + size) % tabsize);
+			size_t expanded = tabsize - (col % tabsize);
 
-			if (expanded + size >= dstlen - 1)
-				expanded = dstlen - size - 1;
+			/* A tab that does not fit is left whole for the next
+			 * piece, unless even an empty buffer cannot hold it. */
+			if (size + expanded > dstlen - 1) {
+				if (size) {
+					break;
+				}
+				expanded = dstlen - 1;
+			}
 			memset(dst + size, ' ', expanded);
 			size += expanded;
-		} else if (isspace((unsigned char)c) || iscntrl((unsigned char)c)) {
-			dst[size++] = ' ';
+			col += expanded;
+			pos++;
+
+		} else if (c >= 0x80) {
+			/* Tab stops count display columns, not bytes; invalid
+			 * UTF-8 counts one column per byte, as in utf8_length(). */
+			utf8proc_int32_t unicode;
+			utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t *) src + pos,
+								  end - pos, &unicode);
+			int width = 1;
+
+			if (bytes < 1 || unicode < 0) {
+				bytes = 1;
+			} else {
+				width = utf8proc_charwidth(unicode);
+			}
+			if (size + bytes > dstlen - 1) {
+				break;
+			}
+			memcpy(dst + size, src + pos, bytes);
+			size += bytes;
+			col += width;
+			pos += bytes;
+
 		} else {
-			dst[size++] = src[pos];
+			dst[size++] = isspace(c) || iscntrl(c) ? ' ' : c;
+			col++;
+			pos++;
 		}
 	}
 

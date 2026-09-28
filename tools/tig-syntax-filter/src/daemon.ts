@@ -18,7 +18,8 @@
 import * as net from "node:net";
 import { unlink, mkdir } from "node:fs/promises";
 import { statSync, accessSync, constants as fs_constants } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
 import { SectionSplitter, type diff_section } from "./diff_parser.ts";
@@ -229,9 +230,8 @@ function daemon_alive(path: string): Promise<boolean> {
 	});
 }
 
-/** Environment variables that select a repository, as listed by `git
- * rev-parse --local-env-vars`. */
-const REPO_ENV_VARS = [
+/** git 2.5x's `git rev-parse --local-env-vars`, for when git cannot say. */
+const FALLBACK_REPO_ENV_VARS = [
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
 	"GIT_CONFIG_COUNT", "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE",
 	"GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE", "GIT_INDEX_FILE",
@@ -239,22 +239,50 @@ const REPO_ENV_VARS = [
 	"GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
 ];
 
+/** The environment variables that select a repository, as the installed
+ * git lists them. */
+function repo_env_vars(): string[] {
+	try {
+		return execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8" })
+			.split("\n").filter((name) => name !== "");
+	} catch {
+		return FALLBACK_REPO_ENV_VARS;
+	}
+}
+
 /** Drop what the daemon inherited from whichever client happened to spawn
  * it: every connection names its repository by cwd alone, so e.g. the
  * GIT_WORK_TREE that tig sets when run as a git alias would otherwise
  * point every later request's git commands at that one repository, and
- * the cwd would keep that directory busy for the daemon's lifetime. */
+ * the cwd would keep that directory busy for the daemon's lifetime.
+ * Relative paths from the environment must be resolved before this. */
 function forget_spawning_client(): void {
-	for (const name of REPO_ENV_VARS) {
+	for (const name of repo_env_vars()) {
 		delete process.env[name];
 	}
 	process.chdir("/");
 }
 
+/** Listen on `path` with the socket owner-only from the moment it exists
+ * (a chmod after listen leaves a window, and the path may be in a
+ * world-writable /tmp fallback; the client also checks the peer UID).
+ * The bind happens synchronously within listen(), so the umask is
+ * restored at once rather than inherited by later git children. */
+function listen_private(server: net.Server, path: string, on_listening?: () => void): void {
+	const umask = process.umask(0o077);
+	try {
+		server.listen(path, on_listening);
+	} finally {
+		process.umask(umask);
+	}
+}
+
 async function main(): Promise<void> {
-	forget_spawning_client();
+	// Relative settings mean the spawning client's cwd, as in the client.
+	const path = resolve(socket_path());
 	const state_home = process.env.XDG_STATE_HOME || join(process.env.HOME ?? "/tmp", ".local", "state");
-	const log_dir = join(state_home, "tig-syntax");
+	const log_dir = resolve(state_home, "tig-syntax");
+	forget_spawning_client();
 	await mkdir(log_dir, { recursive: true });
 	await configure({
 		sinks: {
@@ -269,7 +297,6 @@ async function main(): Promise<void> {
 
 	await init_highlighter();
 
-	const path = socket_path();
 	let active_connections = 0;
 	let idle_timer: ReturnType<typeof setTimeout>;
 	let shed_timer: ReturnType<typeof setTimeout>;
@@ -322,18 +349,14 @@ async function main(): Promise<void> {
 					process.exit(1);
 				}
 			}
-			server.listen(path);
+			listen_private(server, path);
 			return;
 		}
 		logger.error("server error: {err}", { err: String(err) });
 		process.exit(1);
 	});
 
-	// Owner-only from the moment the socket exists (a chmod after listen
-	// leaves a window): it may live in a world-writable /tmp fallback.
-	// The client additionally checks the peer UID.
-	process.umask(0o077);
-	server.listen(path, () => {
+	listen_private(server, path, () => {
 		logger.info("listening on {path} (pid {pid})", { path, pid: process.pid });
 		logger.info("budgets: {budget_ms}ms/section, max {max_lines} lines, passthrough over {max_section_bytes} bytes, caches {line_cache_mb}+{blob_cache_mb}MB", config);
 		schedule_idle_exit();

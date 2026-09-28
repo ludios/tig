@@ -1,6 +1,5 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
-// Model-output: Claude Opus 5.5
 
 /**
  * Section processing: turn one diff section into output bytes, either
@@ -166,11 +165,13 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	}
 	// git applies each side's own diff driver, so a rename can put textconv
 	// output on one side only.
-	for (const path of new Set([info.old_path, info.new_path])) {
-		if (path !== null && await has_textconv(cwd, path)) {
-			logger.info("skipping {path}: textconv diff driver", { path });
-			return null;
-		}
+	const paths = [...new Set([info.old_path, info.new_path])]
+		.filter((path): path is string => path !== null);
+	const textconv = await Promise.all(paths.map((path) => has_textconv(cwd, path)));
+	const textconv_path = paths.find((_, i) => textconv[i]);
+	if (textconv_path !== undefined) {
+		logger.info("skipping {path}: textconv diff driver", { path: textconv_path });
+		return null;
 	}
 	const check_path = info.new_path ?? info.old_path;
 
