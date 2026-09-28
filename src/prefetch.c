@@ -90,17 +90,18 @@ prefetch_reap(void)
 	}
 }
 
-/* Kill a running pipeline's process group, reap its leader, and clear
- * its slot.  The daemon cancels work for a client killed mid-request. */
+/* Empty a slot, first killing its pipeline's process group and reaping
+ * the leader if one is running.  The daemon cancels work for a client
+ * killed mid-request. */
 static void
-prefetch_kill(struct prefetch_job *job)
+prefetch_clear(struct prefetch_job *job)
 {
-	if (job->pgid <= 0)
-		return;
-	kill(-job->pgid, SIGKILL);
-	while (waitpid(job->pgid, NULL, 0) < 0 && errno == EINTR)
-		;
-	job->pgid = 0;
+	if (job->pgid > 0) {
+		kill(-job->pgid, SIGKILL);
+		while (waitpid(job->pgid, NULL, 0) < 0 && errno == EINTR)
+			;
+		job->pgid = 0;
+	}
 	job->id[0] = 0;
 }
 
@@ -242,8 +243,7 @@ prefetch_request(const char *ids[], size_t ids_len)
 		 * pipeline does not replicate): cancel and forget everything,
 		 * so a live :set change takes effect immediately. */
 		for (job = 0; job < PREFETCH_JOBS; job++) {
-			prefetch_kill(&prefetch_jobs[job]);
-			prefetch_jobs[job].id[0] = 0;
+			prefetch_clear(&prefetch_jobs[job]);
 		}
 		prefetch_pending_count = 0;
 		return;
@@ -255,10 +255,7 @@ prefetch_request(const char *ids[], size_t ids_len)
 	 * ones. */
 	for (job = 0; job < PREFETCH_JOBS; job++) {
 		if (!prefetch_id_in(prefetch_jobs[job].id, ids, ids_len)) {
-			if (prefetch_jobs[job].pgid > 0)
-				prefetch_kill(&prefetch_jobs[job]);
-			else
-				prefetch_jobs[job].id[0] = 0;
+			prefetch_clear(&prefetch_jobs[job]);
 		}
 	}
 
