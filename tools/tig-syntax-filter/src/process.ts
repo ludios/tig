@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: Claude Opus 5.5
 
 /**
  * Section processing: turn one diff section into output bytes, either
@@ -163,11 +164,15 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	if (info.hunks.length === 0) {
 		return null;
 	}
-	const check_path = info.new_path ?? info.old_path;
-	if (check_path !== null && await has_textconv(cwd, check_path)) {
-		logger.info("skipping {path}: textconv diff driver", { path: check_path });
-		return null;
+	// git applies each side's own diff driver, so a rename can put textconv
+	// output on one side only.
+	for (const path of new Set([info.old_path, info.new_path])) {
+		if (path !== null && await has_textconv(cwd, path)) {
+			logger.info("skipping {path}: textconv diff driver", { path });
+			return null;
+		}
 	}
+	const check_path = info.new_path ?? info.old_path;
 
 	// Fetch only the sides the hunks actually style — the old side serves
 	// "-" lines alone (context maps to the new side), so a pure-addition
@@ -251,9 +256,11 @@ async function highlight_file_section(cwd: string, section: diff_section,
 			// The diff shows a byte-order mark as part of line 1; it passes
 			// through unstyled ahead of the line's tokens.
 			const lead = doc_line === 1 ? doc.bom : "";
-			const body_text = line.bytes.subarray(1).toString("utf8");
 			const source_line = doc.lines[doc_line - 1];
-			if (body_text !== lead + source_line) {
+			// Bytes, not decoded text: decoding would equate an invalid
+			// byte in the diff with a U+FFFD in the source, and the
+			// emitted line would then differ from the input.
+			if (!line.bytes.subarray(1).equals(Buffer.from(lead + source_line, "utf8"))) {
 				logger.info("correspondence mismatch in {path} at source line {line}", {
 					path: info.new_path ?? info.old_path, line: doc_line,
 				});
