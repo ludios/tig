@@ -115,17 +115,19 @@ app_syntax_filter_load(const char *query)
 	static char filter_path[SIZEOF_STR];
 	const char *env_path = getenv("PATH");
 
-	if (!query || !*query) {
-		filter_app.argv[0] = NULL;
-		return &filter_app;
+	if (!query) {
+		query = "";
 	}
-
 	if (!strcmp(cached_query, query))
 		return &filter_app;
 
 	string_ncopy(cached_query, query, strlen(query));
 	filter_app.argv[0] = NULL;
 	filter_path[0] = 0;
+
+	if (!*query) {
+		return &filter_app;
+	}
 
 	if (strchr(query, '~')) {
 		if (!path_expand(filter_path, sizeof(filter_path), query))
