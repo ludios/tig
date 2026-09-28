@@ -36,8 +36,10 @@ export interface diff_section {
  * section and every complete line until the next boundary streams out the
  * same way, one oversized section per feed() call (plan item A8).  Callers
  * pass such sections through raw, so a giant generated file costs neither
- * memory nor a highlight attempt.  Line alignment is preserved: a trailing
- * partial line always waits in `carry` for its newline or EOF.
+ * memory nor a highlight attempt.  The preamble, also passed through raw,
+ * streams the same way, so input that never reaches a diff (`git log |
+ * tig`) is not held back until EOF.  Line alignment is preserved: a
+ * trailing partial line always waits in `carry` for its newline or EOF.
  */
 export class SectionSplitter {
 	private carry: Buffer = Buffer.alloc(0);
@@ -99,7 +101,7 @@ export class SectionSplitter {
 			start = nl + 1;
 		}
 		this.carry = data.subarray(start);
-		if (this.current_kind === "oversized") {
+		if (this.current_kind !== "file") {
 			// Stream, do not buffer: everything complete goes out now.
 			const done = this.take_section();
 			if (done !== null) {

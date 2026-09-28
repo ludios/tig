@@ -23,6 +23,14 @@ function section_bytes(section: diff_section): Buffer {
 	return Buffer.concat(parts);
 }
 
+/** Each section's bytes, with the preamble's pieces (it streams as it
+ * arrives, so chunking decides how it is cut) joined into one. */
+function merge_preamble(sections: diff_section[]): Buffer[] {
+	const preamble = sections.filter((s) => s.kind === "preamble").map(section_bytes);
+	const rest = sections.filter((s) => s.kind !== "preamble").map(section_bytes);
+	return preamble.length > 0 ? [Buffer.concat(preamble), ...rest] : rest;
+}
+
 const SAMPLE_DIFF = [
 	"commit 0123456789abcdef",
 	"Author: Someone <someone@example.com>",
@@ -65,8 +73,15 @@ describe("SectionSplitter", () => {
 		}
 	});
 
-	it("produces identical sections for any chunking of the input", () => {
-		const reference = split_all(Buffer.from(SAMPLE_DIFF));
+	it("streams the preamble as it arrives", () => {
+		const splitter = new SectionSplitter();
+		const sections = splitter.feed(Buffer.from("commit 0123456789abcdef\nAuthor: x\npartial"));
+		expect(sections.map((s) => s.kind)).toEqual(["preamble"]);
+		expect(section_bytes(sections[0]).toString()).toBe("commit 0123456789abcdef\nAuthor: x\n");
+	});
+
+	it("produces identical file sections for any chunking of the input", () => {
+		const reference = merge_preamble(split_all(Buffer.from(SAMPLE_DIFF)));
 		fc.assert(fc.property(
 			fc.array(fc.integer({ min: 1, max: 40 }), { maxLength: 60 }),
 			(chunk_sizes) => {
@@ -83,9 +98,10 @@ describe("SectionSplitter", () => {
 				}
 				sections.push(...splitter.feed(data.subarray(offset)));
 				sections.push(...splitter.finish());
-				expect(sections.length).toBe(reference.length);
-				for (let i = 0; i < sections.length; i++) {
-					expect(section_bytes(sections[i]).equals(section_bytes(reference[i]))).toBe(true);
+				const merged = merge_preamble(sections);
+				expect(merged.length).toBe(reference.length);
+				for (let i = 0; i < merged.length; i++) {
+					expect(merged[i].equals(reference[i])).toBe(true);
 				}
 			},
 		));
