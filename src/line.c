@@ -1,3 +1,6 @@
+/* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -10,9 +13,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
-/* Model-output: Claude Fable 5 */
-/* Model-output: Claude Opus 5.5 */
 
 #include "tig/tig.h"
 #include "tig/types.h"

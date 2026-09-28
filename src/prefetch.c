@@ -1,5 +1,6 @@
 /* Model-output: Claude Fable 5 */
 /* Model-output: Claude Opus 5.5 */
+/* Model-output: ChatGPT 6 Astra */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -89,8 +90,8 @@ prefetch_reap(void)
 	}
 }
 
-/* Kill a pipeline's process group, reap its leader, and clear its slot.
- * The daemon cancels work for a client killed mid-request. */
+/* Kill a running pipeline's process group, reap its leader, and clear
+ * its slot.  The daemon cancels work for a client killed mid-request. */
 static void
 prefetch_kill(struct prefetch_job *job)
 {

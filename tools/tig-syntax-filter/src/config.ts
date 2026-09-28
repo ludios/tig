@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: ChatGPT 6 Astra
 
 /**
  * Budget and limit knobs, read from the environment at daemon start.  A

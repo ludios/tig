@@ -1,5 +1,6 @@
 /* Model-output: Claude Fable 5 */
 /* Model-output: Claude Opus 5.5 */
+/* Model-output: ChatGPT 6 Astra */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *

@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: ChatGPT 6 Astra
 
 /**
  * The tig-syntax highlight daemon: a unix-socket server that accepts a
@@ -12,8 +13,8 @@
  *	"O <consumed_input_bytes> <output_bytes>\n" <output bytes>
  *	"P 0\n", a keepalive probe once the client has half-closed.
  *	"E 0\n" on clean end of stream.
- * The client keeps input spooled until an O frame acknowledges it, so a
- * daemon crash at any point lets it fall back to emitting the raw diff.
+ * The client keeps its input spooled, so a daemon crash at any point lets
+ * it fall back to emitting the unacknowledged rest raw.
  */
 
 import * as net from "node:net";

@@ -1,5 +1,6 @@
 /* Model-output: Claude Fable 5 */
 /* Model-output: Claude Opus 5.5 */
+/* Model-output: ChatGPT 6 Astra */
 
 /* For struct ucred (SO_PEERCRED). */
 #define _GNU_SOURCE
@@ -7,10 +8,9 @@
 /*
  * tig-syntax-filter: the client tig runs as its diff-syntax-filter.  It
  * streams stdin to the highlight daemon (spawning it if needed) and the
- * daemon's frames to stdout.  Input stays spooled until a frame
- * acknowledges it, so if the daemon is missing, dies, or stalls, the
- * client emits the rest of the diff raw from the spool: tig always gets
- * output.
+ * daemon's frames to stdout.  All input stays spooled, so if the daemon
+ * is missing, dies, or stalls, the client emits the unacknowledged rest
+ * of the diff raw from the spool: tig always gets output.
  *
  * One poll() loop drives the nonblocking socket in both directions.
  * While input is unacknowledged or the end frame is due, the daemon must

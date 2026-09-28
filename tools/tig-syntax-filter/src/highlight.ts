@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: ChatGPT 6 Astra
 
 /**
  * Tokenization and SGR emission.  Wraps shiki (vscode-textmate +
@@ -50,7 +51,7 @@ export const MAX_RUNS_PER_LINE = 4000;
 /** Lines tokenized between deadline checks; ~10-60 ms of work per chunk at
  * measured grammar rates, so a section overshoots its budget by at most
  * roughly that. */
-const CHUNK_LINES = 128;
+export const CHUNK_LINES = 128;
 
 /** identity|lang -> shallowest requested depth that exceeded the budget,
  * and when.  While fresh, requests at least that deep fail fast unless

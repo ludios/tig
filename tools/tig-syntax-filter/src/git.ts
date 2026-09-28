@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: ChatGPT 6 Astra
 
 /**
  * Git plumbing for the daemon.  Each operation takes the client's working
@@ -92,7 +93,8 @@ async function rev_parse_one(cwd: string, flag: string): Promise<string | null> 
 
 /**
  * Resolve the canonical identity of the repository containing `cwd`, or
- * null when git can't.  Costs a few git spawns per distinct cwd, cached
+ * null when git can't find its common directory (e.g. outside any
+ * repository).  Costs a few git spawns per distinct cwd, cached
  * for the daemon's lifetime.  Every field is validated, because old git
  * echoes unknown rev-parse options and exits 0.
  */

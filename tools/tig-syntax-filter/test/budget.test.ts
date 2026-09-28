@@ -1,5 +1,6 @@
 // Model-output: Claude Fable 5
 // Model-output: Claude Opus 5.5
+// Model-output: ChatGPT 6 Astra
 
 /**
  * Chunked tokenization equals one-shot tokenization, budget exhaustion
@@ -16,7 +17,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configure } from "@logtape/logtape";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
-import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats } from "../src/highlight.ts";
+import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,9 +50,10 @@ beforeAll(async () => {
 
 describe("chunked tokenization", () => {
 	it("emits exactly what one-shot tokenization emits", async () => {
-		// git.ts spans several tokenization chunks.
 		const content = await readFile(join(HERE, "..", "src", "git.ts"), "utf8");
 		const lines = content.split("\n");
+		// Continuation across chunks is what this test covers.
+		expect(lines.length).toBeGreaterThan(2 * CHUNK_LINES);
 		const ours = await highlight_lines("test|chunk-eq", "typescript", content,
 						   lines.length, null);
 		expect(ours).not.toBeNull();
