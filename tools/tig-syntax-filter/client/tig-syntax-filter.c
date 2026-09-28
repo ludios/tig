@@ -27,8 +27,9 @@
  * a spawn lock keeps a burst of clients from starting a herd of daemons.
  *
  * Daemon protocol: see src/daemon.ts.  Frames are validated: a declared
- * payload above MAX_FRAME_BYTES or an acknowledgment for more bytes than
- * are actually outstanding is a protocol error and triggers fallback.
+ * payload above MAX_FRAME_BYTES, an acknowledgment for more bytes than are
+ * actually outstanding, or an end frame while input is unacknowledged is a
+ * protocol error and triggers fallback.
  * In fallback output, literal ESC bytes are framed as ESC[999m so tig's
  * SGR decoder restores them.
  *
@@ -676,7 +677,14 @@ main(void)
 				int state = drain_frames(&inbox, &acked, sent);
 
 				if (state == 1) {
-					return 0;
+					/* An end frame is only valid once all input
+					 * was acknowledged; otherwise it would drop
+					 * the tail of the diff. */
+					if (acked == spool.len && !stdin_open) {
+						return 0;
+					}
+					close(daemon_fd);
+					return fallback_passthrough(&spool, acked, stdin_open);
 				}
 				if (state == -1) {
 					close(daemon_fd);
