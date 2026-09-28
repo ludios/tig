@@ -28,8 +28,9 @@
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { promisify } from "node:util";
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { open, type FileHandle } from "node:fs/promises";
+import { constants as fs_constants } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
 import { ByteLRU } from "./lru.ts";
@@ -398,21 +399,33 @@ export async function cat_blob(cwd: string, oid: string): Promise<blob_result | 
 
 /**
  * The worktree file content for repository-relative `path`, or null when
- * unreadable or exceeding the size limit.
+ * it is not a readable regular file within the size limit.  `path` comes
+ * from the diff text, which pager mode reads from arbitrary stdin, so it
+ * must not escape the worktree, and a symlink, FIFO, device, or huge file
+ * must not be followed, block, or be read whole.
  */
 export async function read_worktree_file(cwd: string, path: string): Promise<Buffer | null> {
 	const info = await repo_info(cwd);
 	if (info === null || info.toplevel === null) {
 		return null;
 	}
+	if (isAbsolute(path) || path.includes("\0") || path.split("/").includes("..")) {
+		return null;
+	}
+	let file: FileHandle | undefined;
 	try {
-		const content = await readFile(join(info.toplevel, path));
-		if (content.length > MAX_BLOB_BYTES) {
+		file = await open(join(info.toplevel, path),
+				  fs_constants.O_RDONLY | fs_constants.O_NOFOLLOW | fs_constants.O_NONBLOCK);
+		const st = await file.stat();
+		if (!st.isFile() || st.size > MAX_BLOB_BYTES) {
 			return null;
 		}
-		return content;
+		const content = await file.readFile();
+		return content.length > MAX_BLOB_BYTES ? null : content;
 	} catch {
 		return null;
+	} finally {
+		await file?.close();
 	}
 }
 
