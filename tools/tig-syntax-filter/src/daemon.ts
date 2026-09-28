@@ -229,7 +229,30 @@ function daemon_alive(path: string): Promise<boolean> {
 	});
 }
 
+/** Environment variables that select a repository, as listed by `git
+ * rev-parse --local-env-vars`. */
+const REPO_ENV_VARS = [
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
+	"GIT_CONFIG_COUNT", "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE",
+	"GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE", "GIT_INDEX_FILE",
+	"GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
+	"GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+];
+
+/** Drop what the daemon inherited from whichever client happened to spawn
+ * it: every connection names its repository by cwd alone, so e.g. the
+ * GIT_WORK_TREE that tig sets when run as a git alias would otherwise
+ * point every later request's git commands at that one repository, and
+ * the cwd would keep that directory busy for the daemon's lifetime. */
+function forget_spawning_client(): void {
+	for (const name of REPO_ENV_VARS) {
+		delete process.env[name];
+	}
+	process.chdir("/");
+}
+
 async function main(): Promise<void> {
+	forget_spawning_client();
 	const state_home = process.env.XDG_STATE_HOME || join(process.env.HOME ?? "/tmp", ".local", "state");
 	const log_dir = join(state_home, "tig-syntax");
 	await mkdir(log_dir, { recursive: true });
