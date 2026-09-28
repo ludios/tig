@@ -75,6 +75,9 @@
  * section's tokenization budget (daemon side) plus contention from other
  * connections must fit comfortably inside it. */
 #define FRAME_DEADLINE_MS 60000
+/* Lateness past the frame deadline that means we, not the daemon, were not
+ * running (stopped with ^Z or SIGSTOP, starved, blocked writing to tig). */
+#define STALL_MS	1000
 /* Sanity bound on a frame's declared payload size. */
 #define MAX_FRAME_BYTES	(1ull << 30)
 
@@ -804,6 +807,13 @@ main(void)
 			}
 		}
 
+		/* Checking the deadline long after it passed: the time we were
+		 * not running must not count against the daemon, which may well
+		 * have finished meanwhile (a frame waiting partly in the socket,
+		 * partly in the daemon), so it gets a fresh deadline. */
+		if (deadline != 0 && now_ms() > deadline + STALL_MS) {
+			deadline = now_ms() + deadline_ms;
+		}
 		if (deadline != 0 && now_ms() >= deadline) {
 			/* The daemon failed to complete a frame in time. */
 			close(daemon_fd);
