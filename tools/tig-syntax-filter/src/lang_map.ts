@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * Mapping from file names to shiki (VS Code) language identifiers.
@@ -41,7 +42,8 @@ const extension_to_lang: Record<string, string> = {
 	"ml": "ocaml", "mli": "ocaml",
 	"clj": "clojure", "cljs": "clojure", "cljc": "clojure",
 	"scala": "scala",
-	"cs": "csharp",
+	"cs": "csharp", "csx": "csharp", "cake": "csharp",
+	"cshtml": "razor", "razor": "razor",
 	"fs": "fsharp", "fsi": "fsharp",
 	"php": "php",
 	"r": "r",
@@ -52,6 +54,8 @@ const extension_to_lang: Record<string, string> = {
 	"dockerfile": "docker",
 	"diff": "diff", "patch": "diff",
 	"xml": "xml", "svg": "xml",
+	"csproj": "xml", "fsproj": "xml", "vbproj": "xml", "props": "xml", "targets": "xml",
+	"nuspec": "xml", "slnx": "xml", "xaml": "xml", "axaml": "xml",
 	"ini": "ini", "cfg": "ini",
 	"tf": "terraform",
 	"graphql": "graphql", "gql": "graphql",

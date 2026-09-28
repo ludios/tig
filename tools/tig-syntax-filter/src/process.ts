@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * Section processing: turn one diff section into output bytes, either
@@ -42,10 +43,11 @@ export function raw_section_output(section: diff_section): Buffer {
 const undecodable = new Set<string>();
 const UNDECODABLE_MAX = 4096;
 
-/** Decode a Buffer as strict UTF-8, or null when it is not valid UTF-8. */
+/** Decode a Buffer as strict UTF-8, or null when it is not valid UTF-8.
+ * A leading byte-order mark is kept (as U+FEFF), not silently dropped. */
 function decode_utf8(bytes: Buffer): string | null {
 	try {
-		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+		return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 	} catch {
 		return null;
 	}
@@ -58,13 +60,19 @@ function remember_undecodable(identity: string): void {
 	undecodable.add(identity);
 }
 
+const BOM = "\uFEFF";
+
 /**
  * The source document for one side of a file diff: its full text and a
- * cache identity.  `lines` excludes newline characters.
+ * cache identity.  `lines` excludes newline characters.  `bom` is the
+ * byte-order mark ("\uFEFF", or "" when absent) that starts the file and
+ * so line 1 of the diff, but not `text`: editors strip it before
+ * tokenizing, and a grammar would mistake it for code.
  */
 interface side_doc {
 	identity: string;
 	lang: string;
+	bom: string;
 	text: string;
 	lines: string[];
 }
@@ -129,18 +137,20 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 		remember_undecodable(identity);
 		return null;
 	}
-	const text = decode_utf8(content);
-	if (text === null) {
+	const decoded = decode_utf8(content);
+	if (decoded === null) {
 		remember_undecodable(identity);
 		return null;
 	}
+	const bom = decoded.startsWith(BOM) ? BOM : "";
+	const text = decoded.slice(bom.length);
 	const first_newline = text.indexOf("\n");
 	const first_line = first_newline === -1 ? text : text.slice(0, first_newline);
 	const lang = detect_lang(path, first_line);
 	if (lang === null || !(await ensure_lang(lang))) {
 		return null;
 	}
-	return { identity, lang, text, lines: text.split("\n") };
+	return { identity, lang, bom, text, lines: text.split("\n") };
 }
 
 /**
@@ -238,15 +248,18 @@ async function highlight_file_section(cwd: string, section: diff_section,
 				sgr_by_line.set(line_index, null);
 				continue;
 			}
+			// The diff shows a byte-order mark as part of line 1; it passes
+			// through unstyled ahead of the line's tokens.
+			const lead = doc_line === 1 ? doc.bom : "";
 			const body_text = line.bytes.subarray(1).toString("utf8");
 			const source_line = doc.lines[doc_line - 1];
-			if (body_text !== source_line) {
+			if (body_text !== lead + source_line) {
 				logger.info("correspondence mismatch in {path} at source line {line}", {
 					path: info.new_path ?? info.old_path, line: doc_line,
 				});
 				return null;
 			}
-			sgr_by_line.set(line_index, sgr_lines[doc_line - 1]);
+			sgr_by_line.set(line_index, lead + sgr_lines[doc_line - 1]);
 		}
 	}
 

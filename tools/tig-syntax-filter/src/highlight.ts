@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * Tokenization and SGR emission.  Wraps shiki (vscode-textmate +
@@ -26,7 +27,7 @@ const logger = getLogger(["tig-syntax", "highlight"]);
  * Bump when the emission format or an emitted color changes, to invalidate
  * cache keys.
  */
-const EMIT_VERSION = 2;
+const EMIT_VERSION = 3;
 
 /**
  * Foreground overrides for the vendored theme, keyed by the name of the
@@ -319,11 +320,21 @@ export function emit_sgr_lines(token_lines: ThemedToken[][]): string[] {
 	return result;
 }
 
+/** The carriage returns ending `line`: a CRLF terminator's, or several
+ * where line endings were converted twice. */
+function cr_suffix(line: string): string {
+	return line.endsWith("\r") ? /\r+$/.exec(line)![0] : "";
+}
+
 /**
  * Tokenize `content` (a complete source document) as `lang` and return one
  * SGR-annotated string per source line, up to `last_line` (1-based; grammar
  * state only depends on preceding lines, so later lines need no work).
+ * Stripping the SGR from a returned line yields the source line exactly.
  * Lines are cached under `identity` + lang + emit version.
+ *
+ * Like an editor, the grammar never sees a CRLF line's carriage return;
+ * it follows the line's final reset, unstyled.
  *
  * Tokenization runs in CHUNK_LINES batches continued via shiki's
  * GrammarState (verified token-identical to one-shot tokenization), with
@@ -412,9 +423,11 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			line_cache.set(key, { lines, state });
 		}
 	};
+	const emit = (): string[] => emit_sgr_lines(token_lines).map((line, i) =>
+		line + cr_suffix(slice[prefix.length + i]));
 	const keep_partial = (): void => {
 		if (token_lines.length > 0) {
-			keep_if_longer(prefix.concat(emit_sgr_lines(token_lines)));
+			keep_if_longer(prefix.concat(emit()));
 		}
 	};
 	for (let start = prefix.length; start < needed; start += CHUNK_LINES) {
@@ -436,12 +449,14 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			fail_cache_put(fail_key, last_line);
 			return null;
 		}
-		const chunk = slice.slice(start, start + CHUNK_LINES).join("\n");
-		const chunk_tokens = hl.codeToTokensBase(chunk, {
+		const chunk_lines = slice.slice(start, start + CHUNK_LINES);
+		const chunk = chunk_lines.map((line) => line.slice(0, line.length - cr_suffix(line).length));
+		const chunk_tokens = hl.codeToTokensBase(chunk.join("\n"), {
 			lang: lang as never,
 			theme: theme_name as never,
 			grammarState: state as never,
 		});
+		A(chunk_tokens.length === chunk_lines.length, "tokenizer split a chunk into a different number of lines");
 		state = get_state(chunk_tokens);
 		token_lines.push(...chunk_tokens);
 		stats.tokenized_lines += chunk_tokens.length;
@@ -453,7 +468,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		});
 	}
 
-	const result = prefix.concat(emit_sgr_lines(token_lines));
+	const result = prefix.concat(emit());
 	keep_if_longer(result);
 	return result;
 	};
