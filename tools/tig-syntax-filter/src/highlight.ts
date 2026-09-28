@@ -329,10 +329,11 @@ function cr_suffix(line: string): string {
  * run.  Before each batch it checks `deadline` (a performance.now()
  * timestamp, or null) and `cancelled`; if either trips, the lines so far
  * are cached with their grammar state for later requests to resume from,
- * and null is returned.  A missed deadline also records the requested
- * depth for fail-fast; a cancellation doesn't, as abandoned work says
- * nothing about cost.  The deadline is wall time, so under contention
- * sections give up a little earlier.
+ * and null is returned.  A deadline missed mid-work also records the
+ * requested depth for fail-fast.  A cancellation doesn't, nor does a
+ * deadline that passed before any work: neither says anything about cost.
+ * The deadline is wall time, so under contention sections give up a
+ * little earlier.
  *
  * Also returns null when the request is deeper than the configured line
  * cap or a line exceeds MAX_LINE_CHARS.
@@ -423,6 +424,12 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			return null;
 		}
 		if (deadline !== null && performance.now() > deadline) {
+			if (token_lines.length === 0) {
+				// The budget went elsewhere, e.g. to the section's other
+				// side: no verdict on what this document costs.
+				logger.info("deadline passed before tokenizing {lang}", { lang });
+				return null;
+			}
 			const elapsed_ms = Math.round(performance.now() - started);
 			logger.info("budget exhausted tokenizing {lang} at line {done}/{needed} after {ms}ms", {
 				lang, done: token_lines.length, needed, ms: elapsed_ms,

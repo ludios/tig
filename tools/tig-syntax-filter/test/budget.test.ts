@@ -83,28 +83,53 @@ describe("chunked tokenization", () => {
 	}, 60000);
 });
 
+/** A `cancelled` hook that never cancels but, once the first chunk is
+ * done, waits until `deadline` has passed: a deterministic mid-work
+ * deadline miss. */
+function miss_deadline_after_first_chunk(deadline: number): () => boolean {
+	let calls = 0;
+	return () => {
+		calls++;
+		while (calls > 1 && performance.now() <= deadline) {
+			// Spin until the deadline is behind us.
+		}
+		return false;
+	};
+}
+
 describe("tokenization budget", () => {
 	const doc = Array.from({ length: 600 }, (_, i) => `const v_${i} = ${i};`).join("\n");
 
-	it("returns null when the deadline is already exhausted", async () => {
+	it("returns null, without a verdict, when the deadline passed before any work", async () => {
 		const out = await highlight_lines("test|budget-a", "typescript", doc, 600,
 						  performance.now() - 1);
 		expect(out).toBeNull();
+		// The budget went elsewhere; the document itself must still get
+		// its attempt.
+		const retry = await highlight_lines("test|budget-a", "typescript", doc, 600,
+						    performance.now() + 60000);
+		expect(retry).not.toBeNull();
+		expect(retry!.length).toBe(600);
 	});
 
 	it("fails fast on an equally deep revisit even with budget to spare", async () => {
+		const deadline = performance.now() + 50;
+		const missed = await highlight_lines("test|budget-d", "typescript", doc, 600,
+						     deadline, miss_deadline_after_first_chunk(deadline));
+		expect(missed).toBeNull();
 		const before = performance.now();
-		const out = await highlight_lines("test|budget-a", "typescript", doc, 600,
+		const out = await highlight_lines("test|budget-d", "typescript", doc, 600,
 						  performance.now() + 60000);
 		expect(out).toBeNull();
 		expect(performance.now() - before).toBeLessThan(50);
 	});
 
 	it("still attempts (and succeeds at) a shallower depth", async () => {
-		const out = await highlight_lines("test|budget-a", "typescript", doc, 100,
+		// Deeper than the one chunk the miss above cached.
+		const out = await highlight_lines("test|budget-d", "typescript", doc, 200,
 						  performance.now() + 60000);
 		expect(out).not.toBeNull();
-		expect(out!.length).toBeGreaterThanOrEqual(100);
+		expect(out!.length).toBeGreaterThanOrEqual(200);
 	});
 
 	it("stops on cancellation without recording a failure depth", async () => {
