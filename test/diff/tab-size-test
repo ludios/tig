@@ -1,0 +1,43 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+steps '
+	:save-display diff.screen
+'
+
+tigrc <<EOF
+set tab-size = 16
+EOF
+
+git_init
+
+# Tab stops wider than 8 columns must not cut the line off.
+test_tig show <<EOF
+diff --git a/a.c b/a.c
+index 4cf3d9e..ced6838 100644
+--- a/a.c
++++ b/a.c
+@@ -1,2 +1,2 @@
+ int a;
+-	old;
++		new;	/* x */
+EOF
+
+assert_equals 'diff.screen' <<EOF
+diff --git a/a.c b/a.c
+index 4cf3d9e..ced6838 100644
+--- a/a.c
++++ b/a.c
+@@ -1,2 +1,2 @@
+ int a;
+-               old;
++                               new;            /* x */
+ 
+ 
+[diff] Changes to 'a.c' - line 1 of 8                                       100%
+EOF
