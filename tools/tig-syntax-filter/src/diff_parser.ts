@@ -308,7 +308,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 			return null;
 		}
 		if (!text.startsWith("@@")) {
-			return null;
+			// Text after the last complete hunk that belongs to no file:
+			// the next commit's header in a multi-commit stream (`git log
+			// -p`), a format-patch signature.  It passes through raw.
+			break;
 		}
 		const header = parse_hunk_header(text);
 		if (header === null) {

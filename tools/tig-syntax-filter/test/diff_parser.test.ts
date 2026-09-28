@@ -233,6 +233,26 @@ describe("parse_file_section", () => {
 		expect(info?.new_path).toBe("my file.js");
 	});
 
+	it("ends at text following the last complete hunk", () => {
+		// The next commit's header in `git log -p` lands in the previous
+		// commit's last file section.
+		const info = parse_file_section(file_section([
+			"diff --git a/foo.c b/foo.c",
+			"index 1111111..2222222 100644",
+			"--- a/foo.c",
+			"+++ b/foo.c",
+			"@@ -1 +1 @@",
+			"-a",
+			"+b",
+			"commit 0123456789abcdef",
+			"Author: Someone <someone@example.com>",
+			"",
+			"    Next commit",
+		]));
+		expect(info?.hunks.length).toBe(1);
+		expect(info?.hunks[0].body).toEqual([5, 6]);
+	});
+
 	it("rejects hunks whose counts do not match the body", () => {
 		expect(parse_file_section(file_section([
 			"diff --git a/foo.c b/foo.c",
