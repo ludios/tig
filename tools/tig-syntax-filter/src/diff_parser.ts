@@ -42,7 +42,9 @@ export interface diff_section {
  * trailing partial line always waits in `carry` for its newline or EOF.
  */
 export class SectionSplitter {
-	private carry: Buffer = Buffer.alloc(0);
+	/** The trailing partial line in the pieces it arrived in; joining them
+	 * only once its newline arrives keeps a long line linear. */
+	private carry: Buffer[] = [];
 	private current: diff_line[] = [];
 	private current_bytes = 0;
 	private current_kind: "preamble" | "file" | "oversized" = "preamble";
@@ -89,7 +91,14 @@ export class SectionSplitter {
 
 	feed(chunk: Buffer): diff_section[] {
 		const completed: diff_section[] = [];
-		let data = this.carry.length > 0 ? Buffer.concat([this.carry, chunk]) : chunk;
+		if (chunk.indexOf(0x0a) === -1) {
+			// No line completes, so nothing new could stream out either.
+			if (chunk.length > 0) {
+				this.carry.push(chunk);
+			}
+			return completed;
+		}
+		const data = this.carry.length > 0 ? Buffer.concat([...this.carry, chunk]) : chunk;
 		let start = 0;
 
 		while (true) {
@@ -100,7 +109,7 @@ export class SectionSplitter {
 			this.push_line(data.subarray(start, nl), true, completed);
 			start = nl + 1;
 		}
-		this.carry = data.subarray(start);
+		this.carry = start < data.length ? [data.subarray(start)] : [];
 		if (this.current_kind !== "file") {
 			// Stream, do not buffer: everything complete goes out now.
 			const done = this.take_section();
@@ -114,8 +123,8 @@ export class SectionSplitter {
 	finish(): diff_section[] {
 		const completed: diff_section[] = [];
 		if (this.carry.length > 0) {
-			this.push_line(this.carry, false, completed);
-			this.carry = Buffer.alloc(0);
+			this.push_line(Buffer.concat(this.carry), false, completed);
+			this.carry = [];
 		}
 		const done = this.take_section();
 		if (done !== null) {
