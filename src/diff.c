@@ -339,15 +339,28 @@ diff_syntax_only_markers(const char *text)
  * Restore literal ESC bytes on a line whose only escapes are framing
  * markers.  Non-hunk lines (commit message, diff stat, hunk headers) take
  * early returns in diff_common_read() that never reach the SGR decoder,
- * so they are unframed up front to keep stored text lossless.
+ * so they are unframed up front to keep stored text lossless.  The ESC
+ * bytes in the result are content and must not be decoded again.  Returns
+ * a buffer valid until the next call, or NULL when out of memory.
  */
 static const char *
 diff_syntax_unframe(const char *data)
 {
-	static char buf[SIZEOF_MED_STR];
+	static char *buf;
+	static size_t bufsize;
+	size_t size = strlen(data) + 1;	/* Unframing only ever shrinks. */
 	size_t out = 0;
 
-	while (*data && out < sizeof(buf) - 1) {
+	if (size > bufsize) {
+		char *tmp = realloc(buf, size);
+
+		if (!tmp)
+			return NULL;
+		buf = tmp;
+		bufsize = size;
+	}
+
+	while (*data) {
 		if (*data == 0x1b && !prefixcmp(data, SGR_LITERAL_ESC_MARKER)) {
 			buf[out++] = 0x1b;
 			data += STRING_SIZE(SGR_LITERAL_ESC_MARKER);
@@ -520,9 +533,13 @@ bool
 diff_common_read(struct view *view, const char *data, struct diff_state *state)
 {
 	enum line_type type;
+	bool unframed = false;
 
 	if (state->syntax && strchr(data, 0x1b) && diff_syntax_only_markers(data)) {
 		data = diff_syntax_unframe(data);
+		if (!data)
+			return false;
+		unframed = true;
 	}
 
 	type = get_line_type(data);
@@ -602,6 +619,9 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 	if (!opt_diff_indicator && state->reading_diff_chunk &&
 	    !state->stage)
 		data += state->parents;
+
+	if (unframed)
+		return pager_common_read(view, data, type, NULL);
 
 	if (state->syntax && strchr(data, 0x1b))
 		return diff_common_syntax(view, data, type);
