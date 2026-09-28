@@ -41,11 +41,10 @@ const logger = getLogger(["tig-syntax", "git"]);
 const MAX_BLOB_BYTES = 8 * 1024 * 1024;
 const MAX_BATCHERS = 8;
 
-/** A blob response: git's echoed full OID, a content hash as cache
- * `identity`, and the content.  Shared caches key on the hash, not the
- * OID: `refs/replace` can make git serve different bytes under one OID. */
+/** A blob response: its content and a hash of it as cache `identity`.
+ * Shared caches key on the hash, not the OID: `refs/replace` can make git
+ * serve different bytes under one OID. */
 export interface blob_result {
-	oid: string;
 	identity: string;
 	content: Buffer;
 }
@@ -157,8 +156,6 @@ function batch_command_supported(): Promise<boolean> {
 interface blob_request {
 	oid: string;
 	resolve: (blob: blob_result | null) => void;
-	/** Full OID from the info preflight (command mode only). */
-	full_oid?: string;
 }
 
 /**
@@ -263,7 +260,6 @@ class blob_batcher {
 				const entry = this.expected.shift();
 				const content = Buffer.from(this.contiguous().subarray(0, this.payload_size));
 				const result: blob_result = {
-					oid: entry?.request.full_oid ?? "",
 					identity: content_identity(content),
 					content,
 				};
@@ -278,15 +274,15 @@ class blob_batcher {
 			}
 			const next = this.expected[0];
 			A(next !== undefined, "cat-file reply without expectation");
-			const m = /^([0-9a-f]+) (\w+) (\d+)$/.exec(line);
+			const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(line);
 			if (m === null) {
 				// "<oid> missing"/"<oid> ambiguous": no payload follows.
 				this.expected.shift();
 				next.request.resolve(null);
 				continue;
 			}
-			const size = parseInt(m[3], 10);
-			const acceptable = m[2] === "blob" && size <= MAX_BLOB_BYTES;
+			const size = parseInt(m[2], 10);
+			const acceptable = m[1] === "blob" && size <= MAX_BLOB_BYTES;
 			if (next.kind === "info") {
 				this.expected.shift();
 				if (!acceptable) {
@@ -294,7 +290,6 @@ class blob_batcher {
 					continue;
 				}
 				// Ask for the payload; its reply repeats the header.
-				next.request.full_oid = m[1];
 				this.expected.push({ kind: "contents", request: next.request });
 				this.child.stdin.write(`contents ${next.request.oid}\n`);
 				continue;
@@ -306,7 +301,6 @@ class blob_batcher {
 				this.discard_left = size + 1;
 				continue;
 			}
-			next.request.full_oid = m[1];
 			this.payload_size = size;
 		}
 	}
@@ -358,10 +352,9 @@ async function get_batcher(dir: string): Promise<blob_batcher> {
 }
 
 /**
- * The blob `oid` (possibly abbreviated) in the repository at `cwd`, with
- * git's full OID, or null when the object is missing, not a blob, or
- * exceeds the size limit.  Concurrent requests for the same object share
- * one fetch.
+ * The blob `oid` (possibly abbreviated) in the repository at `cwd`, or
+ * null when the object is missing, not a blob, or exceeds the size limit.
+ * Concurrent requests for the same object share one fetch.
  */
 export async function cat_blob(cwd: string, oid: string): Promise<blob_result | null> {
 	const info = await repo_info(cwd);

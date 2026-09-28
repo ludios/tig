@@ -48,12 +48,11 @@ describe("cat_blob batching", () => {
 		expect(big).toBeNull();
 		expect(small).not.toBeNull();
 		expect(small!.content.toString("utf8")).toBe("hello blob\n");
-		// Requests after the rejection still resolve, and an
-		// abbreviated OID comes back in full.
+		// Requests after the rejection still resolve, abbreviated ones
+		// included.
 		const again = await cat_blob(repo, small_oid.slice(0, 12));
 		expect(again).not.toBeNull();
 		expect(again!.content.toString("utf8")).toBe("hello blob\n");
-		expect(again!.oid).toBe(small_oid);
 		expect(again!.identity).toMatch(/^sha256:/);
 	});
 
