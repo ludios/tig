@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* For struct ucred (SO_PEERCRED). */
 #define _GNU_SOURCE
@@ -46,6 +47,7 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -287,15 +289,33 @@ try_connect(const char *path)
 	return fd;
 }
 
+/* Close every descriptor above stderr.  We inherit whatever tig had open
+ * (its terminal, the pipes of its views), and the long-lived daemon must
+ * not pin those for its whole lifetime. */
+static void
+close_inherited_fds(void)
+{
+#ifdef SYS_close_range
+	if (syscall(SYS_close_range, 3u, ~0u, 0) == 0) {
+		return;
+	}
+#endif
+	long max = sysconf(_SC_OPEN_MAX);
+
+	for (long fd = 3; fd < (max > 0 ? max : 1024); fd++) {
+		close((int) fd);
+	}
+}
+
 /*
  * Start the daemon as a direct child in its own session (setsid: signals
  * and process-group kills aimed at us never reach it), stdio to /dev/null
- * (it logs to a file itself).  Returns the child's pid, or -1 when fork
- * fails.  On the happy path the child is never reaped: it outlives us and
- * is reparented when we exit.  Being a direct child is what lets
- * connect_daemon() see a launcher exit without ever listening.  The
- * launcher is found via $TIG_SYNTAX_DAEMON, next to this executable, or
- * on $PATH.
+ * (it logs to a file itself), no other inherited descriptors.  Returns the
+ * child's pid, or -1 when fork fails.  On the happy path the child is never
+ * reaped: it outlives us and is reparented when we exit.  Being a direct
+ * child is what lets connect_daemon() see a launcher exit without ever
+ * listening.  The launcher is found via $TIG_SYNTAX_DAEMON, next to this
+ * executable, or on $PATH.
  */
 static pid_t
 spawn_daemon(void)
@@ -316,6 +336,7 @@ spawn_daemon(void)
 			close(devnull);
 		}
 	}
+	close_inherited_fds();
 
 	const char *launcher = getenv("TIG_SYNTAX_DAEMON");
 
