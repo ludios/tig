@@ -61,6 +61,10 @@ export const CHUNK_LINES = 128;
 const budget_fail_cache = new Map<string, { depth: number, at: number }>();
 const FAIL_CACHE_MAX = 512;
 const FAIL_TTL_MS = 60 * 1000;
+/** A missed deadline is a verdict on a document only when the call spent
+ * at least this share of the budget tokenizing it: a side that got only
+ * what its sibling left says nothing about its own cost. */
+const VERDICT_MIN_BUDGET_SHARE = 0.9;
 
 function fail_cache_put(key: string, last_line: number): void {
 	const prev = budget_fail_cache.get(key);
@@ -320,11 +324,11 @@ function cr_suffix(line: string): string {
  * run.  Before each batch it checks `deadline` (a performance.now()
  * timestamp, or null) and `cancelled`; if either trips, the lines so far
  * are cached with their grammar state for later requests to resume from,
- * and null is returned.  A deadline missed mid-work also records the
- * requested depth for fail-fast.  A cancellation doesn't, nor does a
- * deadline that passed before any work: neither says anything about cost.
- * The deadline is wall time, so under contention sections give up a
- * little earlier.
+ * and null is returned.  A missed deadline also records the requested
+ * depth for fail-fast, but only when the call tokenized for most of the
+ * budget; a cancellation, or a side left with its sibling's leftovers,
+ * says nothing about cost.  The deadline is wall time, so under
+ * contention sections give up a little earlier.
  *
  * Also returns null when the request is deeper than the configured line
  * cap or a line exceeds MAX_LINE_CHARS.
@@ -367,6 +371,9 @@ export async function highlight_lines(identity: string, lang: string, content: s
 
 	const hl = highlighter;
 	const work = async (): Promise<string[] | null> => {
+	if (deadline !== null && performance.now() > deadline) {
+		return null;
+	}
 	const all_lines = content.split("\n");
 	const needed = Math.min(last_line, all_lines.length);
 	if (needed > config.max_lines) {
@@ -415,20 +422,19 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			return null;
 		}
 		if (deadline !== null && performance.now() > deadline) {
-			if (token_lines.length === 0) {
-				// The budget went elsewhere, e.g. to the section's other
-				// side: no verdict on what this document costs.
-				logger.info("deadline passed before tokenizing {lang}", { lang });
-				return null;
-			}
-			const elapsed_ms = Math.round(performance.now() - started);
-			logger.info("budget exhausted tokenizing {lang} at line {done}/{needed} after {ms}ms", {
-				lang, done: token_lines.length, needed, ms: elapsed_ms,
+			const elapsed_ms = performance.now() - started;
+			const verdict = elapsed_ms >= VERDICT_MIN_BUDGET_SHARE * config.budget_ms;
+			logger.info("deadline hit tokenizing {lang} at line {done}/{needed} after {ms}ms; {outcome}", {
+				lang, done: prefix.length + token_lines.length, needed,
+				ms: Math.round(elapsed_ms),
+				outcome: verdict ? "failing fast at this depth" : "too little budget for a verdict",
 			});
 			// Keep whichever cached prefix is longer: a deep retry
 			// that dies early must not shrink an existing entry.
 			keep_partial();
-			fail_cache_put(fail_key, last_line);
+			if (verdict) {
+				fail_cache_put(fail_key, last_line);
+			}
 			return null;
 		}
 		const chunk_lines = slice.slice(start, start + CHUNK_LINES);

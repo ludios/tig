@@ -105,7 +105,8 @@ app_diff_highlight_path_search(char *dest, size_t destlen, const char *query)
  * Resolve the diff-syntax-filter option to an executable: a value with
  * '/' or '~' is a path, anything else is looked up in $PATH; it is never
  * run through a shell.  argv[0] is NULL when nothing executable is found.
- * Only the last value is cached, so :set to another filter re-resolves.
+ * Only a successful lookup of the last value is cached, so a filter
+ * installed after a failed lookup is found on the next call.
  */
 struct app_external *
 app_syntax_filter_load(const char *query)
@@ -118,8 +119,9 @@ app_syntax_filter_load(const char *query)
 	if (!query) {
 		query = "";
 	}
-	if (!strcmp(cached_query, query))
+	if (filter_app.argv[0] && !strcmp(cached_query, query)) {
 		return &filter_app;
+	}
 
 	string_ncopy(cached_query, query, strlen(query));
 	filter_app.argv[0] = NULL;

@@ -9,7 +9,7 @@
  * byte-losslessly.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
@@ -19,6 +19,7 @@ import { configure } from "@logtape/logtape";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
 import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
+import { config } from "../src/config.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -83,22 +84,29 @@ describe("chunked tokenization", () => {
 	}, 60000);
 });
 
-/** A `cancelled` hook that never cancels but, once the first chunk is
- * done, waits until `deadline` has passed: a deterministic mid-work
- * deadline miss. */
-function miss_deadline_after_first_chunk(deadline: number): () => boolean {
-	let calls = 0;
-	return () => {
-		calls++;
-		while (calls > 1 && performance.now() <= deadline) {
-			// Spin until the deadline is behind us.
-		}
-		return false;
-	};
-}
-
 describe("tokenization budget", () => {
 	const doc = Array.from({ length: 600 }, (_, i) => `const v_${i} = ${i};`).join("\n");
+
+	/** Tokenize `doc` as `key` to `depth` under a stopped clock that jumps
+	 * `spent_ms` ahead once the first chunk is done, past the deadline:
+	 * a deterministic mid-work miss after `spent_ms` of tokenizing.  The
+	 * jump rides on cancelled(), which is consulted before each chunk. */
+	async function miss_deadline(key: string, depth: number, spent_ms: number): Promise<string[] | null> {
+		const start = performance.now();
+		let now = start;
+		let chunks = 0;
+		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+		try {
+			return await highlight_lines(key, "typescript", doc, depth, start + spent_ms, () => {
+				if (++chunks === 2) {
+					now = start + spent_ms + 1;
+				}
+				return false;
+			});
+		} finally {
+			clock.mockRestore();
+		}
+	}
 
 	it("returns null, without a verdict, when the deadline passed before any work", async () => {
 		const out = await highlight_lines("test|budget-a", "typescript", doc, 600,
@@ -112,24 +120,26 @@ describe("tokenization budget", () => {
 		expect(retry!.length).toBe(600);
 	});
 
-	it("fails fast on an equally deep revisit even with budget to spare", async () => {
-		const deadline = performance.now() + 50;
-		const missed = await highlight_lines("test|budget-d", "typescript", doc, 600,
-						     deadline, miss_deadline_after_first_chunk(deadline));
-		expect(missed).toBeNull();
-		const before = performance.now();
+	it("fails fast at the depth of a miss that had the budget, not shallower", async () => {
+		expect(await miss_deadline("test|budget-d", 600, config.budget_ms)).toBeNull();
+		const before = stats.tokenized_lines;
 		const out = await highlight_lines("test|budget-d", "typescript", doc, 600,
 						  performance.now() + 60000);
 		expect(out).toBeNull();
-		expect(performance.now() - before).toBeLessThan(50);
+		expect(stats.tokenized_lines).toBe(before);
+		// Deeper than the one chunk the miss cached.
+		const shallower = await highlight_lines("test|budget-d", "typescript", doc, 200,
+							performance.now() + 60000);
+		expect(shallower).not.toBeNull();
+		expect(shallower!.length).toBeGreaterThanOrEqual(200);
 	});
 
-	it("still attempts (and succeeds at) a shallower depth", async () => {
-		// Deeper than the one chunk the miss above cached.
-		const out = await highlight_lines("test|budget-d", "typescript", doc, 200,
-						  performance.now() + 60000);
-		expect(out).not.toBeNull();
-		expect(out!.length).toBeGreaterThanOrEqual(200);
+	it("records no verdict after a miss on a sliver of the budget", async () => {
+		expect(await miss_deadline("test|budget-e", 600, 100)).toBeNull();
+		const retry = await highlight_lines("test|budget-e", "typescript", doc, 600,
+						    performance.now() + 60000);
+		expect(retry).not.toBeNull();
+		expect(retry!.length).toBe(600);
 	});
 
 	it("stops on cancellation without recording a failure depth", async () => {

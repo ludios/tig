@@ -98,8 +98,9 @@ prefetch_clear(struct prefetch_job *job)
 {
 	if (job->pgid > 0) {
 		kill(-job->pgid, SIGKILL);
-		while (waitpid(job->pgid, NULL, 0) < 0 && errno == EINTR)
-			;
+		while (waitpid(job->pgid, NULL, 0) < 0 && errno == EINTR) {
+			/* Interrupted: wait again. */
+		}
 		job->pgid = 0;
 	}
 	job->id[0] = 0;

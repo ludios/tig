@@ -14,7 +14,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configure } from "@logtape/logtape";
-import { cat_blob, has_textconv, shed_git_state } from "../src/git.ts";
+import { cat_blob, content_identity, has_textconv, shed_git_state } from "../src/git.ts";
 
 let repo: string;
 let big_oid: string;
@@ -53,7 +53,8 @@ describe("cat_blob batching", () => {
 		const again = await cat_blob(repo, small_oid.slice(0, 12));
 		expect(again).not.toBeNull();
 		expect(again!.content.toString("utf8")).toBe("hello blob\n");
-		expect(again!.identity).toMatch(/^sha256:/);
+		expect(again!.identity).toBe(content_identity(again!.content));
+		expect(again!.identity).toBe(small!.identity);
 	});
 
 	it("recovers transparently after idle shedding", async () => {
