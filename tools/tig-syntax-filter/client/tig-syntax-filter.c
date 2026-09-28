@@ -687,8 +687,7 @@ main(void)
 			if (errno == EINTR) {
 				continue;
 			}
-			close(daemon_fd);
-			return fallback_passthrough(&spool, acked, stdin_open);
+			goto fallback;
 		}
 
 		if (fds[daemon_slot].revents & (POLLIN | POLLHUP | POLLERR)) {
@@ -699,12 +698,10 @@ main(void)
 					errno == EWOULDBLOCK)) {
 				/* nothing readable after all */
 			} else if (got <= 0) {
-				close(daemon_fd);
-				return fallback_passthrough(&spool, acked, stdin_open);
+				goto fallback;
 			} else {
 				if (!buf_append(&inbox, chunk, (size_t) got)) {
-					close(daemon_fd);
-					return fallback_passthrough(&spool, acked, stdin_open);
+					goto fallback;
 				}
 				int state = drain_frames(&inbox, &acked, sent);
 
@@ -715,12 +712,10 @@ main(void)
 					if (acked == spool.len && !stdin_open) {
 						return 0;
 					}
-					close(daemon_fd);
-					return fallback_passthrough(&spool, acked, stdin_open);
+					goto fallback;
 				}
 				if (state == -1) {
-					close(daemon_fd);
-					return fallback_passthrough(&spool, acked, stdin_open);
+					goto fallback;
 				}
 				if (state == 2) {
 					stall_forgiven = false;
@@ -775,8 +770,7 @@ main(void)
 				sent += (size_t) n;
 			}
 			if (write_failed) {
-				close(daemon_fd);
-				return fallback_passthrough(&spool, acked, stdin_open);
+				goto fallback;
 			}
 			if (!stdin_open && !wr_shutdown &&
 			    header_sent == header_len && sent == spool.len) {
@@ -816,8 +810,7 @@ main(void)
 					return fallback_passthrough(&spool, spool.len, stdin_open);
 				}
 				if (spool.len > SPOOL_MAX) {
-					close(daemon_fd);
-					return fallback_passthrough(&spool, acked, stdin_open);
+					goto fallback;
 				}
 				if (deadline == 0) {
 					deadline = now_ms() + deadline_ms;
@@ -837,13 +830,14 @@ main(void)
 			stall_forgiven = true;
 		} else if (deadline != 0 && now >= deadline) {
 			/* The daemon failed to complete a frame in time. */
-			close(daemon_fd);
-			if (acked < spool.len || stdin_open) {
-				return fallback_passthrough(&spool, acked, stdin_open);
-			}
-			/* Everything is emitted and only the end frame is
-			 * missing; there is nothing left to recover. */
-			return 0;
+			goto fallback;
 		}
 	}
+
+fallback:
+	/* Abandon the daemon and emit what it has not acknowledged raw;
+	 * with everything acknowledged and stdin closed, only the end
+	 * frame was missing and this emits nothing. */
+	close(daemon_fd);
+	return fallback_passthrough(&spool, acked, stdin_open);
 }

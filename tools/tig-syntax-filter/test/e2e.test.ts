@@ -289,28 +289,49 @@ describe("client + daemon end to end", () => {
 	}, 60000);
 });
 
+/** What a scripted daemon answers once it has all input: the bytes to send,
+ * then whether to close the connection (false leaves it open, like a
+ * daemon that stalls after them). */
+interface scripted_reply {
+	data: Buffer,
+	end: boolean,
+}
+
+/** An output frame acknowledging `consumed` input bytes with `payload`
+ * wrapped in markers, so tests can tell framed output from raw. */
+function marked_frame(consumed: number, payload: Buffer): Buffer {
+	const marked = Buffer.concat([Buffer.from("<<"), payload, Buffer.from(">>")]);
+	return Buffer.concat([Buffer.from(`O ${consumed} ${marked.length}\n`), marked]);
+}
+
+/** The well-behaved answer: one frame acknowledging all of `input`, then
+ * the end frame. */
+function complete_reply(input: Buffer): scripted_reply {
+	return { data: Buffer.concat([marked_frame(input.length, input), Buffer.from("E 0\n")]), end: true };
+}
+
 /** A scripted stand-in for the daemon on `path`: it reads the handshake and
- * all input, then, unless `respond` is false (a wedged daemon), answers
- * after `delay_ms` with one frame acknowledging everything whose payload
- * is the input between two markers, and the end frame. */
-async function fake_daemon(path: string, respond: boolean, delay_ms: number): Promise<Server> {
+ * all input, then answers with `reply(input)` after `delay_ms`, or never
+ * when `reply` is null (a wedged daemon). */
+async function fake_daemon(path: string, reply: ((input: Buffer) => scripted_reply) | null,
+			   delay_ms: number): Promise<Server> {
 	const server = createServer({ allowHalfOpen: true }, (socket) => {
 		const chunks: Buffer[] = [];
 		socket.on("data", (chunk: Buffer) => chunks.push(chunk));
 		socket.on("end", () => {
-			if (!respond) {
+			if (reply === null) {
 				return;
 			}
 			const received = Buffer.concat(chunks);
 			const header_end = received.indexOf(0x0a);
 			const cwd_length = Number(received.subarray(0, header_end).toString().split(" ")[1]);
-			const input = received.subarray(header_end + 1 + cwd_length);
-			const payload = Buffer.concat([Buffer.from("<<"), input, Buffer.from(">>")]);
+			const answer = reply(received.subarray(header_end + 1 + cwd_length));
 			setTimeout(() => {
-				socket.end(Buffer.concat([
-					Buffer.from(`O ${input.length} ${payload.length}\n`), payload,
-					Buffer.from("E 0\n"),
-				]));
+				if (answer.end) {
+					socket.end(answer.data);
+				} else {
+					socket.write(answer.data);
+				}
 			}, delay_ms);
 		});
 	});
@@ -318,12 +339,59 @@ async function fake_daemon(path: string, respond: boolean, delay_ms: number): Pr
 	return server;
 }
 
+/** Run the client on `input` against a fake daemon answering with
+ * `reply`, under a 500 ms frame deadline; resolves to its stdout. */
+async function run_against_fake(name: string, input: Buffer,
+				reply: (input: Buffer) => scripted_reply): Promise<Buffer> {
+	const socket_path = join(work, `${name}.sock`);
+	const server = await fake_daemon(socket_path, reply, 0);
+	try {
+		return await run_filter_async(input, filter_env({
+			TIG_SYNTAX_SOCKET: socket_path,
+			TIG_SYNTAX_DEADLINE_MS: "500",
+		}));
+	} finally {
+		server.close();
+	}
+}
+
+describe("client fallback against a misbehaving scripted daemon", () => {
+	const input = Buffer.from(("y".repeat(99) + "\n").repeat(1000));
+	const half = input.length / 2;
+
+	it("emits the unacknowledged rest raw when the daemon hangs up", async () => {
+		const output = await run_against_fake("hangup", input, (received) =>
+			({ data: marked_frame(half, received.subarray(0, half)), end: true }));
+		expect(output.toString()).toBe(`<<${input.subarray(0, half)}>>${input.subarray(half)}`);
+	}, 60000);
+
+	it("emits the unacknowledged rest raw after an early end frame", async () => {
+		const output = await run_against_fake("early-end", input, (received) => ({
+			data: Buffer.concat([marked_frame(half, received.subarray(0, half)), Buffer.from("E 0\n")]),
+			end: false,
+		}));
+		expect(output.toString()).toBe(`<<${input.subarray(0, half)}>>${input.subarray(half)}`);
+	}, 60000);
+
+	it("emits everything raw after a malformed frame", async () => {
+		const output = await run_against_fake("garbage", input, () =>
+			({ data: Buffer.from("Q nonsense\n"), end: false }));
+		expect(output.toString()).toBe(input.toString());
+	}, 60000);
+
+	it("repeats nothing when only the end frame is missing", async () => {
+		const output = await run_against_fake("no-end", input, (received) =>
+			({ data: marked_frame(received.length, received), end: false }));
+		expect(output.toString()).toBe(`<<${input}>>`);
+	}, 60000);
+});
+
 describe("client deadline against a scripted daemon", () => {
 	// Bigger than a socket buffer, so the frame cannot be read in one go.
 	const input = ("x".repeat(99) + "\n").repeat(10000);
 
 	it("does not count time it was stopped against the daemon", async () => {
-		const server = await fake_daemon(join(work, "stop.sock"), true, 300);
+		const server = await fake_daemon(join(work, "stop.sock"), complete_reply, 300);
 		try {
 			const child = spawn(client_bin, [], { cwd: repo, env: filter_env({
 				TIG_SYNTAX_SOCKET: join(work, "stop.sock"),
@@ -348,7 +416,7 @@ describe("client deadline against a scripted daemon", () => {
 	}, 60000);
 
 	it("still falls back at the deadline when the daemon never answers", async () => {
-		const server = await fake_daemon(join(work, "wedged.sock"), false, 0);
+		const server = await fake_daemon(join(work, "wedged.sock"), null, 0);
 		try {
 			const started = performance.now();
 			const output = await run_filter_async(Buffer.from(input), filter_env({
