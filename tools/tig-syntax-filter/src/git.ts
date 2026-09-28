@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * Git plumbing used by the daemon.  Every operation takes the requesting
@@ -192,6 +193,11 @@ class blob_batcher {
 			this.fail();
 		});
 		this.child.on("exit", () => {
+			this.fail();
+		});
+		// Writing to a child that already died raises EPIPE here, which
+		// would otherwise crash the daemon before "exit" is processed.
+		this.child.stdin.on("error", () => {
 			this.fail();
 		});
 		this.child.stdout.on("data", (chunk: Buffer) => {
@@ -430,6 +436,11 @@ class attr_batcher {
 			this.fail();
 		});
 		this.child.on("exit", () => {
+			this.fail();
+		});
+		// Writing to a child that already died raises EPIPE here, which
+		// would otherwise crash the daemon before "exit" is processed.
+		this.child.stdin.on("error", () => {
 			this.fail();
 		});
 		this.child.stdout.on("data", (chunk: Buffer) => {
