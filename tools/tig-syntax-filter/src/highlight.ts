@@ -270,19 +270,11 @@ function style_sequence(color: string | undefined, font_style: number | undefine
 	return sequence;
 }
 
-/**
- * A stable, repository-independent identity for source content.  Git
- * objects are content-addressed, so a FULL object id (as echoed by
- * cat-file — never the diff's abbreviated form, which is unique only
- * within one repository) identifies content globally; worktree bytes are
- * identified by their own hash.  Cross-worktree and cross-clone cache
- * hits fall out for free.
- */
-export function content_identity(oid_or_content: string | Buffer): string {
-	if (typeof oid_or_content === "string") {
-		return `oid:${oid_or_content}`;
-	}
-	const hash = createHash("sha256").update(oid_or_content).digest("hex");
+/** A repository-independent cache identity for source content: a hash of
+ * its bytes, so identical content shares cache entries across worktrees,
+ * clones, and repositories. */
+export function content_identity(content: Buffer): string {
+	const hash = createHash("sha256").update(content).digest("hex");
 	return `sha256:${hash}`;
 }
 
