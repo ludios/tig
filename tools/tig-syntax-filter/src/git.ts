@@ -261,11 +261,11 @@ class blob_batcher {
 					return;
 				}
 				const entry = this.expected.shift();
-				const content = this.contiguous().subarray(0, this.payload_size);
+				const content = Buffer.from(this.contiguous().subarray(0, this.payload_size));
 				const result: blob_result = {
 					oid: entry?.request.full_oid ?? "",
-					identity: "",
-					content: Buffer.from(content),
+					identity: content_identity(content),
+					content,
 				};
 				this.consume(this.payload_size + 1);
 				this.payload_size = -1;
@@ -386,8 +386,6 @@ export async function cat_blob(cwd: string, oid: string): Promise<blob_result | 
 			logger.debug("no blob {oid} in {store}", { oid, store });
 			return null;
 		}
-		// Hash once per fetch; cache hits reuse the stored identity.
-		blob.identity = content_identity(blob.content);
 		blob_cache.set(key, blob);
 		return blob;
 	})();
