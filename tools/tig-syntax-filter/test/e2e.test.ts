@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * End-to-end tests: the real C client talking to the real daemon over a
@@ -217,7 +218,8 @@ describe("client + daemon end to end", () => {
 		}));
 		expect_highlighted(output);
 		const uid = process.geteuid?.() ?? 0;
-		expect(readdirSync(fallback_tmp)).toContain(`tig-syntax-${uid}.sock`);
+		const socket_name = new RegExp(`^tig-syntax-${uid}-[0-9a-f]{12}\\.sock$`);
+		expect(readdirSync(fallback_tmp).some((name) => socket_name.test(name))).toBe(true);
 		// The daemon really is on the fallback socket (not some
 		// pre-existing one): its environment carries our unique TMPDIR.
 		// procfs-only evidence, so asserted only where procfs exists.

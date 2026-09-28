@@ -38,7 +38,10 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
 ## Environment
 
 - `TIG_SYNTAX_SOCKET` — socket path (default
-  `$XDG_RUNTIME_DIR/tig-syntax.sock`).
+  `$XDG_RUNTIME_DIR/tig-syntax-<build id>.sock`, where the build id is a
+  hash of the daemon's sources taken when the client is built, so an
+  upgraded client starts a fresh daemon and the old one idles out).  The
+  client passes the path to the daemon it spawns.
 - `TIG_SYNTAX_DAEMON` — daemon launcher the client should spawn.
 - `TIG_SYNTAX_SPAWN_WAIT_MS` — how long the client waits for a daemon it
   just spawned to start listening before falling back to the raw diff

@@ -17,7 +17,6 @@
 
 import * as net from "node:net";
 import { unlink, mkdir } from "node:fs/promises";
-import { statSync, accessSync, constants as fs_constants } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
@@ -179,41 +178,15 @@ function handle_connection(socket: net.Socket): Promise<void> {
 	});
 }
 
-/** Whether `dir` is a directory this process owns and can create a
- * socket in.  $XDG_RUNTIME_DIR can name another user's directory (e.g. a
- * session su'd from root keeps /run/user/0), where listening fails with
- * EACCES — such a value must be ignored, not obeyed into a spawn loop
- * that never serves anyone. */
-function usable_socket_dir(dir: string): boolean {
-	try {
-		const st = statSync(dir);
-		if (!st.isDirectory() || st.uid !== (process.geteuid?.() ?? st.uid)) {
-			return false;
-		}
-		accessSync(dir, fs_constants.W_OK | fs_constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/** The daemon's unix socket path, honoring $TIG_SYNTAX_SOCKET; must stay
- * in agreement with socket_path() in the C client for any environment. */
+/** The unix socket path to listen on: $TIG_SYNTAX_SOCKET, which the
+ * client sets when it spawns the daemon (the client alone decides where
+ * daemons live, from its environment and the daemon's build id). */
 export function socket_path(): string {
-	const override = process.env.TIG_SYNTAX_SOCKET;
-	if (override !== undefined && override !== "") {
-		return override;
+	const path = process.env.TIG_SYNTAX_SOCKET;
+	if (path === undefined || path === "") {
+		throw new Error("TIG_SYNTAX_SOCKET is not set; the daemon is started by tig-syntax-filter");
 	}
-	const runtime_dir = process.env.XDG_RUNTIME_DIR;
-	if (runtime_dir !== undefined && runtime_dir !== "" && usable_socket_dir(runtime_dir)) {
-		return join(runtime_dir, "tig-syntax.sock");
-	}
-	// $TMPDIR gets the same scrutiny: a stale or unwritable value must
-	// not regress the plain-/tmp case that always worked.
-	const env_tmpdir = process.env.TMPDIR;
-	const tmpdir = env_tmpdir !== undefined && env_tmpdir !== "" &&
-		usable_socket_dir(env_tmpdir) ? env_tmpdir : "/tmp";
-	return join(tmpdir, `tig-syntax-${process.geteuid?.() ?? 0}.sock`);
+	return path;
 }
 
 /** True when another live daemon already listens on `path`. */

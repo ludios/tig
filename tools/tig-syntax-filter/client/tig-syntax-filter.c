@@ -54,6 +54,13 @@
 #include <time.h>
 #include <unistd.h>
 
+/* A hash of the daemon's sources, from the Makefile.  It names the
+ * socket, so clients built against changed daemon sources start and use a
+ * daemon of their own instead of one still running the old code. */
+#ifndef TIG_SYNTAX_BUILD_ID
+#error "build with the Makefile, which defines TIG_SYNTAX_BUILD_ID"
+#endif
+
 #define SPOOL_MAX	(64u * 1024 * 1024)
 /* Interval between connect() attempts while a spawned daemon starts. */
 #define CONNECT_WAIT_MS	50
@@ -189,9 +196,9 @@ usable_socket_dir(const char *dir)
 	       st.st_uid == geteuid() && access(dir, W_OK | X_OK) == 0;
 }
 
-/* The daemon socket path, mirroring socket_path() in daemon.ts (the two
- * must agree in any environment, or the spawned daemon listens where no
- * client looks). */
+/* The daemon socket path: $TIG_SYNTAX_SOCKET, or a name specific to this
+ * build of the daemon in the runtime or temporary directory.  A daemon we
+ * spawn is told this path. */
 static void
 socket_path(char *dest, size_t destlen)
 {
@@ -203,7 +210,8 @@ socket_path(char *dest, size_t destlen)
 		snprintf(dest, destlen, "%s", override);
 	} else if (runtime_dir != NULL && *runtime_dir != '\0' &&
 		   usable_socket_dir(runtime_dir)) {
-		snprintf(dest, destlen, "%s/tig-syntax.sock", runtime_dir);
+		snprintf(dest, destlen, "%s/tig-syntax-%s.sock", runtime_dir,
+			 TIG_SYNTAX_BUILD_ID);
 	} else {
 		/* $TMPDIR gets the same scrutiny: a stale or unwritable value
 		 * must not regress the plain-/tmp case that always worked. */
@@ -211,8 +219,8 @@ socket_path(char *dest, size_t destlen)
 		    !usable_socket_dir(tmpdir)) {
 			tmpdir = "/tmp";
 		}
-		snprintf(dest, destlen, "%s/tig-syntax-%ld.sock", tmpdir,
-			 (long) geteuid());
+		snprintf(dest, destlen, "%s/tig-syntax-%ld-%s.sock", tmpdir,
+			 (long) geteuid(), TIG_SYNTAX_BUILD_ID);
 	}
 }
 
@@ -323,10 +331,11 @@ close_inherited_fds(void)
  * reaped: it outlives us and is reparented when we exit.  Being a direct
  * child is what lets connect_daemon() see a launcher exit without ever
  * listening.  The launcher is found via $TIG_SYNTAX_DAEMON, next to this
- * executable, or on $PATH.
+ * executable, or on $PATH, and is told to listen on `sock_path` through
+ * $TIG_SYNTAX_SOCKET.
  */
 static pid_t
-spawn_daemon(void)
+spawn_daemon(const char *sock_path)
 {
 	pid_t pid = fork();
 
@@ -345,6 +354,9 @@ spawn_daemon(void)
 		}
 	}
 	close_inherited_fds();
+	if (setenv("TIG_SYNTAX_SOCKET", sock_path, 1) != 0) {
+		_exit(127);
+	}
 
 	const char *launcher = getenv("TIG_SYNTAX_DAEMON");
 
@@ -451,7 +463,7 @@ connect_daemon(void)
 		if (!spawned && fd == CONNECT_ABSENT) {
 			lock_fd = spawn_lock(path);
 			if (lock_fd != LOCK_BUSY) {
-				child = spawn_daemon();
+				child = spawn_daemon(path);
 				spawned = true;
 				if (child < 0) {
 					break;
