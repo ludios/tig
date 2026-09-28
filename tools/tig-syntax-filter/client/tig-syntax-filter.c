@@ -218,7 +218,7 @@ socket_path(char *dest, size_t destlen)
 /* try_connect() verdicts besides a connected fd. */
 #define CONNECT_ABSENT	-1	/* nothing listens (or the socket is unusable) */
 #define CONNECT_BACKLOG	-2	/* a daemon listens but its accept backlog is full */
-#define CONNECT_FOREIGN	-3	/* another user's listener owns the path */
+#define CONNECT_FOREIGN	-3	/* another user owns the path or its listener */
 
 /* Connect to the daemon at `path` without blocking; a connected,
  * nonblocking fd or one of the verdicts above. */
@@ -226,10 +226,17 @@ static int
 try_connect(const char *path)
 {
 	struct sockaddr_un addr;
+	struct stat st;
 	int fd;
 
 	if (strlen(path) >= sizeof(addr.sun_path)) {
 		return CONNECT_ABSENT;
+	}
+	/* Whatever another user planted at the path (possible in the /tmp
+	 * fallback) — a file, a dead socket, a listener that never accepts —
+	 * no daemon of ours can ever listen there. */
+	if (lstat(path, &st) == 0 && st.st_uid != geteuid()) {
+		return CONNECT_FOREIGN;
 	}
 	fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0) {
