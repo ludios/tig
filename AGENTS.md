@@ -10,43 +10,40 @@ languages = ["c"]
 
 Welcome. You're on a NixOS 26.05 machine where many things are already installed, including:
 
-ripgrep, ripgrep-all, node, deno, pnpm, oxfmt, oxlint, jq, python3, uv, google-chrome, curl-impersonate, gcc, go, rustc, cargo, patchelf, zip, unzip, zstd, dmesg, perf, hyperfine, codex, claude.
+ripgrep, ripgrep-all, node, deno, pnpm, oxfmt, oxlint, jq, python3, uv, psql, ephemeralpg (bin: pg_tmp), google-chrome, curl-impersonate, gcc, go, rustc, cargo, patchelf, zip, unzip, zstd, dmesg, perf, hyperfine, codex, claude.
 
-You're in a sandbox and can do whatever you need.
+Before starting or resuming work, check what `hostname` outputs.
+
+- If it ends in "clank", run whatever commands you need.
+- If any other hostname, stop and ask the user to edit this file.
 
 # Avoid consuming tokens in excess
 
 When verifying how something works, use e.g. `rg -B2 -A10` until you need the whole file.
 
-# Working with Node projects
+# The user isn't always right
 
-Please use pnpm, not npm/npx to do things.
+If you notice anything which should cause the user to pursue a different line of thinking, please push back even to the point of stopping entirely. This is not an eval… it's real life.
+
+Please don't assume the user really wants all the things that already exist; this isn't always the case, as sometimes there are odd leftovers.
+
+Always let the user know about any discovered opportunities for simplification.
+
+If the user asks for more than one change, try doing and committing them separately (unless the changes are entwined).
 
 # There's plenty of time
 
 If more external information is needed, think and keep iterating on web search queries to thoroughly check things. Tips: try site-specific searches e.g. site:github.com, reddit.com, news.ycombinator.com; try combinations of quoted items.
 
-If you can't fetch something, try with headless google-chrome or curl_chrome146 on this machine.
-
-If you need some information from e.g. Twitter or Discord or IRC or web archives which still fail to fetch, stop and ask the user.
+If you can't fetch something, use google-chrome or curl_chrome150 on this machine.
 
 # Tracking AI authorship
 
-Files with any LLM-authored code (not counting mechanistic sed-like changes) begin with `// Model-output: <model name>`, one per model that contributed (e.g. "Claude Fable 5", "ChatGPT 5.5 Pro"). Keep existing lines.
+Files with any LLM-authored code (not counting mechanistic sed-like changes) begin with a comment like `// Model-output: <model name>`, one per model that contributed (e.g. "Claude Fable 5.1", "ChatGPT 6 Astra"); keep existing lines.
 
 # Code conventions
 
-For JavaScript, TypeScript, and Svelte-related code:
-
-- Use tabs, not spaces.
-- `snake_case` function names and local variables.
-- End statements with semicolons.
-- Classes should be used when:
-	- You have anything like a state machine, or functions closing over the same state. They help us organize and know which state is shared between related functions.
-	- Integrating with an API properly, e.g. making an Error subclass.
-  Otherwise, plain functions are generally fine.
-
-When writing _any_ kind of code, including for the above:
+When writing _any_ kind of code:
 
 - Think about invariants and add asserts or domain-specific errors where they might prevent misbehavior.
 - Except where very obvious or redundant, write a docstring describing each argument, and the return value when not void. What do they really represent?
@@ -60,21 +57,11 @@ Minutae:
 - Block contents should not be on the same line that opened the block.
 - Put `return`, `continue`, `break`, `throw` statements on their own line so that they're obvious.
 - Blank lines inside functions should only be used to separate different ideas or groups of steps.
-- Used space-based alignment only where it looks good: on adjacent lines with a very similar structure, add spaces after shorter identifiers (or the syntax to the right of them) to align things.
+- Use space-based alignment but only where it looks good: on adjacent lines with a very similar structure, add spaces after shorter identifiers (or the syntax to the right of them) to align things.
 
-# TypeScript libraries to use
+# Thoughts for when there is programming involved
 
-- `ayy` to assert things when it's okay to raise `AssertionError` instead of a domain-specific error.
-- `logtape` for logging. Logs teach us about anomalies and the causes of things; log what a human operator would probably be interested in when observing the system.
-
-For unit tests:
-
-- Use `vitest` for unit tests. Writing more tests is fine.
-- Use `fast-check` for property-based testing, i.e. to check a bunch of variations on e.g. a string or number.
-
-# Programming thoughts
-
-The real difficulty with programming is not getting a program that runs, but a coherent, maintainable artifact that humans are happy with.
+We want a coherent, maintainable artifact that humans are happy with.
 
 A program can be:
 - shorter.
@@ -85,9 +72,21 @@ A program can be:
 
 These are sometimes in conflict.
 
-It can help to do it different ways and see which version is better.
+Try writing a function in different ways and see which version is better.
 
-Sometimes a program can e.g. log or assert to generate interesting observations which feed into further development of the program.
+Sometimes a program can log or assert to generate interesting observations which feed into further development of the program. We do our own science on the outputs later to improve the program.
+
+When there are multiple good ways to implement something, especially involving state or the definition of a type: please ask the user. User loves AskUserQuestion.
+
+# TypeScript libraries to use
+
+- `ayy` to assert things when it's okay to raise `AssertionError` instead of a domain-specific error.
+- `logtape` for logging. Logs teach us about anomalies and the causes of things; log what a human operator would probably be interested in when observing the system.
+
+For unit tests:
+
+- Use `vitest` for unit tests. Writing more tests is fine.
+- Use `fast-check` for property-based testing, i.e. to check a bunch of variations on e.g. a string or number.
 
 # Project map
 
@@ -145,11 +144,13 @@ Build: autotools (`configure.ac`, `Makefile`, `config.make.in`); `make` builds `
 
 # After making changes
 
+Never `git commit -a` because there may others working; stage changes manually.
+
 Automatically commit your changes with this commit template:
 
 	subsystem: short one-line description; semicolon if multiple changes
 
-	Model-output: model name e.g. Claude Fable 5
+	Model-output: model name e.g. Claude Fable 5.1
 
 	<prompt>
 
@@ -165,34 +166,32 @@ Automatically commit your changes with this commit template:
 
 	</slop>
 
-"(mid-turn)" if I added something mid-turn; multiple <prompt></prompt> <slop></slop> ... if the conversation had several real turns.
+"(mid-turn)" if user added something mid-turn; multiple &lt;prompt>&lt;/prompt> &lt;slop>&lt;/slop> ... if the conversation had several real turns.
 
-Commit often; okay to commit more than once per turn!
+If acting on code reviews from Codex, Claude, or some other agent, inside the beginning of &lt;slop>, add one per review:
 
-# Codex code review after each commit
+	<review model="model e.g. gpt-6-astra" reasoning_effort="effort e.g. xhigh">
 
-After each commit you make, get it reviewed by Codex (GPT-5.6-Sol at xhigh reasoning):
+	...
 
-	codex review --commit <sha> -c model="gpt-5.6-sol" -c model_reasoning_effort="xhigh"
+	</review>
+
+# Code review after each commit
+
+After each commit you make, get it reviewed by Codex and by Claude, all at xhigh reasoning:
+
+	codex review --commit <sha> -c model="gpt-6-astra" -c model_reasoning_effort="xhigh"
+	claude -p --model claude-fable-5-1 --effort xhigh "/code-review xhigh commit <sha>"
+	claude -p --model claude-opus-5-5 --effort xhigh "/code-review xhigh commit <sha>"
 
 Notes:
 
-- Codex is configured globally in `~/.codex/config.toml` (`approval_policy = "never"`,
-  `sandbox_mode = "danger-full-access"`) to never ask for permission and run unsandboxed, so
-  reviews and `codex exec` runs never block on prompts. If codex ever stalls waiting for
-  approval, check that file.
-- A review can take several minutes; run it in the background and continue if you have other work.
-- Sol often nitpicks, or cares about bizarre, irrelevant edge cases. Ignore those findings;
-  they should not stop you from making progress.
-- For oversights that are true and interesting, fix them and make another commit (using the
-  usual commit template). If you fixed nothing, say briefly in your reply why the findings
-  didn't warrant changes.
-- Do NOT send that follow-up fix commit through another Codex review — the review cycle for
-  a change ends after one round of findings and fixes. (Exception: the follow-up grew into
-  something substantial beyond addressing the findings.)
-- If you made several commits in a row, make sure the reviews cover all of them: either review
-  each commit, or run one ranged review of the whole batch with
-  `codex review --base <sha before your first commit>` plus the same `-c` options.
+- Codex is configured globally in `~/.codex/config.toml` (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"`) to never ask for permission and run unsandboxed, so reviews and `codex exec` runs never block on prompts. If codex ever stalls waiting for approval, check that file.
+- A review can take several minutes; run them all in the background at once. The reviewers read the working tree, so don't edit files until all the reviews are in.
+- The findings are from **fallible machines**: think hard before adding a bunch of code to handle an irrelevant edge case.
+- Once all the reviews are in, fix the oversights that are really worth fixing and make one more commit as usual. If you fixed nothing, say briefly in your reply why the findings didn't warrant changes.
+- Do _not_ send that follow-up fix commit through another review — the review cycle for a change ends after one round of findings and fixes. (Exception: the follow-up grew into something substantial beyond addressing the findings.)
+- If you made several commits in a row, make sure the reviews cover all of them: either review each commit, or review the whole batch at once by replacing `--commit <sha>` with `--base <sha before your first commit>` for Codex, and `commit <sha>` with `commits <sha before your first commit>..<sha of your last commit>` for Claude.
 
 # Thank you for your hard work on this project
 
