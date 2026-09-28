@@ -162,10 +162,15 @@ export function unquote_git_path(quoted: string): string | null {
 	while (i < inner.length) {
 		const ch = inner.charCodeAt(i);
 		if (ch !== 0x5c) {
-			// Multi-byte UTF-8 in a quoted path is always escaped by git,
-			// so plain chars here are ASCII.
-			bytes.push(ch);
-			i++;
+			if (ch < 0x80) {
+				bytes.push(ch);
+				i++;
+			} else {
+				// Unescaped UTF-8, as with core.quotePath=false.
+				const char = String.fromCodePoint(inner.codePointAt(i)!);
+				bytes.push(...Buffer.from(char, "utf8"));
+				i += char.length;
+			}
 			continue;
 		}
 		const esc = inner[i + 1];

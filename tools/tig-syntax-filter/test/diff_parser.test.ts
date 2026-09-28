@@ -119,6 +119,11 @@ describe("unquote_git_path", () => {
 		expect(unquote_git_path("\"a/q\\\"uote\"")).toBe("a/q\"uote");
 	});
 
+	it("keeps unescaped UTF-8 (core.quotePath=false)", () => {
+		expect(unquote_git_path("\"a/中\\ttab-é.js\"")).toBe("a/中\ttab-é.js");
+		expect(unquote_git_path("\"a/😀\\\"q.js\"")).toBe("a/😀\"q.js");
+	});
+
 	it("rejects malformed quoting", () => {
 		expect(unquote_git_path("\"unterminated")).toBe(null);
 		expect(unquote_git_path("\"bad\\z\"")).toBe(null);
