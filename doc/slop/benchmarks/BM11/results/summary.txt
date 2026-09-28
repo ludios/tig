@@ -1,0 +1,58 @@
+first-screen (n=20 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc      197.6     205.5    16.2     191.2    +0.0%
+  mi     glibc      195.1     202.3    13.4     191.6    -1.3%
+  glibc  mi         191.6     202.7    18.6     179.6    -3.0%
+  mi     mi         188.2     193.5    13.2     182.2    -4.7%
+first-screen-nountracked (n=10 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc       78.1      89.4    20.1      74.4    +0.0%
+  mi     glibc       78.4      90.1    18.4      73.9    +0.4%
+  glibc  mi          73.0      88.0    20.3      71.5    -6.4%
+  mi     mi          75.0      81.5    15.8      71.5    -3.9%
+load-graph-30k (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc    16351.5   16312.9    95.2   16178.1    +0.0%
+  mi     glibc    16116.0   16153.2    78.4   16075.3    -1.4%
+  glibc  mi       16234.9   16243.4    67.5   16172.9    -0.7%
+  mi     mi       16158.2   16177.7   106.3   16079.2    -1.2%
+load-nograph (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc     6620.8    6668.9   127.5    6594.5    +0.0%
+  mi     glibc     6609.3    6606.2    19.5    6587.5    -0.2%
+  glibc  mi        6335.4    6324.2    40.1    6265.6    -4.3%
+  mi     mi        6336.9    6346.6    45.0    6291.8    -4.3%
+switch-off-0 (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc      340.2     341.7     4.0     337.3    +0.0%
+  mi     glibc      348.5     352.0     9.4     345.1    +2.4%
+  glibc  mi         330.2     335.1    14.1     326.1    -2.9%
+  mi     mi         331.6     334.4    15.4     321.5    -2.5%
+switch-off-300 (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc     7607.5    7639.7    97.1    7517.8    +0.0%
+  mi     glibc     7589.1    7648.7   131.4    7571.4    -0.2%
+  glibc  mi        7424.8    7659.8   545.6    7376.3    -2.4%
+  mi     mi        7567.8    7684.4   335.2    7378.5    -0.5%
+switch-on-0 (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc      347.6     351.0     8.9     344.3    +0.0%
+  mi     glibc      351.5     359.5    17.3     344.5    +1.1%
+  glibc  mi         331.3     335.8     9.7     327.4    -4.7%
+  mi     mi         328.7     346.8    28.7     324.9    -5.4%
+switch-on-300 (n=5 per combo)
+  tig    git       median      mean      sd       min  vs base
+  glibc  glibc    15852.4   15834.1    59.9   15730.9    +0.0%
+  mi     glibc    15872.6   15877.2    74.1   15770.5    +0.1%
+  glibc  mi       15661.2   15674.4    54.2   15634.6    -1.2%
+  mi     mi       15745.1   15933.3   558.2   15578.7    -0.7%
+switch, filter on: per-switch ms (difference of medians / 300)
+  tig=glibc git=glibc  51.68 ms   +0.0%
+  tig=mi    git=glibc  51.74 ms   +0.1%
+  tig=glibc git=mi     51.10 ms   -1.1%
+  tig=mi    git=mi     51.39 ms   -0.6%
+switch, filter off: per-switch ms (difference of medians / 300)
+  tig=glibc git=glibc  24.22 ms   +0.0%
+  tig=mi    git=glibc  24.14 ms   -0.4%
+  tig=glibc git=mi     23.65 ms   -2.4%
+  tig=mi    git=mi     24.12 ms   -0.4%

@@ -1,6 +1,7 @@
 # Benchmark data for doc/slop/performance-ideas.md
 
 Model-output: Claude Fable 5
+Model-output: Claude Opus 5.5
 
 Raw data collected 2026-08-10; machine and caveats in `environment.txt`.
 Benchmark definitions (what gates what) live in `../performance-ideas.md`.
@@ -50,3 +51,10 @@ runners never touch an interactive tig session's daemon.
   `hyperfine-L{1,2,3,4}-*.json` (git show alone → echo daemon → tokenization
   stubbed → full pipeline), `eld.log` (per-connection event-loop delay from
   the instrumented daemon; L3/L4 phases).
+- `BM11/` — mimalloc in tig and/or in the git it spawns, on nixpkgs
+  (added 2026-09-28; Model-output: Claude Opus 5.5): `run-bm11.sh`
+  (builds both tigs from HEAD plus `gitwrap.c` git shims with/without
+  `LD_PRELOAD`), `bench.py` (pty timer: first-screen or TIG_SCRIPT modes,
+  combos shuffled per round), `summarize.py`, `results/*.csv` +
+  `results/summary.txt`.  Verdict: ≤5% anywhere, mostly git-side; not
+  worth shipping.  Details in `BM11/README.md`.
