@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * The tig-syntax highlight daemon: a unix-socket server that accepts a
@@ -15,7 +16,7 @@
  */
 
 import * as net from "node:net";
-import { unlink, mkdir, chmod } from "node:fs/promises";
+import { unlink, mkdir } from "node:fs/promises";
 import { statSync, accessSync, constants as fs_constants } from "node:fs";
 import { join } from "node:path";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
@@ -285,7 +286,19 @@ async function main(): Promise<void> {
 				logger.info("another daemon is live on {path}, exiting", { path });
 				process.exit(0);
 			}
-			await unlink(path).catch(() => {});
+			// A dead daemon's socket: replace it.  One that cannot be
+			// removed (another user's file in a sticky /tmp, a
+			// read-only directory) would make listening fail forever.
+			try {
+				await unlink(path);
+			} catch (unlink_err) {
+				if ((unlink_err as NodeJS.ErrnoException).code !== "ENOENT") {
+					logger.error("cannot replace stale {path}: {err}", {
+						path, err: String(unlink_err),
+					});
+					process.exit(1);
+				}
+			}
 			server.listen(path);
 			return;
 		}
@@ -293,10 +306,11 @@ async function main(): Promise<void> {
 		process.exit(1);
 	});
 
+	// Owner-only from the moment the socket exists (a chmod after listen
+	// leaves a window): it may live in a world-writable /tmp fallback.
+	// The client additionally checks the peer UID.
+	process.umask(0o077);
 	server.listen(path, () => {
-		// Owner-only: the socket may live in a world-writable /tmp
-		// fallback; the client additionally checks the peer UID.
-		void chmod(path, 0o600).catch(() => {});
 		logger.info("listening on {path} (pid {pid})", { path, pid: process.pid });
 		logger.info("budgets: {budget_ms}ms/section, max {max_lines} lines, passthrough over {max_section_bytes} bytes, caches {line_cache_mb}+{blob_cache_mb}MB", config);
 		schedule_idle_exit();
