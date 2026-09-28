@@ -15,9 +15,9 @@
 import { createHash } from "node:crypto";
 import { getLogger } from "@logtape/logtape";
 import { parse_file_section, type diff_section, type file_info } from "./diff_parser.ts";
-import { ensure_lang, highlight_lines, frame_content, content_identity } from "./highlight.ts";
+import { ensure_lang, highlight_lines, frame_content } from "./highlight.ts";
 import { detect_lang } from "./lang_map.ts";
-import { cat_blob, read_worktree_file, has_textconv, repo_info } from "./git.ts";
+import { cat_blob, content_identity, read_worktree_file, has_textconv, repo_info } from "./git.ts";
 import { config } from "./config.ts";
 
 const logger = getLogger(["tig-syntax", "process"]);

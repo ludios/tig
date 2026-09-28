@@ -29,10 +29,10 @@ import { promisify } from "node:util";
 import { open, realpath, type FileHandle } from "node:fs/promises";
 import { constants as fs_constants } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
 import { A } from "ayy";
 import { getLogger } from "@logtape/logtape";
 import { ByteLRU } from "./lru.ts";
-import { content_identity } from "./highlight.ts";
 import { config } from "./config.ts";
 
 const execfile_p = promisify(execFile);
@@ -48,6 +48,14 @@ export interface blob_result {
 	oid: string;
 	identity: string;
 	content: Buffer;
+}
+
+/** A repository-independent cache identity for source content: a hash of
+ * its bytes, so identical content shares cache entries across worktrees,
+ * clones, and repositories. */
+export function content_identity(content: Buffer): string {
+	const hash = createHash("sha256").update(content).digest("hex");
+	return `sha256:${hash}`;
 }
 
 /** A repository's canonical identities, resolved from a client cwd. */

@@ -16,7 +16,6 @@ import { config } from "./config.ts";
 import { ByteLRU } from "./lru.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { A } from "ayy";
@@ -269,14 +268,6 @@ function style_sequence(color: string | undefined, font_style: number | undefine
 	style_memo.set(memo_key, sequence);
 	A(style_memo.size < 100000, "style memo unbounded");
 	return sequence;
-}
-
-/** A repository-independent cache identity for source content: a hash of
- * its bytes, so identical content shares cache entries across worktrees,
- * clones, and repositories. */
-export function content_identity(content: Buffer): string {
-	const hash = createHash("sha256").update(content).digest("hex");
-	return `sha256:${hash}`;
 }
 
 /** Render token lines into SGR-annotated strings (exported for tests). */
