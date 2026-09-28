@@ -76,8 +76,11 @@
  * connections must fit comfortably inside it. */
 #define FRAME_DEADLINE_MS 60000
 /* Lateness past the frame deadline that means we, not the daemon, were not
- * running (stopped with ^Z or SIGSTOP, starved, blocked writing to tig). */
-#define STALL_MS	1000
+ * running (stopped with ^Z or SIGSTOP, or starved): poll() otherwise wakes
+ * up within milliseconds of the deadline. */
+#define STALL_MS	250
+/* Longest path a unix socket can be bound or connected at. */
+#define SOCKET_PATH_MAX	(sizeof(((struct sockaddr_un *) 0)->sun_path) - 1)
 /* Sanity bound on a frame's declared payload size. */
 #define MAX_FRAME_BYTES	(1ull << 30)
 
@@ -211,18 +214,26 @@ socket_path(char *dest, size_t destlen)
 
 	if (override != NULL && *override != '\0') {
 		snprintf(dest, destlen, "%s", override);
-	} else if (runtime_dir != NULL && *runtime_dir != '\0' &&
-		   usable_socket_dir(runtime_dir)) {
+		return;
+	}
+	if (runtime_dir != NULL && *runtime_dir != '\0' &&
+	    usable_socket_dir(runtime_dir)) {
 		snprintf(dest, destlen, "%s/tig-syntax-%s.sock", runtime_dir,
 			 TIG_SYNTAX_BUILD_ID);
-	} else {
-		/* $TMPDIR gets the same scrutiny: a stale or unwritable value
-		 * must not regress the plain-/tmp case that always worked. */
-		if (tmpdir == NULL || *tmpdir == '\0' ||
-		    !usable_socket_dir(tmpdir)) {
-			tmpdir = "/tmp";
+		if (strlen(dest) <= SOCKET_PATH_MAX) {
+			return;
 		}
-		snprintf(dest, destlen, "%s/tig-syntax-%ld-%s.sock", tmpdir,
+	}
+	/* $TMPDIR gets the same scrutiny: a stale or unwritable value must
+	 * not regress the plain-/tmp case that always worked, and neither
+	 * may a directory too deep to hold a socket. */
+	if (tmpdir == NULL || *tmpdir == '\0' || !usable_socket_dir(tmpdir)) {
+		tmpdir = "/tmp";
+	}
+	snprintf(dest, destlen, "%s/tig-syntax-%ld-%s.sock", tmpdir,
+		 (long) geteuid(), TIG_SYNTAX_BUILD_ID);
+	if (strlen(dest) > SOCKET_PATH_MAX) {
+		snprintf(dest, destlen, "/tmp/tig-syntax-%ld-%s.sock",
 			 (long) geteuid(), TIG_SYNTAX_BUILD_ID);
 	}
 }
@@ -241,7 +252,7 @@ try_connect(const char *path)
 	struct stat st;
 	int fd;
 
-	if (strlen(path) >= sizeof(addr.sun_path)) {
+	if (strlen(path) > SOCKET_PATH_MAX) {
 		return CONNECT_ABSENT;
 	}
 	/* Whatever another user planted at the path (possible in the /tmp
@@ -455,6 +466,11 @@ connect_daemon(void)
 	int fd;
 
 	socket_path(path, sizeof(path));
+	if (strlen(path) > SOCKET_PATH_MAX) {
+		/* Only an explicit $TIG_SYNTAX_SOCKET gets here; no daemon we
+		 * spawn could ever listen at it. */
+		return -1;
+	}
 	fd = try_connect(path);
 	if (fd >= 0) {
 		return fd;
@@ -617,6 +633,7 @@ main(void)
 	size_t header_len;
 	size_t header_sent = 0;
 	long long deadline = 0;		/* 0 = disarmed */
+	bool stall_forgiven = false;	/* since the last completed frame */
 	const long long deadline_ms = env_ms("TIG_SYNTAX_DEADLINE_MS", FRAME_DEADLINE_MS, 100, 600000);
 	int daemon_fd;
 
@@ -706,6 +723,7 @@ main(void)
 					return fallback_passthrough(&spool, acked, stdin_open);
 				}
 				if (state == 2) {
+					stall_forgiven = false;
 					/* A complete frame is progress: re-arm.
 					 * With everything acknowledged and stdin
 					 * still open there is no outstanding work
@@ -807,14 +825,17 @@ main(void)
 			}
 		}
 
-		/* Checking the deadline long after it passed: the time we were
-		 * not running must not count against the daemon, which may well
-		 * have finished meanwhile (a frame waiting partly in the socket,
-		 * partly in the daemon), so it gets a fresh deadline. */
-		if (deadline != 0 && now_ms() > deadline + STALL_MS) {
-			deadline = now_ms() + deadline_ms;
-		}
-		if (deadline != 0 && now_ms() >= deadline) {
+		long long now = now_ms();
+
+		/* Checking the deadline well after it passed means we were not
+		 * running, and the daemon may have finished meanwhile (its frame
+		 * waiting partly in the socket, partly in the daemon): time we
+		 * could not read must not count against it.  Once per frame, so
+		 * that sustained starvation cannot shield a wedged daemon. */
+		if (deadline != 0 && now > deadline + STALL_MS && !stall_forgiven) {
+			deadline = now + deadline_ms;
+			stall_forgiven = true;
+		} else if (deadline != 0 && now >= deadline) {
 			/* The daemon failed to complete a frame in time. */
 			close(daemon_fd);
 			if (acked < spool.len || stdin_open) {

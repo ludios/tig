@@ -328,7 +328,8 @@ Independent, upstreamable on its own (closes jonas/tig#227). No syntax code yet.
 
 Upgrade the filter for production:
 
-- **Daemon**: shiki instance listening on `$XDG_RUNTIME_DIR/tig-syntax.sock`,
+- **Daemon**: shiki instance listening on `$XDG_RUNTIME_DIR/tig-syntax-<build id>.sock`
+  (id: a hash of the daemon sources baked into the client; the client passes the path),
   lazily spawned by the thin client on first use; grammars/theme + the Oniguruma
   WASM engine (pinned, explicitly instantiated) loaded once.
 - **Transactional client, not a dumb pipe**: once bytes are fed to a dying daemon

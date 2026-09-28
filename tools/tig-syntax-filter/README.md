@@ -30,6 +30,10 @@ in the repository root.
 	pnpm install               # once, for the daemon's dependencies
 	make -C client             # builds bin/tig-syntax-filter
 
+Re-run `make -C client` after every update: the client bakes in a hash of
+the daemon's sources and uses it to find (or start) a matching daemon, so
+a stale client keeps talking to a daemon running the old code.
+
 Then put `bin/` on PATH (both `tig-syntax-filter` and
 `tig-syntax-daemon` live there; the client finds the daemon launcher
 next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add

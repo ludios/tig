@@ -180,13 +180,11 @@ function handle_connection(socket: net.Socket): Promise<void> {
 
 /** The unix socket path to listen on: $TIG_SYNTAX_SOCKET, which the
  * client sets when it spawns the daemon (the client alone decides where
- * daemons live, from its environment and the daemon's build id). */
-export function socket_path(): string {
+ * daemons live, from its environment and the daemon's build id), or null
+ * when unset. */
+export function socket_path(): string | null {
 	const path = process.env.TIG_SYNTAX_SOCKET;
-	if (path === undefined || path === "") {
-		throw new Error("TIG_SYNTAX_SOCKET is not set; the daemon is started by tig-syntax-filter");
-	}
-	return path;
+	return path === undefined || path === "" ? null : path;
 }
 
 /** True when another live daemon already listens on `path`. */
@@ -252,7 +250,8 @@ function listen_private(server: net.Server, path: string, on_listening?: () => v
 
 async function main(): Promise<void> {
 	// Relative settings mean the spawning client's cwd, as in the client.
-	const path = resolve(socket_path());
+	const socket = socket_path();
+	const path = socket === null ? null : resolve(socket);
 	const state_home = process.env.XDG_STATE_HOME || join(process.env.HOME ?? "/tmp", ".local", "state");
 	const log_dir = resolve(state_home, "tig-syntax");
 	forget_spawning_client();
@@ -267,6 +266,11 @@ async function main(): Promise<void> {
 			{ category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console"] },
 		],
 	});
+	if (path === null) {
+		// E.g. a client built before the daemon sources it now runs.
+		logger.error("TIG_SYNTAX_SOCKET is not set: the daemon is started by tig-syntax-filter; rebuild it with `make -C client` after updating");
+		process.exit(1);
+	}
 
 	await init_highlighter();
 
@@ -277,13 +281,15 @@ async function main(): Promise<void> {
 		clearTimeout(idle_timer);
 		clearTimeout(shed_timer);
 		shed_timer = setTimeout(() => {
-			logger.info("idle for {min} minutes, shedding git state", {
-				min: IDLE_SHED_MS / 60000,
+			logger.info("idle for {min} minutes, shedding git state (pid {pid})", {
+				min: IDLE_SHED_MS / 60000, pid: process.pid,
 			});
 			shed_git_state();
 		}, IDLE_SHED_MS);
 		idle_timer = setTimeout(() => {
-			logger.info("idle for {hours} hours, exiting", { hours: IDLE_EXIT_MS / 3600000 });
+			logger.info("idle for {hours} hours, exiting (pid {pid})", {
+				hours: IDLE_EXIT_MS / 3600000, pid: process.pid,
+			});
 			server.close();
 			process.exit(0);
 		}, IDLE_EXIT_MS);

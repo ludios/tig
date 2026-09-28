@@ -80,6 +80,19 @@ describe("SectionSplitter", () => {
 		expect(section_bytes(sections[0]).toString()).toBe("commit 0123456789abcdef\nAuthor: x\n");
 	});
 
+	it("takes in a long line spanning many chunks in linear time", () => {
+		// Re-concatenating the partial line per chunk took ~1 s here.
+		const splitter = new SectionSplitter(1048576);
+		const chunk = Buffer.alloc(65536, 0x61);
+		const started = performance.now();
+		for (let i = 0; i < 512; i++) {
+			splitter.feed(chunk);
+		}
+		const sections = [...splitter.feed(Buffer.from("\n")), ...splitter.finish()];
+		expect(performance.now() - started).toBeLessThan(250);
+		expect(sections.reduce((n, s) => n + s.byte_length, 0)).toBe(512 * 65536 + 1);
+	});
+
 	it("produces identical file sections for any chunking of the input", () => {
 		const reference = merge_preamble(split_all(Buffer.from(SAMPLE_DIFF)));
 		fc.assert(fc.property(

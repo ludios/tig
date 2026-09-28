@@ -100,14 +100,17 @@ export class SectionSplitter {
 		}
 		const data = this.carry.length > 0 ? Buffer.concat([...this.carry, chunk]) : chunk;
 		let start = 0;
+		// The carried bytes hold no newline: search only the new chunk.
+		let from = data.length - chunk.length;
 
 		while (true) {
-			const nl = data.indexOf(0x0a, start);
+			const nl = data.indexOf(0x0a, from);
 			if (nl === -1) {
 				break;
 			}
 			this.push_line(data.subarray(start, nl), true, completed);
 			start = nl + 1;
+			from = start;
 		}
 		this.carry = start < data.length ? [data.subarray(start)] : [];
 		if (this.current_kind !== "file") {

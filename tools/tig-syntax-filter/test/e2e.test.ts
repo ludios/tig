@@ -17,6 +17,7 @@ import { chmodSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFile
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer, type Server } from "node:net";
 
 const tool_dir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const client_bin = join(tool_dir, "bin", "tig-syntax-filter");
@@ -284,6 +285,80 @@ describe("client + daemon end to end", () => {
 		}
 		for (const output of await Promise.all(runs)) {
 			expect_highlighted(output);
+		}
+	}, 60000);
+});
+
+/** A scripted stand-in for the daemon on `path`: it reads the handshake and
+ * all input, then, unless `respond` is false (a wedged daemon), answers
+ * after `delay_ms` with one frame acknowledging everything whose payload
+ * is the input between two markers, and the end frame. */
+async function fake_daemon(path: string, respond: boolean, delay_ms: number): Promise<Server> {
+	const server = createServer({ allowHalfOpen: true }, (socket) => {
+		const chunks: Buffer[] = [];
+		socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+		socket.on("end", () => {
+			if (!respond) {
+				return;
+			}
+			const received = Buffer.concat(chunks);
+			const header_end = received.indexOf(0x0a);
+			const cwd_length = Number(received.subarray(0, header_end).toString().split(" ")[1]);
+			const input = received.subarray(header_end + 1 + cwd_length);
+			const payload = Buffer.concat([Buffer.from("<<"), input, Buffer.from(">>")]);
+			setTimeout(() => {
+				socket.end(Buffer.concat([
+					Buffer.from(`O ${input.length} ${payload.length}\n`), payload,
+					Buffer.from("E 0\n"),
+				]));
+			}, delay_ms);
+		});
+	});
+	await new Promise<void>((resolve) => server.listen(path, resolve));
+	return server;
+}
+
+describe("client deadline against a scripted daemon", () => {
+	// Bigger than a socket buffer, so the frame cannot be read in one go.
+	const input = ("x".repeat(99) + "\n").repeat(10000);
+
+	it("does not count time it was stopped against the daemon", async () => {
+		const server = await fake_daemon(join(work, "stop.sock"), true, 300);
+		try {
+			const child = spawn(client_bin, [], { cwd: repo, env: filter_env({
+				TIG_SYNTAX_SOCKET: join(work, "stop.sock"),
+				TIG_SYNTAX_DEADLINE_MS: "1000",
+			}) });
+			const chunks: Buffer[] = [];
+			child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+			const closed = new Promise((resolve) => child.on("close", resolve));
+			child.stdin.end(input);
+			// Stopped (as by ^Z in tig) well past the deadline, while
+			// the daemon finishes its frame.
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			child.kill("SIGSTOP");
+			await new Promise((resolve) => setTimeout(resolve, 2500));
+			child.kill("SIGCONT");
+			await closed;
+			const output = Buffer.concat(chunks).toString();
+			expect(output).toBe(`<<${input}>>`);
+		} finally {
+			server.close();
+		}
+	}, 60000);
+
+	it("still falls back at the deadline when the daemon never answers", async () => {
+		const server = await fake_daemon(join(work, "wedged.sock"), false, 0);
+		try {
+			const started = performance.now();
+			const output = await run_filter_async(Buffer.from(input), filter_env({
+				TIG_SYNTAX_SOCKET: join(work, "wedged.sock"),
+				TIG_SYNTAX_DEADLINE_MS: "500",
+			}));
+			expect(output.toString()).toBe(input);
+			expect(performance.now() - started).toBeLessThan(5000);
+		} finally {
+			server.close();
 		}
 	}, 60000);
 });

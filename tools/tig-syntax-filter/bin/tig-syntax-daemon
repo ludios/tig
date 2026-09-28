@@ -1,7 +1,10 @@
 #!/bin/sh
 # Model-output: Claude Fable 5
+# Model-output: Claude Opus 5.5
 # Launch the tig-syntax highlight daemon.  Node >= 23.6 runs TypeScript
 # directly (type stripping); the daemon lives next to this script.
+# tig-syntax-filter starts it with TIG_SYNTAX_SOCKET set to where it will
+# connect; to start one by hand, set that too.
 # Resolve symlinks portably (readlink -f is not universal).
 self=$0
 if command -v realpath >/dev/null 2>&1; then
