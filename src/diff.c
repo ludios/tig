@@ -119,30 +119,45 @@ struct diff_stat_context {
 	size_t skipped_len;	/* With skip: bytes of diff_skipped_text in use. */
 };
 
+/*
+ * Make the growable buffer `*buf`, of `*size` bytes, hold at least `need`
+ * bytes, at least doubling it when it grows so that appending stays
+ * linear.  Returns false when out of memory, leaving the buffer as it was.
+ */
+static bool
+diff_reserve(char **buf, size_t *size, size_t need)
+{
+	size_t new_size;
+	char *tmp;
+
+	if (need <= *size) {
+		return true;
+	}
+	new_size = MAX(need, *size * 2);
+	tmp = realloc(*buf, new_size);
+	if (!tmp) {
+		return false;
+	}
+	*buf = tmp;
+	*size = new_size;
+	return true;
+}
+
 /* Storage for the one line under construction, reused from line to line;
  * diff_common_add_line() copies it into the line.  diff_cells holds the
  * cells; with skip, diff_skipped_text holds the cells' text, i.e. the line
  * without its markup, NUL-terminated. */
 static struct box_cell diff_cells[8192];
 static char *diff_skipped_text;
+static size_t diff_skipped_size;
 
 /* Append `length` bytes from `text` to diff_skipped_text.  Returns false
  * when out of memory. */
 static bool
 diff_common_append_skipped(struct diff_stat_context *context, const char *text, size_t length)
 {
-	static size_t size;
-	size_t need = context->skipped_len + length + 1;
-
-	if (need > size) {
-		size_t new_size = MAX(need, size * 2);
-		char *tmp = realloc(diff_skipped_text, new_size);
-
-		if (!tmp) {
-			return false;
-		}
-		diff_skipped_text = tmp;
-		size = new_size;
+	if (!diff_reserve(&diff_skipped_text, &diff_skipped_size, context->skipped_len + length + 1)) {
+		return false;
 	}
 	memcpy(diff_skipped_text + context->skipped_len, text, length);
 	context->skipped_len += length;
@@ -153,14 +168,16 @@ diff_common_append_skipped(struct diff_stat_context *context, const char *text, 
 static bool
 diff_common_add_cell(struct diff_stat_context *context, size_t length, bool allow_empty)
 {
-	if (!allow_empty && (length == 0))
+	if (!allow_empty && (length == 0)) {
 		return true;
+	}
 	if (context->cells >= ARRAY_SIZE(diff_cells)) {
 		report("Too many diff cells, truncating");
 		return false;
 	}
-	if (context->skip && !diff_common_append_skipped(context, context->text, length))
+	if (context->skip && !diff_common_append_skipped(context, context->text, length)) {
 		return false;
+	}
 	diff_cells[context->cells].length = length;
 	diff_cells[context->cells].type = context->type;
 	diff_cells[context->cells].syntax_style = context->syntax_style;
@@ -168,6 +185,9 @@ diff_common_add_cell(struct diff_stat_context *context, size_t length, bool allo
 	return true;
 }
 
+/* Add the line built in `context`.  Its stored text is `text` itself,
+ * unless the context skipped markup: then it is the cells' text that
+ * diff_common_add_cell() accumulated. */
 static struct line *
 diff_common_add_line(struct view *view, const char *text, enum line_type type, struct diff_stat_context *context)
 {
@@ -179,12 +199,14 @@ diff_common_add_line(struct view *view, const char *text, enum line_type type, s
 		line_text = context->skipped_len ? diff_skipped_text : "";
 	}
 	line = add_line_text_at(view, view->lines, line_text, type, context->cells);
-	if (!line)
+	if (!line) {
 		return NULL;
+	}
 
 	box = line->data;
-	if (context->cells)
+	if (context->cells) {
 		memcpy(box->cell, diff_cells, sizeof(struct box_cell) * context->cells);
+	}
 	box->cells = context->cells;
 	return line;
 }
@@ -378,17 +400,11 @@ diff_syntax_unframe(const char *data)
 {
 	static char *buf;
 	static size_t bufsize;
-	size_t size = strlen(data) + 1;	/* Unframing only ever shrinks. */
 	size_t out = 0;
 
-	if (size > bufsize) {
-		char *tmp = realloc(buf, size);
-
-		if (!tmp) {
-			return NULL;
-		}
-		buf = tmp;
-		bufsize = size;
+	/* Unframing only ever shrinks. */
+	if (!diff_reserve(&buf, &bufsize, strlen(data) + 1)) {
+		return NULL;
 	}
 
 	while (*data) {
