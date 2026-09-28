@@ -86,7 +86,7 @@ main_add_commit(struct view *view, enum line_type type, struct commit *template,
 
 	/* FIXME: More graceful handling of titles; append "..." to
 	 * shortened titles, etc. */
-	string_expand(buf, sizeof(buf), title, strlen(title), 1);
+	string_expand(buf, sizeof(buf), title, strlen(title), 1, 0);
 	title = buf;
 	titlelen = strlen(title);
 

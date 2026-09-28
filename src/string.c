@@ -91,7 +91,7 @@ string_copy_rev_from_commit_line(char *dst, const char *src)
 }
 
 size_t
-string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize)
+string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col)
 {
 	size_t size, pos;
 
@@ -99,7 +99,7 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 		const char c = src[pos];
 
 		if (c == '\t') {
-			size_t expanded = tabsize - (size % tabsize);
+			size_t expanded = tabsize - ((col + size) % tabsize);
 
 			if (expanded + size >= dstlen - 1)
 				expanded = dstlen - size - 1;

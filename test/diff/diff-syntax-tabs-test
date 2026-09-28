@@ -1,0 +1,59 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+steps '
+	:save-display diff.screen
+'
+
+# Splits hunk lines into cells the way the syntax daemon does: a style
+# change right after the +/- indicator, and around a token.
+file bin/cell-filter <<EOF
+#!/bin/sh
+exec awk -v esc="\$(printf '\033')" '
+/^@@/ { in_hunk = 1; print; next }
+in_hunk && /^[-+ ]/ {
+	gsub(/new/, esc "[38;2;198;120;221m&" esc "[39m");
+	\$0 = substr(\$0, 1, 1) esc "[0m" substr(\$0, 2);
+}
+{ print }
+'
+EOF
+
+chmod +x bin/cell-filter
+
+tigrc <<EOF
+set diff-syntax-filter = $PWD/bin/cell-filter
+EOF
+
+git_init
+
+# Tabs must line up as in the unfiltered diff, however the line is split.
+test_tig show <<EOF
+diff --git a/a.c b/a.c
+index 4cf3d9e..ced6838 100644
+--- a/a.c
++++ b/a.c
+@@ -1,2 +1,2 @@
+ int a;
+-	old;
++		new;	/* x */
+EOF
+
+assert_equals 'diff.screen' strict <<EOF
+diff --git a/a.c b/a.c
+index 4cf3d9e..ced6838 100644
+--- a/a.c
++++ b/a.c
+@@ -1,2 +1,2 @@
+ int a;
+-       old;
++               new;    /* x */
+ 
+ 
+[diff] Changes to 'a.c' - line 1 of 8                                       100%
+EOF

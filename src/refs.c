@@ -137,7 +137,7 @@ refs_read(struct view *view, struct buffer *buf, bool force_stop)
 		reference->commit_time = template.commit_time;
 
 		if (title)
-			string_expand(reference->title, sizeof(reference->title), title, strlen(title), 1);
+			string_expand(reference->title, sizeof(reference->title), title, strlen(title), 1, 0);
 
 		view->line[i].dirty = true;
 		view_column_info_update(view, &view->line[i]);

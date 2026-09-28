@@ -28,7 +28,7 @@ index 4cf3d9e..ced6838 100644
 +		new;	/* x */
 EOF
 
-assert_equals 'diff.screen' <<EOF
+assert_equals 'diff.screen' strict <<EOF
 diff --git a/a.c b/a.c
 index 4cf3d9e..ced6838 100644
 --- a/a.c

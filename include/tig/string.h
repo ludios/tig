@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -93,7 +95,11 @@ void string_copy_rev_from_commit_line(char *dst, const char *src);
 #define string_concat_path(dst, path1, path2) \
 	string_format(dst, !*path1 || path1[strlen(path1) - 1] == '/' ? "%s%s" : "%s/%s", path1, path2)
 
-size_t string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize);
+/* Expand tabs to spaces and blank out other whitespace and control
+ * characters.  `col` is the column at which `src` starts, so that text
+ * expanded in pieces gets the same tab stops as when expanded whole.
+ * Returns the number of bytes consumed from `src`. */
+size_t string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col);
 
 char *string_trim_end(char *name);
 char *string_trim(char *name);

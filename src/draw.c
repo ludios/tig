@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -140,8 +141,12 @@ draw_space(struct view *view, enum line_type type, int max, int spaces)
 	return VIEW_MAX_LEN(view) <= 0;
 }
 
+/* Draw `string` with tabs expanded.  Tab stops are relative to the view
+ * column `tab_origin`, so text drawn as several cells lines up exactly as
+ * if drawn in one piece; pass view->col to start fresh. */
 static bool
-draw_text_expanded(struct view *view, enum line_type type, const char *string, int length, int max_width, bool use_tilde)
+draw_text_expanded(struct view *view, enum line_type type, const char *string, int length,
+		   int max_width, bool use_tilde, unsigned long tab_origin)
 {
 	static char text[SIZEOF_STR];
 
@@ -149,7 +154,8 @@ draw_text_expanded(struct view *view, enum line_type type, const char *string, i
 		length = strlen(string);
 
 	do {
-		size_t pos = string_expand(text, sizeof(text), string, length, opt_tab_size);
+		size_t pos = string_expand(text, sizeof(text), string, length, opt_tab_size,
+					   view->col - tab_origin);
 		size_t col = view->col;
 
 		if (draw_chars(view, type, text, -1, max_width, use_tilde))
@@ -162,16 +168,10 @@ draw_text_expanded(struct view *view, enum line_type type, const char *string, i
 	return VIEW_MAX_LEN(view) <= 0;
 }
 
-static inline bool
-draw_textn(struct view *view, enum line_type type, const char *string, int length)
-{
-	return draw_text_expanded(view, type, string, length, VIEW_MAX_LEN(view), false);
-}
-
 bool
 draw_text(struct view *view, enum line_type type, const char *string)
 {
-	return draw_textn(view, type, string, -1);
+	return draw_text_expanded(view, type, string, -1, VIEW_MAX_LEN(view), false, view->col);
 }
 
 static bool
@@ -188,7 +188,7 @@ draw_text_overflow(struct view *view, const char *text, enum line_type type,
 		int trimmed = false;
 		size_t len = utf8_length(&tmp, -1, 0, &text_width, max, &trimmed, false, 1);
 
-		if (draw_text_expanded(view, type, text, -1, text_width, max < overflow))
+		if (draw_text_expanded(view, type, text, -1, text_width, max < overflow, view->col))
 			return true;
 
 		text += len;
@@ -605,7 +605,7 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 			if (line->graph_indent) {
 				indent = get_graph_indent(text);
 
-				if (draw_text_expanded(view, LINE_DEFAULT, text, -1, indent, false))
+				if (draw_text_expanded(view, LINE_DEFAULT, text, -1, indent, false, view->col))
 					return true;
 				text += indent;
 			}
@@ -618,6 +618,7 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 			} else if (column_data.box) {
 				const struct box *box = column_data.box;
 				const char *text = box->text;
+				unsigned long tab_origin = view->col;
 				size_t i;
 
 				for (i = 0; i < box->cells; i++) {
@@ -632,7 +633,8 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 					}
 
 					draw_syntax_style = cell->syntax_style;
-					eol = draw_textn(view, cell->type, text, length);
+					eol = draw_text_expanded(view, cell->type, text, length,
+								 VIEW_MAX_LEN(view), false, tab_origin);
 					draw_syntax_style = 0;
 					if (eol)
 						return true;
