@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
@@ -216,6 +217,20 @@ describe("parse_file_section", () => {
 		]));
 		expect(info?.old_last_line).toBe(8);
 		expect(info?.new_last_line).toBe(0);
+	});
+
+	it("drops the TAB git appends to names containing a space", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/my file.js b/my file.js",
+			"index 1111111..2222222 100644",
+			"--- a/my file.js\t",
+			"+++ b/my file.js\t",
+			"@@ -1 +1 @@",
+			"-a",
+			"+b",
+		]));
+		expect(info?.old_path).toBe("my file.js");
+		expect(info?.new_path).toBe("my file.js");
 	});
 
 	it("rejects hunks whose counts do not match the body", () => {

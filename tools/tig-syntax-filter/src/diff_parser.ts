@@ -1,4 +1,5 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
  * Byte-exact parsing of `git diff`/`git show` output into per-file sections.
@@ -190,6 +191,14 @@ export function unquote_git_path(quoted: string): string | null {
 	return Buffer.from(bytes).toString("utf8");
 }
 
+/** The path field of a "--- " or "+++ " line.  git appends a TAB after a
+ * name containing a space (a hint for GNU patch); it is not part of the
+ * name, which would quote a TAB of its own. */
+function header_path(text: string): string {
+	const field = text.slice(4);
+	return field.endsWith("\t") ? field.slice(0, -1) : field;
+}
+
 /**
  * Strip the diff prefix ("a/" or "b/") only when `prefixed` says the diff
  * actually uses the default prefixes; with --no-prefix, a repository path
@@ -269,14 +278,14 @@ export function parse_file_section(section: diff_section): file_info | null {
 			}
 		} else if (text.startsWith("--- ")) {
 			saw_minus = true;
-			const raw = unquote_git_path(text.slice(4));
+			const raw = unquote_git_path(header_path(text));
 			if (raw === null) {
 				return null;
 			}
 			old_path = raw === "/dev/null" ? null : strip_prefix(raw, "a/", prefixed);
 		} else if (text.startsWith("+++ ")) {
 			saw_plus = true;
-			const raw = unquote_git_path(text.slice(4));
+			const raw = unquote_git_path(header_path(text));
 			if (raw === null) {
 				return null;
 			}
