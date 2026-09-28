@@ -12,6 +12,7 @@
  */
 
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 #include "tig/tig.h"
 #include "tig/types.h"
@@ -427,11 +428,10 @@ init_line_info_color_pair(struct line_info *info, enum line_type type,
 }
 
 /*
- * Ephemeral syntax styles.  Pair IDs are allocated from SYNTAX_PAIR_BASE
- * upward, far above the line-rule pair range, so both allocators can grow
- * independently; the style count is capped both by SYNTAX_STYLE_MAX and by
- * the terminal's pair budget.  Styles are never freed: views keep style IDs
- * in their box cells, and the table is bounded.
+ * Ephemeral syntax styles.  Their pair IDs start at SYNTAX_PAIR_BASE, far
+ * above the pairs line rules need.  The count is capped by
+ * SYNTAX_STYLE_MAX and the terminal's pair budget.  Styles are never freed
+ * (box cells hold their IDs); the table is bounded.
  */
 
 #define SYNTAX_PAIR_BASE	1024

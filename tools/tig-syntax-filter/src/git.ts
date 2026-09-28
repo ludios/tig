@@ -2,27 +2,24 @@
 // Model-output: Claude Opus 5.5
 
 /**
- * Git plumbing used by the daemon.  Every operation takes the requesting
- * client's working directory and resolves it once (cached) to the
- * repository's canonical identities: the common git directory keys
- * object-level state (worktrees sharing one object store share batchers
- * and blob cache entries) and the worktree top level keys worktree-level
- * state (attribute lookups, file reads) — see plan item C4.
+ * Git plumbing for the daemon.  Each operation takes the client's working
+ * directory, resolved once (and cached) to canonical repository
+ * identities: the common git directory keys object-level state, so
+ * worktrees sharing an object store share batchers and blob cache
+ * entries, and the worktree top level keys worktree-level state
+ * (attribute lookups, file reads).
  *
- * Blob reads go through a persistent cat-file child per object store plus
- * a byte-budgeted LRU, so that revisiting commits while navigating in tig
- * costs no process spawns.  On git >= 2.36 the child runs `cat-file
- * --batch-command` and every request is preflighted with `info`, so
- * missing, non-blob, and oversized objects are rejected without ever
- * transferring their payloads; older git falls back to `--batch` with
- * incremental discarding.  Responses carry a content-derived identity
- * computed once per fetch, so callers can key shared caches
- * content-addressably even when the diff only gave an abbreviated OID.
+ * Blobs come from one persistent cat-file child per object store behind
+ * a byte-budgeted LRU, so revisiting commits spawns no processes.  On git
+ * >= 2.36 the child runs `--batch-command` and preflights each request
+ * with `info`, so missing, non-blob, and oversized objects never transfer
+ * their payloads; older git uses `--batch` and discards unwanted payloads
+ * as they stream.  Each fetch carries a content hash, so callers can key
+ * shared caches by content even when the diff gave an abbreviated OID.
  *
- * Textconv attribute checks batch through one persistent `git check-attr
- * --stdin -z` child per worktree (plan item C1) with driver-level
- * `git config` results cached per repository, so visiting an N-file
- * commit costs no attribute-related process spawns once the child exists.
+ * Textconv checks go through one persistent `git check-attr --stdin -z`
+ * child per worktree, with diff-driver config cached per worktree, so an
+ * N-file commit costs no per-file spawns.
  */
 
 import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
@@ -43,10 +40,9 @@ const logger = getLogger(["tig-syntax", "git"]);
 const MAX_BLOB_BYTES = 8 * 1024 * 1024;
 const MAX_BATCHERS = 8;
 
-/** A blob response: git's echoed full OID, a content-derived cache
- * identity (computed once per fetch; the echoed OID must NOT key shared
- * caches because `refs/replace` makes git serve different bytes under the
- * same OID), and the content. */
+/** A blob response: git's echoed full OID, a content hash as cache
+ * `identity`, and the content.  Shared caches key on the hash, not the
+ * OID: `refs/replace` can make git serve different bytes under one OID. */
 export interface blob_result {
 	oid: string;
 	identity: string;
@@ -96,10 +92,9 @@ async function rev_parse_one(cwd: string, flag: string): Promise<string | null> 
 
 /**
  * Resolve the canonical identity of the repository containing `cwd`, or
- * null when cwd is not inside one.  A few git spawns per distinct cwd,
- * cached for the daemon's lifetime.  Every field is validated: old git
- * versions ECHO unknown rev-parse options with exit status 0, so raw
- * output can never be trusted to be the requested value.
+ * null when git can't.  Costs a few git spawns per distinct cwd, cached
+ * for the daemon's lifetime.  Every field is validated, because old git
+ * echoes unknown rev-parse options and exits 0.
  */
 export async function repo_info(cwd: string): Promise<repo_identity | null> {
 	const cached = repo_cache.get(cwd);
@@ -157,18 +152,16 @@ interface blob_request {
 }
 
 /**
- * A persistent cat-file child for one object store.  Requests are answered
- * strictly in command order, so a FIFO of expectations plus an incremental
- * buffer parser is sufficient.
+ * A persistent cat-file child for one object store.  Replies come in
+ * request order, so a FIFO of expectations and an incremental parser
+ * suffice.
  *
- * In "command" mode (git >= 2.36) each request is `info <oid>` first, and
- * only satisfactory blobs get a `contents <oid>` follow-up, so missing,
- * non-blob, and oversized payloads are never transferred.  In "batch"
- * mode (older git) payloads always arrive, and an unwanted one resolves
- * null while being discarded incrementally as it streams — never
- * accumulated (memory stays bounded) and never fatal (requests pipelined
- * behind it, e.g. the other side of the same diff, must not be taken down
- * with it).
+ * In "command" mode (git >= 2.36), each request starts with `info <oid>`,
+ * and only acceptable blobs get a `contents <oid>` follow-up, so missing,
+ * non-blob, and oversized objects never transfer.  In "batch" mode (older
+ * git), an unwanted payload still arrives; it resolves null and is
+ * discarded as it streams, never buffered whole, and the replies behind
+ * it stay in step.
  */
 class blob_batcher {
 	private child: ChildProcessByStdio<Writable, Readable, null>;
@@ -334,9 +327,9 @@ class blob_batcher {
 const batchers = new Map<string, blob_batcher>();
 
 async function get_batcher(dir: string): Promise<blob_batcher> {
-	// Resolve the probe BEFORE the map check: an await between check and
-	// insert would let concurrent first fetches each spawn a child and
-	// orphan all but the last one.
+	// Await the probe before checking the map: an await between check and
+	// insert would let concurrent first fetches each spawn a child,
+	// orphaning all but the last.
 	const mode = await batch_command_supported() ? "command" : "batch";
 	let batcher = batchers.get(dir);
 	if (batcher !== undefined && !batcher.broken) {
@@ -376,8 +369,7 @@ export async function cat_blob(cwd: string, oid: string): Promise<blob_result | 
 		const batcher = await get_batcher(store);
 		let blob = await batcher.request(oid);
 		if (blob === null && batcher.broken) {
-			// The batcher died mid-flight — a real child failure.  One
-			// retry on a fresh batcher for this innocent request.
+			// Retry once on a fresh batcher if this one broke.
 			blob = await (await get_batcher(store)).request(oid);
 		}
 		if (blob === null) {
@@ -515,11 +507,10 @@ class attr_batcher {
 /** Worktree root -> live check-attr child. */
 const attr_batchers = new Map<string, attr_batcher>();
 
-/** Attributes and diff-driver config are editable mid-session, and a
- * persistent check-attr child never re-reads them (per-call spawning used
- * to observe changes instantly).  Expire each root's child and cached
- * verdicts on this interval: at most one respawn per repo per minute, in
- * exchange for edits taking effect promptly. */
+/** Attributes and diff-driver config can change mid-session, but a
+ * persistent check-attr child never re-reads them.  So the first lookup
+ * after this long drops a worktree's child and cached verdicts, letting
+ * edits take effect within a minute or so. */
 const ATTR_TTL_MS = 60 * 1000;
 const attr_fresh_since = new Map<string, number>();
 
@@ -563,12 +554,10 @@ function get_attr_batcher(root: string): attr_batcher {
 }
 
 /**
- * Whether git applies a textconv diff driver to `path` in the repository at
- * `cwd`.  Textconv means git may show transformed rather than literal blob
- * content, so such files must not be highlighted from raw sources.
- * `path` is repository-relative, so the attribute check runs from the
- * worktree top level — running it from a subdirectory cwd would resolve
- * the path against the wrong location.
+ * Whether repository-relative `path` in the repository at `cwd` has a diff
+ * driver with textconv, whose converted output can't be highlighted from
+ * the raw blob.  Attributes are checked from the worktree top level (or
+ * `cwd` in a bare repository), where `path` resolves.
  */
 export async function has_textconv(cwd: string, path: string): Promise<boolean> {
 	const info = await repo_info(cwd);
@@ -605,11 +594,8 @@ export async function has_textconv(cwd: string, path: string): Promise<boolean> 
 	return result;
 }
 
-/**
- * Idle shedding (plan item B5): drop the blob cache and kill the
- * persistent git children — all cheap to rebuild on the next visit.  The
- * far more valuable tokenized-line cache is deliberately left alone.
- */
+/** Idle shedding: drop the blob and attribute caches and kill the
+ * persistent git children, all cheap to rebuild. */
 export function shed_git_state(): void {
 	blob_cache.clear();
 	for (const batcher of batchers.values()) {

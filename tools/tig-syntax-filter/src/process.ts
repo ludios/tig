@@ -37,9 +37,8 @@ export function raw_section_output(section: diff_section): Buffer {
 	return Buffer.concat(parts);
 }
 
-/** Content identities known to be unhighlightable (binary or invalid
- * UTF-8) — a content-global verdict, so identity alone may key it (plan
- * item C10).  Bounded FIFO-ish: cleared when it grows silly. */
+/** Content identities known to contain NUL bytes or invalid UTF-8; the
+ * set is cleared wholesale at UNDECODABLE_MAX entries. */
 const undecodable = new Set<string>();
 const UNDECODABLE_MAX = 4096;
 
@@ -95,12 +94,12 @@ async function content_matches_oid(cwd: string, content: Buffer, oid: string): P
 
 /**
  * Fetch and prepare one side's source document, or null when the side
- * cannot be highlighted (no source, binary/invalid UTF-8, no grammar).
- * `worktree_fallback` reads the file itself when no object is available:
- * git can print computed post-image OIDs for worktree content that is in
- * no object database.  Worktree content must still hash to a printed OID
- * (the file may have changed since git emitted the diff) and is cached by
- * its own content hash, never under the OID.
+ * cannot be highlighted (no source, NUL bytes or invalid UTF-8, no
+ * grammar).  With `worktree_fallback`, a side whose object is absent or
+ * missing is read from the worktree, since git prints computed OIDs for
+ * worktree content that is in no object database.  Worktree content must
+ * still hash to the diff's OID, if there is one: the file may have
+ * changed since.
  */
 async function load_side(cwd: string, path: string | null, oid: string | null,
 			 worktree_fallback: boolean): Promise<side_doc | null> {
@@ -113,10 +112,6 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 		const blob = await cat_blob(cwd, oid);
 		if (blob !== null) {
 			content = blob.content;
-			// The identity is a hash of the actual bytes, computed once
-			// at fetch time — safe to share across worktrees, clones,
-			// and repositories, unlike the echoed OID (refs/replace can
-			// serve different bytes under the same OID).
 			identity = blob.identity;
 		}
 	}
@@ -175,12 +170,10 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	}
 	const check_path = info.new_path ?? info.old_path;
 
-	// Fetch only the sides the hunks actually style — the old side serves
-	// "-" lines alone (context maps to the new side), so a pure-addition
-	// section never touches the old blob — and fetch both concurrently.
-	// The old side always has a real OID when retrievable at all; the new
-	// side falls back to the worktree (all-zero OID for unstaged changes,
-	// and computed OIDs whose blobs exist in no object database).
+	// Load only the sides the hunks style, concurrently: "-" lines use the
+	// old source, "+" and context lines the new one.  Only the new side can
+	// be worktree content (an all-zero OID for unstaged changes, or a
+	// computed OID with no object behind it).
 	const [old_doc, new_doc] = await Promise.all([
 		info.old_last_line === 0 ? null : load_side(cwd, info.old_path, info.old_oid, false),
 		info.new_last_line === 0 ? null : load_side(cwd, info.new_path, info.new_oid, true),
@@ -189,10 +182,9 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		logger.debug("no sources for {path}", { path: check_path });
 		return null;
 	}
-	// One side loading while the other does not is an anomaly worth a log
-	// line: the failed side's lines render raw next to highlighted ones
-	// (e.g. an old blob missing from a shallow/partial clone), which a
-	// user reports as "the before code is not highlighted".
+	// Log a side that failed to load while the other did: its lines render
+	// raw next to highlighted ones (e.g. an old blob missing from a shallow
+	// or partial clone).
 	if (old_doc === null && info.old_last_line !== 0 && info.old_path !== null) {
 		logger.info("old side of {path} unavailable ({oid}); its lines will be raw", {
 			path: check_path, oid: info.old_oid,

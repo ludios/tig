@@ -150,8 +150,7 @@ index 65f914a..3aa4320 100644
 [diff] a1dcf1aaa11470978db1d5d8bcf9e16201eb70ff - line 1 of 24              100%
 EOF
 
-# A missing filter must render the plain diff, not an empty view
-# (unlike the historical diff-highlight behavior).
+# A missing filter must render the plain diff, not an empty view.
 test_case diff-syntax-missing \
 	--tigrc='set diff-syntax-filter = program-that-does-not-exist' \
 	--args='show master^' \

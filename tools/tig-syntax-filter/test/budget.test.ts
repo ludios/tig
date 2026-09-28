@@ -1,10 +1,11 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
- * A1/A6/A8 behavior: chunked tokenization equals one-shot tokenization,
- * budget exhaustion falls back (with prefix caching and depth-scoped
- * fail-fast), and oversized sections stream through the splitter raw,
- * line-aligned, and byte-losslessly.
+ * Chunked tokenization equals one-shot tokenization, budget exhaustion
+ * falls back (with prefix caching and depth-scoped fail-fast), and
+ * oversized sections stream through the splitter raw, line-aligned, and
+ * byte-losslessly.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -48,7 +49,7 @@ beforeAll(async () => {
 
 describe("chunked tokenization", () => {
 	it("emits exactly what one-shot tokenization emits", async () => {
-		// git.ts is ~270 lines: spans several 128-line chunks.
+		// git.ts spans several tokenization chunks.
 		const content = await readFile(join(HERE, "..", "src", "git.ts"), "utf8");
 		const lines = content.split("\n");
 		const ours = await highlight_lines("test|chunk-eq", "typescript", content,

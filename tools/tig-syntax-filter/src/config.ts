@@ -1,23 +1,23 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
- * Budget and limit knobs (plan item A6), read once from the environment at
- * daemon start.  Every knob falls back to its default on a missing, malformed,
- * or out-of-range value; ranges exist so a typo cannot disable a safety
- * bound entirely.
+ * Budget and limit knobs, read from the environment at daemon start.  A
+ * missing, malformed, or out-of-range value means the default; the ranges
+ * keep a typo from disabling a bound.
  *
- * - TIG_SYNTAX_BUDGET_MS: per-section tokenization budget shared by both
- *   sides of a file diff.  Exceeding it makes the section fall back to raw
- *   (see highlight.ts); grammar loading and blob fetching do not count.
- *   Generous by default: the work is cached per document and resumable,
- *   so a big budget costs one wait per document per daemon lifetime,
- *   whereas a small one leaves slow-grammar files raw.  Must fit inside
- *   the client's frame deadline with room for contention.
- * - TIG_SYNTAX_MAX_LINES: deepest source line a hunk may require before the
- *   section is not highlighted at all (bounds tokenization memory).
- * - TIG_SYNTAX_MAX_SECTION_BYTES: file sections larger than this stop being
- *   buffered and stream through raw instead (see diff_parser.ts).
- * - TIG_SYNTAX_LINE_CACHE_MB / TIG_SYNTAX_BLOB_CACHE_MB: approximate byte
+ * - TIG_SYNTAX_BUDGET_MS: tokenization time per file section, shared by
+ *   both sides; a side not done by then renders raw (see highlight.ts).
+ *   Grammar loading and blob fetching don't count.  Generous, since
+ *   tokenization is cached and resumes where it stopped: a big budget is
+ *   usually paid once per document, while a small one keeps slow-grammar
+ *   files raw across several visits.  Must fit inside the client's frame
+ *   deadline, with room for contention.
+ * - TIG_SYNTAX_MAX_LINES: a side whose hunks reach deeper into its source
+ *   is not highlighted (bounds tokenization memory).
+ * - TIG_SYNTAX_MAX_SECTION_BYTES: larger file sections stream through raw
+ *   instead of being buffered (see diff_parser.ts).
+ * - TIG_SYNTAX_LINE_CACHE_MB / TIG_SYNTAX_BLOB_CACHE_MB: approximate
  *   budgets for the tokenized-line cache (highlight.ts) and the blob cache
  *   (git.ts).
  */

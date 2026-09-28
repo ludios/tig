@@ -1,10 +1,10 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
- * git.ts batcher behavior: an oversized blob kills the shared cat-file
- * child by design, but requests pipelined alongside it must survive via a
- * fresh batcher (C2 made both diff sides load concurrently, so one bad
- * side must not take the other down).
+ * git.ts blob fetching: rejecting an oversized blob without disturbing
+ * other requests, recovering after idle shedding, and sharing concurrent
+ * fetches of one blob.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -29,8 +29,7 @@ beforeAll(async () => {
 	});
 	repo = await mkdtemp(join(tmpdir(), "tig-syntax-git-test-"));
 	execFileSync("git", ["-C", repo, "init", "-q"]);
-	// 9 MB: above the daemon's 8 MiB blob limit, so its batch response
-	// kills the cat-file child.
+	// 9 MiB: above the daemon's 8 MiB blob limit.
 	await writeFile(join(repo, "big.bin"), Buffer.alloc(9 * 1024 * 1024, 0x61));
 	await writeFile(join(repo, "small.txt"), "hello blob\n");
 	big_oid = execFileSync("git", ["-C", repo, "hash-object", "-w", "big.bin"],
@@ -39,8 +38,8 @@ beforeAll(async () => {
 		{ cwd: repo, encoding: "utf8" }).trim();
 }, 60000);
 
-describe("cat_blob under a batcher kill", () => {
-	it("still serves an innocent request pipelined with an oversized blob", async () => {
+describe("cat_blob batching", () => {
+	it("rejects an oversized blob without disrupting other requests", async () => {
 		const [big, small] = await Promise.all([
 			cat_blob(repo, big_oid),
 			cat_blob(repo, small_oid),
@@ -48,9 +47,8 @@ describe("cat_blob under a batcher kill", () => {
 		expect(big).toBeNull();
 		expect(small).not.toBeNull();
 		expect(small!.content.toString("utf8")).toBe("hello blob\n");
-		// The FIFO stays synchronized after the discard: later requests on
-		// the same child still resolve correctly — and an abbreviated
-		// request comes back with the full echoed OID (C4).
+		// Requests after the rejection still resolve, and an
+		// abbreviated OID comes back in full.
 		const again = await cat_blob(repo, small_oid.slice(0, 12));
 		expect(again).not.toBeNull();
 		expect(again!.content.toString("utf8")).toBe("hello blob\n");

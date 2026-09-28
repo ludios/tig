@@ -368,8 +368,8 @@ diff_common_read_diff_wdiff(struct view *view, const char *text)
 	return diff_common_add_line(view, text, LINE_DEFAULT, &context);
 }
 
-/* SGR parameter marking a literal ESC byte in the original diff content;
- * see the diff-syntax-filter wire protocol in doc/slop/. */
+/* SGR parameter standing for a literal ESC byte of diff content; see
+ * diff-syntax-filter in tigrc(5). */
 #define SGR_LITERAL_ESC 999
 #define SGR_LITERAL_ESC_MARKER "\x1b[999m"
 
@@ -388,12 +388,11 @@ diff_syntax_only_markers(const char *text)
 }
 
 /*
- * Restore literal ESC bytes on a line whose only escapes are framing
- * markers.  Non-hunk lines (commit message, diff stat, hunk headers) take
- * early returns in diff_common_read() that never reach the SGR decoder,
- * so they are unframed up front to keep stored text lossless.  The ESC
- * bytes in the result are content and must not be decoded again.  Returns
- * a buffer valid until the next call, or NULL when out of memory.
+ * Replace literal-ESC markers with ESC bytes on a line that has no other
+ * escapes.  Non-hunk lines (commit message, diff stat, hunk headers) never
+ * reach the SGR decoder, so this keeps their stored text lossless.  The
+ * resulting ESC bytes are content, not escapes to decode.  Returns a
+ * buffer valid until the next call, or NULL when out of memory.
  */
 static const char *
 diff_syntax_unframe(const char *data)

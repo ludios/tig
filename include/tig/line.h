@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -141,11 +142,10 @@ void init_colors(void);
 void tig_init_pair(int id, int fg, int bg);
 
 /*
- * Ephemeral syntax styles: (foreground, attributes) pairs decoded from a
- * diff-syntax-filter's SGR output, composed with the background of a base
- * line type (e.g. diff-add).  They live in their own table so that they are
- * invisible to line-type classification and configuration serialization,
- * and they are capped, so callers must handle a 0 (= none) result.
+ * Ephemeral syntax styles: a foreground and attributes decoded from a
+ * diff-syntax-filter's SGR output, over the background of a base line type
+ * (e.g. diff-add).  Kept apart from line types, so line classification and
+ * config serialization never see them.
  */
 
 /* Returns a 1-based style ID, or 0 when the table or pair budget is full.

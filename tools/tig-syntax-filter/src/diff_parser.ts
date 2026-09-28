@@ -27,19 +27,18 @@ export interface diff_section {
 }
 
 /**
- * Incrementally splits a diff byte stream into sections.  feed() returns
- * the sections completed by the given chunk; finish() flushes the rest.
- * A section boundary is a line starting with "diff --git ".
+ * Incrementally splits a diff byte stream into sections, each starting at
+ * a "diff --git " line.  feed() returns the sections a chunk completes;
+ * finish() flushes the rest.
  *
- * A file section that grows beyond `max_section_bytes` stops being
- * buffered: its accumulated lines flush immediately as an "oversized"
- * section and every complete line until the next boundary streams out the
- * same way, one oversized section per feed() call (plan item A8).  Callers
- * pass such sections through raw, so a giant generated file costs neither
- * memory nor a highlight attempt.  The preamble, also passed through raw,
- * streams the same way, so input that never reaches a diff (`git log |
- * tig`) is not held back until EOF.  Line alignment is preserved: a
- * trailing partial line always waits in `carry` for its newline or EOF.
+ * Once a file section's complete lines exceed `max_section_bytes`, it
+ * stops being buffered: its lines flush as "oversized" sections as they
+ * arrive, up to the next boundary, and callers pass those through raw.
+ * So a giant generated file is neither held in memory nor highlighted.
+ * The preamble, also raw, streams the same way, so input that never
+ * reaches a diff (`git log | tig`) is not held until EOF.  Sections end
+ * on line boundaries: a trailing partial line waits in `carry` for its
+ * newline or EOF.
  */
 export class SectionSplitter {
 	/** The trailing partial line in the pieces it arrived in; joining them
@@ -152,10 +151,9 @@ export interface file_info {
 	old_oid: string | null;		/* null = unusable (absent or all-zero) */
 	new_oid: string | null;
 	hunks: hunk[];
-	/** Deepest old row occupied by a "-" line and deepest new row occupied
-	 * by a "+" or context line, across all hunks (1-based).  0 means that
-	 * side is never used for styling — context lines map to the new side —
-	 * so it need not be fetched or tokenized at all. */
+	/** Deepest source line each side needs for styling (1-based): "-"
+	 * lines use the old side, "+" and context lines the new side.  0 means
+	 * that side need not be fetched or tokenized. */
 	old_last_line: number;
 	new_last_line: number;
 }
@@ -231,10 +229,10 @@ function strip_prefix(path: string, prefix: "a/" | "b/", prefixed: boolean): str
 }
 
 /**
- * Whether the "diff --git" header shows the default a/ b/ prefixes.
- * Custom --src-prefix/--dst-prefix values are not recognized; their paths
- * stay unstripped and such files simply fail source lookup and pass
- * through raw (correspondence validation would reject them anyway).
+ * Whether the "diff --git" header uses the default a/ b/ prefixes, judged
+ * by the old path.  Custom --src-prefix/--dst-prefix values stay in the
+ * paths, where they can foil path-based lookups (attributes, worktree
+ * reads); hunk validation still rejects any mismatched source.
  */
 function has_default_prefixes(header: string): boolean {
 	const rest = header.slice("diff --git ".length);

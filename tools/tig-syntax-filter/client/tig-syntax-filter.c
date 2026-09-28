@@ -5,32 +5,32 @@
 #define _GNU_SOURCE
 
 /*
- * tig-syntax-filter: the thin, transactional client tig runs as its
- * diff-syntax-filter.  It streams stdin to the highlight daemon (spawning
- * it on first use) and daemon frames to stdout.  All unacknowledged input
- * stays spooled, so if the daemon is missing, dies, or stalls, the client
- * emits the raw diff from the spool instead — tig always gets output.
+ * tig-syntax-filter: the client tig runs as its diff-syntax-filter.  It
+ * streams stdin to the highlight daemon (spawning it if needed) and the
+ * daemon's frames to stdout.  Input stays spooled until a frame
+ * acknowledges it, so if the daemon is missing, dies, or stalls, the
+ * client emits the rest of the diff raw from the spool: tig always gets
+ * output.
  *
- * The daemon socket is nonblocking and both directions are driven through
- * one poll() loop, under an ABSOLUTE deadline: whenever input bytes are
- * outstanding (sent or ready to send, but not yet acknowledged by a
- * complete frame), the daemon has FRAME_DEADLINE_MS to complete a frame.
- * Only a completed frame re-arms the deadline — partial writes, partial
- * reads, or a daemon trickling bytes do not.  A wedged daemon therefore
- * can never block tig: neither in write() (the socket buffer filling up
- * no longer matters) nor by dribbling just enough traffic to look alive.
+ * One poll() loop drives the nonblocking socket in both directions.
+ * While input is unacknowledged or the end frame is due, the daemon must
+ * deliver a frame within FRAME_DEADLINE_MS; keepalives and partial reads
+ * or writes don't re-arm the deadline.  So a wedged daemon can block tig
+ * neither through a full socket buffer nor by trickling bytes.  A
+ * deadline noticed well after it passed means the client itself was
+ * stopped, which earns one extension per frame.
  *
- * A daemon that is not running gets spawned and waited for: a cold start
- * on a slow or cache-cold machine can take seconds, and raw output is the
- * worse outcome, so the wait is long (SPAWN_WAIT_MS) — but a launcher that
- * exits with a failure (no node, a crashing daemon) ends it at once, and
- * a spawn lock keeps a burst of clients from starting a herd of daemons.
+ * A missing daemon is spawned and waited for up to SPAWN_WAIT_MS, since a
+ * cold start can take seconds and raw output is worse than waiting.  A
+ * launcher that exits with failure (no node, a crashing daemon) ends the
+ * wait at once, and a spawn lock keeps a burst of clients from starting a
+ * herd of daemons.
  *
- * Daemon protocol: see src/daemon.ts.  Frames are validated: a declared
- * payload above MAX_FRAME_BYTES, an acknowledgment for more bytes than are
- * actually outstanding, or an end frame while input is unacknowledged is a
- * protocol error and triggers fallback.
- * In fallback output, literal ESC bytes are framed as ESC[999m so tig's
+ * Protocol: see src/daemon.ts.  A frame declaring more than
+ * MAX_FRAME_BYTES, an output frame acknowledging nothing or more than is
+ * outstanding, or an end frame while input is unacknowledged is a
+ * protocol error; that, or a spool outgrowing SPOOL_MAX, triggers
+ * fallback.  Fallback output frames literal ESC bytes as ESC[999m so tig's
  * SGR decoder restores them.
  *
  * Exit status is always 0: tig renders whatever arrives on the pipe.
@@ -189,10 +189,9 @@ write_framed(const unsigned char *data, size_t len)
 }
 
 /* Whether `dir` is a directory we own and can create a socket in.
- * $XDG_RUNTIME_DIR can name another user's directory (e.g. a session
- * su'd from root keeps /run/user/0), where both connecting and
- * listening fail with EACCES — such a value must be ignored, not
- * obeyed into permanent raw passthrough. */
+ * $XDG_RUNTIME_DIR may name another user's directory (su from root keeps
+ * /run/user/0), where connect and listen fail with EACCES; trusting it
+ * would leave every diff raw. */
 static bool
 usable_socket_dir(const char *dir)
 {
@@ -274,11 +273,10 @@ try_connect(const char *path)
 	strcpy(addr.sun_path, path);
 	if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
 		if (errno == EAGAIN) {
-			/* Full accept backlog: a daemon exists but is not
-			 * accepting right now.  Distinct from absence, so the
-			 * caller retries without spawning a competitor (whose
-			 * liveness probe could hit the same full backlog and
-			 * steal the live daemon's socket path). */
+			/* Full accept backlog: a daemon listens but is busy.
+			 * The caller retries rather than spawning a rival,
+			 * whose liveness probe could hit the same backlog and
+			 * take over the live daemon's socket path. */
 			close(fd);
 			return CONNECT_BACKLOG;
 		}
@@ -298,10 +296,9 @@ try_connect(const char *path)
 		}
 	}
 #ifdef SO_PEERCRED
-	/* The socket path can be predictable (/tmp fallback); never hand the
-	 * repository's diff to a daemon owned by another user.  Such a
-	 * listener is a distinct verdict: a daemon we spawn yields to any
-	 * live listener, so nothing of ours can ever take the path. */
+	/* The /tmp fallback path is predictable: never send the diff to
+	 * another user's daemon.  Its own verdict ends the retries, since a
+	 * daemon we spawn yields to any live listener. */
 	{
 		struct ucred cred;
 		socklen_t cred_len = sizeof(cred);
@@ -338,15 +335,16 @@ close_inherited_fds(void)
 }
 
 /*
- * Start the daemon as a direct child in its own session (setsid: signals
- * and process-group kills aimed at us never reach it), stdio to /dev/null
- * (it logs to a file itself), no other inherited descriptors.  Returns the
- * child's pid, or -1 when fork fails.  On the happy path the child is never
- * reaped: it outlives us and is reparented when we exit.  Being a direct
- * child is what lets connect_daemon() see a launcher exit without ever
- * listening.  The launcher is found via $TIG_SYNTAX_DAEMON, next to this
- * executable, or on $PATH, and is told to listen on `sock_path` through
- * $TIG_SYNTAX_SOCKET.
+ * Start the daemon launcher as our child in a new session, so terminal
+ * signals and process-group kills aimed at us never reach it.  Staying our
+ * child lets connect_daemon() see it exit without ever listening; once it
+ * becomes the daemon, it outlives us unreaped.  Returns its pid, or -1
+ * when fork fails.
+ *
+ * The child gets stdio on /dev/null (the daemon logs to a file) and no
+ * other inherited descriptors, and runs $TIG_SYNTAX_DAEMON, else
+ * tig-syntax-daemon next to this executable or on $PATH, telling it to
+ * listen on `sock_path` via $TIG_SYNTAX_SOCKET.
  */
 static pid_t
 spawn_daemon(const char *sock_path)
@@ -405,13 +403,12 @@ spawn_daemon(const char *sock_path)
 #define LOCK_UNUSABLE	-1	/* no usable lock file; spawn regardless */
 
 /*
- * Take the spawn lock, a flock()ed file next to the socket, so that a
- * burst of clients hitting a cold socket (tig's warm-up, the diff view,
- * prefetches) starts one daemon rather than a herd that all load their
- * grammars before every one but the first loses the socket and exits.
- * Returns the held fd (released by the kernel when we exit, so a crashed
- * holder leaves no stale lock), LOCK_BUSY, or LOCK_UNUSABLE.  The lock is
- * an optimization only: the daemon itself settles socket ownership.
+ * Take the spawn lock, a flock()ed file next to the socket, so a burst of
+ * clients at a cold socket (tig's warm-up, the diff view, prefetches)
+ * starts one daemon, not a herd that each load grammars only for all but
+ * one to lose the socket and exit.  Returns the held fd (released on exit,
+ * even a crash), LOCK_BUSY, or LOCK_UNUSABLE.  The lock is only an
+ * optimization; the daemons themselves settle socket ownership.
  */
 static int
 spawn_lock(const char *sock_path)
@@ -445,14 +442,11 @@ spawn_lock(const char *sock_path)
 /*
  * Connect to the daemon, spawning it when nothing listens; -1 when no
  * daemon becomes reachable.  connect() is retried every CONNECT_WAIT_MS
- * for up to the spawn wait — unless the launcher we started exits with a
- * failure status, which ends the wait at once.  A launcher exiting
- * successfully is not conclusive (it may have found a live daemon and
- * yielded, or daemonized on its own), so the retries continue.  When
- * another client holds the spawn lock its daemon is on the way, so this
- * one only retries — and spawns itself later should the lock free up
- * without a daemon appearing.  A listener owned by another user ends the
- * wait at once: no daemon of ours can take that path.
+ * for up to the spawn wait, which ends early when our launcher exits with
+ * failure or another user owns the path.  A launcher's success is
+ * inconclusive (it may have yielded to a live daemon or daemonized), so
+ * retries continue.  While another client holds the spawn lock, we only
+ * retry, spawning if the lock frees without a daemon.
  */
 static int
 connect_daemon(void)
@@ -580,9 +574,9 @@ drain_frames(struct buf *inbox, size_t *acked, size_t sent)
 				return 1;
 			} else if (sscanf(header, "%c %llu", &kind, &consumed) == 2
 				   && kind == 'P') {
-				/* Keepalive: the daemon probes whether we are still
-				 * here.  No payload, acknowledges nothing, and is
-				 * NOT progress — it must never re-arm the deadline. */
+				/* Keepalive probe from the daemon: no payload,
+				 * acknowledges nothing, and must not re-arm
+				 * the deadline. */
 				memmove(inbox->data, inbox->data + header_len,
 					inbox->len - header_len);
 				inbox->len -= header_len;
@@ -594,9 +588,9 @@ drain_frames(struct buf *inbox, size_t *acked, size_t sent)
 		if (out_len > MAX_FRAME_BYTES) {
 			return -1;
 		}
-		/* A frame that consumes no input is not progress (a stream of
-		 * them must not re-arm the deadline) and any payload on it
-		 * would be output corresponding to no input; reject both. */
+		/* An output frame must acknowledge input: one that doesn't
+		 * would re-arm the deadline without progress, and its
+		 * payload would be output for no input. */
 		if (consumed == 0) {
 			return -1;
 		}
@@ -719,11 +713,10 @@ main(void)
 				}
 				if (state == 2) {
 					stall_forgiven = false;
-					/* A complete frame is progress: re-arm.
-					 * With everything acknowledged and stdin
-					 * still open there is no outstanding work
-					 * (a slow git must not trip the deadline),
-					 * so disarm until more input arrives. */
+					/* Re-arm after an output frame, or
+					 * disarm while everything is
+					 * acknowledged and we only wait for
+					 * more stdin. */
 					if (acked == spool.len && stdin_open) {
 						deadline = 0;
 					} else {

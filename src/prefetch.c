@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -88,9 +89,8 @@ prefetch_reap(void)
 	}
 }
 
-/* Kill one pipeline's whole process group and reap its leader.  The filter
- * client dying mid-request is safe by design: the daemon's keepalive probe
- * notices and cancels the abandoned tokenization. */
+/* Kill a pipeline's process group, reap its leader, and clear its slot.
+ * The daemon cancels work for a client killed mid-request. */
 static void
 prefetch_kill(struct prefetch_job *job)
 {
@@ -131,11 +131,9 @@ prefetch_spawn(const char *id, struct app_external *app)
 	pid_t pid;
 	size_t arg;
 
-	/* Mirror the diff view's hunk-affecting options: the option helpers
-	 * return "" when disabled (the diff view's argv_format drops those,
-	 * but a direct exec must not hand git empty arguments), and the
-	 * user's diff-options change hunk shapes, so cache keys only match
-	 * when they are included. */
+	/* Use the diff view's hunk-affecting options, diff-options included,
+	 * so the prefetch warms what the diff view will request.  Skip the ""
+	 * option helpers return when disabled, which exec would pass to git. */
 	for (arg = 0; candidates[arg]; arg++)
 		if (*candidates[arg])
 			show_argv[argc++] = candidates[arg];
@@ -252,8 +250,8 @@ prefetch_request(const char *ids[], size_t ids_len)
 
 	prefetch_reap();
 
-	/* A moved selection invalidates running prefetches it no longer
-	 * wants; completed memos for unwanted commits merely expire. */
+	/* Forget prefetches the new selection doesn't want, killing running
+	 * ones. */
 	for (job = 0; job < PREFETCH_JOBS; job++) {
 		if (!prefetch_id_in(prefetch_jobs[job].id, ids, ids_len)) {
 			if (prefetch_jobs[job].pgid > 0)
@@ -320,9 +318,8 @@ prefetch_idle(void)
 	for (i = 0; i < prefetch_pending_count; i++) {
 		struct prefetch_job *slot = NULL;
 
-		/* Prefer slots holding nothing over completed-job memos, so
-		 * launching one new commit does not erase the memo that stops
-		 * another from being redone. */
+		/* Prefer empty slots: a completed job's memo keeps its commit
+		 * from being prefetched again. */
 		for (job = 0; job < PREFETCH_JOBS && !slot; job++)
 			if (prefetch_jobs[job].pgid == 0 && !prefetch_jobs[job].id[0])
 				slot = &prefetch_jobs[job];

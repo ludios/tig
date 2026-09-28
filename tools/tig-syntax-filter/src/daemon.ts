@@ -8,11 +8,12 @@
  *
  * Wire protocol (client -> daemon):
  *	"TIGSYN1 <cwd_byte_length>\n" <cwd bytes> <raw diff bytes ... EOF>
- * Daemon -> client, a sequence of frames, each acknowledging consumed input:
+ * Daemon -> client, a sequence of frames:
  *	"O <consumed_input_bytes> <output_bytes>\n" <output bytes>
+ *	"P 0\n", a keepalive probe once the client has half-closed.
  *	"E 0\n" on clean end of stream.
- * The client keeps unacknowledged input spooled, so a daemon crash at any
- * point lets it fall back to emitting the raw diff.
+ * The client keeps input spooled until an O frame acknowledges it, so a
+ * daemon crash at any point lets it fall back to emitting the raw diff.
  */
 
 import * as net from "node:net";
@@ -29,11 +30,9 @@ import { process_section } from "./process.ts";
 
 const logger = getLogger(["tig-syntax", "daemon"]);
 
-/* Idle lifecycle (plan item B5): after IDLE_SHED_MS the cheap-to-rebuild
- * state goes (blob cache, git children) while the valuable tokenized-line
- * cache stays, so a same-day return skips re-tokenization; only after
- * IDLE_EXIT_MS does the daemon exit entirely.  (Cold start is also hidden
- * by tig's startup warm-up, plan item B4.) */
+/* After IDLE_SHED_MS without connections, drop the cheap-to-rebuild git
+ * state (blob and attribute caches, git children) but keep the costly
+ * tokenized-line cache; after IDLE_EXIT_MS, exit. */
 const IDLE_SHED_MS = 30 * 60 * 1000;
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 
@@ -145,11 +144,9 @@ function handle_connection(socket: net.Socket): Promise<void> {
 			if (cwd !== null) {
 				enqueue_sections(splitter.finish());
 			}
-			// The client half-closes after sending its diff, so from here
-			// on a kill leaves the connection indistinguishable from a
-			// patient client — until a write fails.  Probe with keepalive
-			// frames (harmless to a live client, EPIPE from a dead one)
-			// so abandoned tokenization gets cancelled between chunks.
+			// Once the client half-closes, only a failed write
+			// reveals that it was killed, so send keepalives:
+			// abandoned tokenization then stops between chunks.
 			heartbeat = setInterval(() => {
 				socket.write("P 0\n");
 			}, 500);

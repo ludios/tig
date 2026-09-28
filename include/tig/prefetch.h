@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -19,11 +20,11 @@
 #include "tig/tig.h"
 
 /*
- * Diff prefetch: when `diff-prefetch` is enabled and a diff-syntax-filter
- * is configured, the commits after the main-view selection are pushed
- * through `git show | <filter> > /dev/null` in the background once the
- * selection has been idle briefly, so the filter daemon's caches are warm
- * before the user navigates onto them.
+ * Diff prefetch: once the main-view selection sits still briefly, the next
+ * few commits run through `git show | <filter> > /dev/null` in the
+ * background, warming the filter daemon's caches ahead of the user.  Needs
+ * `diff-prefetch` and a diff-syntax-filter; skips word diffs and
+ * file-filtered views.
  */
 
 /* Record up to `ids_len` candidate commit IDs adjacent to the selection.

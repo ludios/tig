@@ -2,13 +2,10 @@
 // Model-output: Claude Opus 5.5
 
 /**
- * End-to-end tests: the real C client talking to the real daemon over a
- * unix socket, fed by `git show` from a scratch repository.  These cover
- * the full production path (client spawn -> daemon listen -> highlight ->
- * framed output), including the environments that broke it in the field:
- * an unusable $XDG_RUNTIME_DIR (e.g. a session su'd from root keeps
- * /run/user/0) must fall back to the $TMPDIR socket, not degrade every
- * diff to raw passthrough.
+ * End-to-end tests of the C client: against the real daemon over a unix
+ * socket, fed `git show` output from a scratch repository (highlighting,
+ * socket fallback, slow and failed starts, concurrent clients), and
+ * against scripted daemons (fallback and deadlines).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -91,12 +88,11 @@ function write_launcher(name: string, body: string): string {
 	return path;
 }
 
-/** PIDs of processes whose environment contains `marker` (a test-unique
- * path) and whose command line contains `cmdline_needle`: daemons by
- * default, or with "" every process the tests spawned detached (a
- * launcher still sleeping before it execs the daemon, for cleanup).
- * Empty where procfs is unavailable (e.g. macOS) — spawned daemons then
- * outlive the suite but idle-exit on their own. */
+/** PIDs of other processes whose environment contains `marker` (a
+ * test-unique path) and whose command line contains `cmdline_needle`:
+ * daemons by default; with "", also launchers still sleeping before they
+ * exec the daemon.  Empty without procfs (e.g. macOS); spawned daemons
+ * then outlive the suite until they idle-exit. */
 function daemon_pids(marker: string, cmdline_needle = "daemon.ts"): number[] {
 	const pids: number[] = [];
 	let entries: string[];
@@ -241,8 +237,7 @@ describe("client + daemon end to end", () => {
 	}, 60000);
 
 	it("waits for a slow daemon start rather than falling back", () => {
-		// Slower than the 3 s the client used to allow: a cold start on a
-		// slow or cache-cold machine.
+		// Cold starts on slow or cache-cold machines can take seconds.
 		const launcher = write_launcher("slow-daemon.sh",
 			`sleep 3.5\nexec ${JSON.stringify(daemon_script)}`);
 		const { output, ms } = run_filter_timed(show_output, filter_env({

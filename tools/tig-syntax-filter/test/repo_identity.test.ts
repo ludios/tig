@@ -1,9 +1,10 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
- * C4/C6 behavior: canonical repository identities (subdirectories and
- * linked worktrees share the object store; attribute checks resolve
- * repo-relative paths from the top level), and the byte-budgeted LRU.
+ * Canonical repository identities (subdirectories and linked worktrees
+ * share the object store), textconv lookups from the worktree top level,
+ * attribute-state resets, and the byte-budgeted LRU.
  */
 
 import { describe, it, expect, beforeAll } from "vitest";

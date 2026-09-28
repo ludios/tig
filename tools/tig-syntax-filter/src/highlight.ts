@@ -52,16 +52,12 @@ export const MAX_RUNS_PER_LINE = 4000;
  * roughly that. */
 const CHUNK_LINES = 128;
 
-/** identity|lang -> shallowest requested depth whose tokenization has
- * exceeded the budget, with the time of the verdict.  Requests at least
- * that deep fail fast; shallower hunks in the same document still get a
- * fresh attempt (the budget verdict depends on the requested prefix, so
- * the key alone must not damn the whole document).  Verdicts expire after
- * FAIL_TTL_MS: a failure can reflect transient contention (the deadline
- * is wall time shared with concurrent sections, e.g. a prefetch burst),
- * and even a deterministic one deserves an occasional retry — otherwise
- * one bad first visit leaves a document permanently raw.  The retry cost
- * is bounded at one budget per document per TTL. */
+/** identity|lang -> shallowest requested depth that exceeded the budget,
+ * and when.  While fresh, requests at least that deep fail fast unless
+ * the cache covers them; shallower ones still get an attempt.  Verdicts
+ * expire after FAIL_TTL_MS: a failure may reflect transient contention
+ * (the deadline is wall time, shared with concurrent sections), and even
+ * a deterministic one should not leave a document raw forever. */
 const budget_fail_cache = new Map<string, { depth: number, at: number }>();
 const FAIL_CACHE_MAX = 512;
 const FAIL_TTL_MS = 60 * 1000;
@@ -101,11 +97,10 @@ let theme_name = "one-monokai";
 let theme_fg = "#bbbbbb";
 let theme_bg = "#282c34";
 
-/** A cached tokenization prefix: SGR-ready lines (no trailing newline)
- * plus the grammar state after the last of them, so a deeper request
- * for the same document continues from there instead of re-tokenizing
- * from line 1 — which is also what makes a budget miss recoverable: each
- * retry advances the prefix. */
+/** A cached tokenization prefix: SGR-annotated lines (without newlines)
+ * and the grammar state after the last one, from which a deeper request
+ * resumes.  Retries after a missed budget resume too, so a slow document
+ * can highlight eventually. */
 interface cached_prefix {
 	lines: string[],
 	state: unknown,
@@ -123,20 +118,19 @@ export const stats = {
 	tokenized_lines: 0,
 };
 
-/** In-flight tokenizations by cache key, so concurrent requests for the
- * same document (e.g. a prefetch racing the foreground view, possible
- * since tokenization yields the event loop) share one pass instead of
- * duplicating oniguruma work. */
+/** In-flight tokenizations by cache key.  Tokenization yields to the
+ * event loop, so a concurrent request for the same document (e.g. a
+ * prefetch racing the foreground view) can join a pass going at least as
+ * deep. */
 const tokenize_inflight = new Map<string, {
 	last_line: number,
 	promise: Promise<string[] | null>,
 }>();
 
 /**
- * Apply `TOKEN_COLOR_OVERRIDES` to a parsed VS Code theme, in place.  Every
- * override must name a rule the theme actually defines: a silently-dropped
- * override would otherwise be the outcome of re-importing a theme whose rules
- * were renamed.
+ * Apply `TOKEN_COLOR_OVERRIDES` to a parsed VS Code theme, in place,
+ * asserting that each names an existing rule with a foreground, so
+ * re-importing a theme with renamed rules can't silently drop one.
  */
 function apply_token_color_overrides(theme: { tokenColors?: unknown }): void {
 	const rules = theme.tokenColors;
@@ -245,9 +239,8 @@ export function frame_content(text: string): string {
 	return text.replaceAll("\x1b", LITERAL_ESC_MARKER);
 }
 
-/** Memo of (color, font style) -> emitted sequence; a theme produces only
- * a handful of distinct styles, and BM5 showed the rebuild+reparse in the
- * profile (plan item C11). */
+/** Memo of (color, font style) -> SGR sequence, sparing the color parsing
+ * per token; a theme has only a handful of distinct styles. */
 const style_memo = new Map<string, string>();
 
 /** The SGR prefix selecting a token's style; always resets first. */
@@ -328,28 +321,26 @@ function cr_suffix(line: string): string {
 
 /**
  * Tokenize `content` (a complete source document) as `lang` and return one
- * SGR-annotated string per source line, up to `last_line` (1-based; grammar
- * state only depends on preceding lines, so later lines need no work).
- * Stripping the SGR from a returned line yields the source line exactly.
- * Lines are cached under `identity` + lang + emit version.
+ * SGR-annotated string per source line, through `last_line` (1-based) or
+ * beyond when cached; later lines can't change earlier tokens, so they
+ * are not tokenized.  Removing the SGR and unframing literal-ESC markers
+ * yields the source lines exactly.  Lines are cached under `identity` +
+ * lang + emit version.
  *
  * Like an editor, the grammar never sees a CRLF line's carriage return;
  * it follows the line's final reset, unstyled.
  *
- * Tokenization runs in CHUNK_LINES batches continued via shiki's
- * GrammarState (verified token-identical to one-shot tokenization), with
- * the event loop yielded between batches (a macrotask: other connections'
- * requests, socket events, and timers interleave mid-section instead of
- * waiting out the whole budget).  `deadline` (a performance.now()
- * timestamp, or null for none) is checked between batches; it is wall
- * time, so under contention concurrent sections abort a little earlier —
- * the latency-focused reading of the budget.  On exceeding it the lines
- * tokenized so far are still cached with their grammar state, and the
- * next request for the document resumes from there — a valid prefix that serves
- * shallower hunks — the failure depth is remembered for fail-fast, and
- * null is returned so the section goes raw.  `cancelled` (e.g. "did the
- * client hang up") also stops between batches, keeping the partial but
- * NOT recording a failure depth: abandoned work says nothing about cost.
+ * Tokenization runs in CHUNK_LINES batches, continued via shiki's
+ * GrammarState (token-identical to one-shot tokenization), yielding to
+ * the event loop between batches so other connections and timers get to
+ * run.  Before each batch it checks `deadline` (a performance.now()
+ * timestamp, or null) and `cancelled`; if either trips, the lines so far
+ * are cached with their grammar state for later requests to resume from,
+ * and null is returned.  A missed deadline also records the requested
+ * depth for fail-fast; a cancellation doesn't, as abandoned work says
+ * nothing about cost.  The deadline is wall time, so under contention
+ * sections give up a little earlier.
+ *
  * Also returns null when the request is deeper than the configured line
  * cap or a line exceeds MAX_LINE_CHARS.
  */

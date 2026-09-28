@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -101,12 +102,10 @@ app_diff_highlight_path_search(char *dest, size_t destlen, const char *query)
  */
 
 /*
- * Resolve the diff-syntax-filter option value to an executable.  The value
- * is a plain name looked up in $PATH, or a path (with ~ expansion); it is
- * never parsed as a shell command.  Returns an app whose argv[0] is NULL
- * when the filter cannot be resolved to an executable file, in which case
- * the caller renders the plain diff.  The result is cached per value so a
- * :set to a different filter re-resolves.
+ * Resolve the diff-syntax-filter option to an executable: a value with
+ * '/' or '~' is a path, anything else is looked up in $PATH; it is never
+ * run through a shell.  argv[0] is NULL when nothing executable is found.
+ * Only the last value is cached, so :set to another filter re-resolves.
  */
 struct app_external *
 app_syntax_filter_load(const char *query)

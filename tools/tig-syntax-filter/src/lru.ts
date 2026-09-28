@@ -1,10 +1,10 @@
 // Model-output: Claude Fable 5
+// Model-output: Claude Opus 5.5
 
 /**
- * A byte-budgeted LRU map (plan item C6).  Entry-count bounds let a few
- * multi-megabyte values dominate memory (a measured 1.4 GB RSS under the
- * old entry-count caches); a byte budget makes eviction track what
- * actually matters.  Sizes are approximations supplied by the caller.
+ * A byte-budgeted LRU map.  An entry-count bound lets a few multi-megabyte
+ * values dominate memory; a byte budget bounds what matters.  Sizes are
+ * the caller's approximations.
  */
 
 import { A } from "ayy";
