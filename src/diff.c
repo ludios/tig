@@ -116,24 +116,54 @@ struct diff_stat_context {
 	bool skip;
 	int syntax_style;
 	size_t cells;
-	const char **cell_text;
-	struct box_cell cell[8192];
+	size_t skipped_len;	/* With skip: bytes of diff_skipped_text in use. */
 };
+
+/* Storage for the one line under construction, reused from line to line;
+ * diff_common_add_line() copies it into the line.  diff_cells holds the
+ * cells; with skip, diff_skipped_text holds the cells' text, i.e. the line
+ * without its markup, NUL-terminated. */
+static struct box_cell diff_cells[8192];
+static char *diff_skipped_text;
+
+/* Append `length` bytes from `text` to diff_skipped_text.  Returns false
+ * when out of memory. */
+static bool
+diff_common_append_skipped(struct diff_stat_context *context, const char *text, size_t length)
+{
+	static size_t size;
+	size_t need = context->skipped_len + length + 1;
+
+	if (need > size) {
+		size_t new_size = MAX(need, size * 2);
+		char *tmp = realloc(diff_skipped_text, new_size);
+
+		if (!tmp) {
+			return false;
+		}
+		diff_skipped_text = tmp;
+		size = new_size;
+	}
+	memcpy(diff_skipped_text + context->skipped_len, text, length);
+	context->skipped_len += length;
+	diff_skipped_text[context->skipped_len] = 0;
+	return true;
+}
 
 static bool
 diff_common_add_cell(struct diff_stat_context *context, size_t length, bool allow_empty)
 {
 	if (!allow_empty && (length == 0))
 		return true;
-	if (context->cells > ARRAY_SIZE(context->cell) - 1) {
+	if (context->cells >= ARRAY_SIZE(diff_cells)) {
 		report("Too many diff cells, truncating");
 		return false;
 	}
-	if (context->skip && !argv_appendn(&context->cell_text, context->text, length))
+	if (context->skip && !diff_common_append_skipped(context, context->text, length))
 		return false;
-	context->cell[context->cells].length = length;
-	context->cell[context->cells].type = context->type;
-	context->cell[context->cells].syntax_style = context->syntax_style;
+	diff_cells[context->cells].length = length;
+	diff_cells[context->cells].type = context->type;
+	diff_cells[context->cells].syntax_style = context->syntax_style;
 	context->cells++;
 	return true;
 }
@@ -141,21 +171,20 @@ diff_common_add_cell(struct diff_stat_context *context, size_t length, bool allo
 static struct line *
 diff_common_add_line(struct view *view, const char *text, enum line_type type, struct diff_stat_context *context)
 {
-	char *cell_text = context->cell_text ? argv_to_string_alloc(context->cell_text, "") : NULL;
-	const char *line_text = cell_text ? cell_text : text;
-	struct line *line = add_line_text_at(view, view->lines, line_text, type, context->cells);
+	const char *line_text = text;
+	struct line *line;
 	struct box *box;
 
-	free(cell_text);
-	argv_free(context->cell_text);
-	free(context->cell_text);
-
+	if (context->skip) {
+		line_text = context->skipped_len ? diff_skipped_text : "";
+	}
+	line = add_line_text_at(view, view->lines, line_text, type, context->cells);
 	if (!line)
 		return NULL;
 
 	box = line->data;
 	if (context->cells)
-		memcpy(box->cell, context->cell, sizeof(struct box_cell) * context->cells);
+		memcpy(box->cell, diff_cells, sizeof(struct box_cell) * context->cells);
 	box->cells = context->cells;
 	return line;
 }
