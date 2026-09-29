@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Model-output: Claude Opus 5.5
+#
+# Graph test: time per row grows linearly with the graph's width
+#
+# 16000 commits, up to ~2000 lanes wide.  On a fast 2026 machine this takes
+# test-graph ~1.3 s of CPU time; when each row cost O(W²), it took ~31 s.
+
+. libtest.sh
+
+gen-history 16000 1 16000 > input
+
+(
+	ulimit -t 8
+	code=0
+	test-graph < input > /dev/null || code="$?"
+	echo "exit status $code"
+) > status 2>&1
+
+assert_equals status strict "test-graph used over 8 s of CPU time or failed" <<EOF
+exit status 0
+EOF

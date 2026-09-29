@@ -2,7 +2,10 @@
 
 Model-output: Claude Opus 5.5
 
-Handoff for a session that will fix this.  Measured 2026-09-28 on xclank
+**Fixed 2026-09-29** as proposed below; see [Result](#result).  The rest is
+the original handoff.
+
+Measured 2026-09-28 on xclank
 (32 cores), `~/cloned/nixpkgs` at d095bb9fd847 (1,011,374 commits, 23k refs),
 git 2.54.0, tig built from `prime` around 06c6ff7e (`src/graph-v2.c` is
 unchanged through d80fbb72).
@@ -135,14 +138,45 @@ Expected result: per-row cost O(W), so the 30k case should land near v1's
 0.5 s instead of 16 s, and the full load near git's own ~7 s plus a few
 seconds.  That's a guess; measure it.
 
+## Result
+
+Implemented as proposed.  `graph_scan_rows()` fills the arrays using an
+open-addressing table keyed by the interned pointer, whose slots belong to
+the current scan by a generation stamp (so NULL is an ordinary key and
+nothing is cleared between scans).  The color map is keyed by pointer, and
+each canvas is allocated once per row.
+
+Symbol bits and colors, dumped raw, are identical to the old code on nixpkgs
+(50k topo order, 30k date order, 20k default order, 15k `--all`, 8k with 137
+`--boundary` commits), vscode (40k `--all`), postgresql and questdb (`--all`),
+this repo, 30 generated histories up to 814 lanes wide, and 24k fuzzed inputs
+(non-topological orders, duplicate and missing parents, boundary commits).
+New tests: `test/graph/21-wide-history-test` (glyphs and colors, verbatim),
+`22-wide-history-cksum-test` (~530 lanes, by checksum) and
+`23-wide-history-speed-test` (~2000 lanes under an 8 s CPU limit: 1.3 s now,
+31 s before); `test/tools/gen-history` generates their inputs.
+
+| main view load (pty, `TIG_SCRIPT=:quit`) | 30k    | 50k    | all 1M                  |
+|------------------------------------------|--------|--------|-------------------------|
+| graph v2 before                          | 16.3 s | 45.1 s | >20 min                 |
+| graph v2 after                           | 1.07 s | 2.08 s | 29.6 s, peak RSS 3.2 GB |
+| graph v1                                 | 0.53 s |        | 6.7 s                   |
+
+The guess above was optimistic for the full load: the remaining O(n·W) work,
+roughly 800M symbols (most of the 3.2 GB at 4 bytes each), still costs ~23 s
+over v1.  About a third of the graph's time is now `get_color()`'s libiberty
+hashtable lookup, one per symbol; a pointer-keyed open-addressing color table
+would remove most of it.
+
 ## Still unsolved after that: memory O(n·W)
 
 Each line keeps W 4-byte `struct graph_symbol`s.  Full nixpkgs ≈ 1M × ~900 ×
-4 B ≈ 3.6 GB, consistent with 2.3 GB RSS halfway through.  Bounding this means
-storing/drawing at most K lanes per line (with some overflow glyph).  That
-changes output and needs a UI decision (cap value, option name, glyph), so
-**ask the user** before doing it.  Since titles are already invisible at these
-widths, a cap would also make the view readable again.
+4 B ≈ 3.6 GB, consistent with 2.3 GB RSS halfway through (3.2 GB peak for a
+full load after the fix).  Bounding this means storing/drawing at most K
+lanes per line (with some overflow glyph).  That changes output and needs a UI
+decision (cap value, option name, glyph), so **ask the user** before doing it.
+Since titles are already invisible at these widths, a cap would also make the
+view readable again.
 
 ## How to verify
 
@@ -179,10 +213,11 @@ widths, a cap would also make the view readable again.
    That's 16.3 s today; then run it without `--max-count` for the full
    history.  Check the exit_status column is 0.
 
-## Workaround until then
+## Workaround
 
 `set main-view-commit-title-graph = v1`, which `doc/tigrc.5.adoc` already
-recommends for large repositories.
+recommends for large repositories.  After the fix, v1 is still ~4× faster
+than v2 on the full nixpkgs history.
 
 ## Out of scope here, found in the same investigation
 

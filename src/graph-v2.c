@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -15,6 +17,7 @@
 #include "tig/util.h"
 #include "tig/graph.h"
 #include "compat/hashtab.h"
+#include <stdint.h>
 
 struct graph_symbol {
 	unsigned int color:8;
@@ -61,6 +64,40 @@ struct colors {
 	size_t count[GRAPH_COLORS];
 };
 
+/* Maps ids to columns of one row at a time.  Open addressing, sized for
+ * the widest row so far and reused from row to row: a slot is in use only
+ * while its generation is the index's. */
+struct graph_id_slot {
+	const char *id;
+	unsigned int generation;
+	int pos;
+};
+
+struct graph_id_index {
+	struct graph_id_slot *slots;
+	size_t size;			/* A power of two, at least twice the row. */
+	unsigned int generation;
+};
+
+/* What graph_generate_symbols() needs to know about the columns of
+ * prev_row, row and next_row, gathered in O(W) per row by graph_scan_rows()
+ * so that no symbol has to rescan a row.  Arrays are indexed by column;
+ * "same id" compares interned pointers, and an empty (NULL) column has the
+ * same id as another empty one. */
+struct graph_row_scan {
+	struct graph_id_index ids;
+	size_t capacity;		/* Columns the arrays have room for. */
+	int *row_left;			/* Nearest column of row to the left with the same id, or -1. */
+	int *row_right;			/* Nearest column of row to the right with the same id, or W. */
+	int *prev_left;			/* Nearest column of prev_row to the left with the same id, or -1. */
+	int *prev_last;			/* Last column of prev_row with the id of row's column, or -1. */
+	int *next_right;		/* Nearest column of next_row to the right with the same id, or W. */
+	bool *shift_left;		/* Each column's symbol.shift_left. */
+	int commit_first;		/* First column of row with the commit's id, or W. */
+	int commit_last;		/* Last column of row with the commit's id, or -1. */
+	int new_parent_last;		/* Last column that turns into a parent in next_row, or -1. */
+};
+
 struct graph_v2 {
 	struct graph api;
 	struct graph_row row;
@@ -72,12 +109,15 @@ struct graph_v2 {
 	size_t expanded;
 	const char *id;
 	struct colors colors;
+	struct graph_row_scan scan;
 	bool has_parents;
 	bool is_boundary;
 };
 
 DEFINE_ALLOCATOR(realloc_graph_columns, struct graph_column, 32)
 DEFINE_ALLOCATOR(realloc_graph_symbols, struct graph_symbol, 1)
+DEFINE_ALLOCATOR(realloc_graph_positions, int, 32)
+DEFINE_ALLOCATOR(realloc_graph_flags, bool, 32)
 
 static htab_t intern_string_htab;
 
@@ -110,88 +150,35 @@ static const char *intern_string(const char *str)
 	return *result;
 }
 
+/* Ids are interned, so the map compares them by pointer.  All empty (NULL)
+ * columns share one entry. */
 struct id_color {
+	const char *id;
 	size_t color;
-	char id[1];
 };
-
-static struct id_color *
-id_color_new(const char *id, size_t color)
-{
-	struct id_color *node = malloc(sizeof(struct id_color) + strlen(id));
-
-	if (!node)
-		die("Failed to allocate color");
-	strcpy(node->id, id);
-	node->color = color;
-
-	return node;
-}
-
-static void
-id_color_delete(struct id_color *node)
-{
-	free(node);
-}
 
 static int
 id_color_eq(const void *entry, const void *element)
 {
-	return strcmp(((const struct id_color *) entry)->id, ((const struct id_color *) element)->id) == 0;
-}
-
-static void
-key_del(void *key)
-{
-	id_color_delete((struct id_color *) key);
+	return ((const struct id_color *) entry)->id == ((const struct id_color *) element)->id;
 }
 
 static hashval_t
 id_color_hash(const void *node)
 {
-	return htab_hash_string(((const struct id_color*) node)->id);
-}
-
-static void
-colors_add_id(struct colors *colors, const char *id, const size_t color)
-{
-	struct id_color *node = id_color_new(id, color);
-	void **slot = htab_find_slot(colors->id_map, node, INSERT);
-
-	if (slot != NULL && *slot == NULL) {
-		*slot = node;
-		colors->count[color]++;
-	} else {
-		id_color_delete(node);
-	}
+	return htab_hash_pointer(((const struct id_color *) node)->id);
 }
 
 static void
 colors_remove_id(struct colors *colors, const char *id)
 {
-	struct id_color *node = id_color_new(id, 0);
-	void **slot = htab_find_slot(colors->id_map, node, NO_INSERT);
+	struct id_color key = { id };
+	void **slot = htab_find_slot(colors->id_map, &key, NO_INSERT);
 
 	if (slot != NULL && *slot != NULL) {
 		colors->count[((struct id_color *) *slot)->color]--;
 		htab_clear_slot(colors->id_map, slot);
 	}
-
-	id_color_delete(node);
-}
-
-static size_t
-colors_get_color(struct colors *colors, const char *id)
-{
-	struct id_color *key = id_color_new(id, 0);
-	struct id_color *node = (struct id_color *) htab_find(colors->id_map, key);
-
-	id_color_delete(key);
-
-	if (node == NULL) {
-		return (size_t) -1; // Max value of size_t. ID not found.
-	}
-	return node->color;
 }
 
 static size_t
@@ -216,29 +203,50 @@ colors_init(struct colors *colors)
 	if (colors->id_map == NULL) {
 		size_t size = 500;
 
-		colors->id_map = htab_create_alloc(size, id_color_hash, id_color_eq, key_del, calloc, free);
+		colors->id_map = htab_create_alloc(size, id_color_hash, id_color_eq, free, calloc, free);
 	}
 }
 
+/* The color of the lane with `id`, picking the least used color for an id
+ * not seen before. */
 static size_t
-get_color(struct graph_v2 *graph, const char *new_id)
+get_color(struct graph_v2 *graph, const char *id)
 {
-	size_t color;
-
-	if (!new_id)
-		new_id = "";
+	struct id_color key = { id };
+	struct id_color *node;
+	void **slot;
 
 	colors_init(&graph->colors);
-	color = colors_get_color(&graph->colors, new_id);
-
-	if (color < (size_t) -1) {
-		return color;
+	slot = htab_find_slot(graph->colors.id_map, &key, INSERT);
+	if (!slot) {
+		die("Failed to allocate color");
 	}
 
-	color = colors_get_free_color(&graph->colors);
-	colors_add_id(&graph->colors, new_id, color);
+	if (!*slot) {
+		node = malloc(sizeof(*node));
+		if (!node) {
+			die("Failed to allocate color");
+		}
+		node->id = id;
+		node->color = colors_get_free_color(&graph->colors);
+		graph->colors.count[node->color]++;
+		*slot = node;
+	}
 
-	return color;
+	return ((struct id_color *) *slot)->color;
+}
+
+static void
+graph_row_scan_free(struct graph_row_scan *scan)
+{
+	free(scan->ids.slots);
+	free(scan->row_left);
+	free(scan->row_right);
+	free(scan->prev_left);
+	free(scan->prev_last);
+	free(scan->next_right);
+	free(scan->shift_left);
+	memset(scan, 0, sizeof(*scan));
 }
 
 static void
@@ -250,6 +258,7 @@ done_graph_rendering(struct graph *graph_ref)
 	free(graph->row.columns);
 	free(graph->next_row.columns);
 	free(graph->parents.columns);
+	graph_row_scan_free(&graph->scan);
 }
 
 static void
@@ -259,6 +268,8 @@ done_graph(struct graph *graph_ref)
 
 	if (graph->colors.id_map)
 		htab_delete(graph->colors.id_map);
+
+	graph_row_scan_free(&graph->scan);
 
 	free(graph);
 
@@ -370,13 +381,6 @@ graph_collapse(struct graph_v2 *graph)
 	}
 
 	return true;
-}
-
-static void
-graph_canvas_append_symbol(struct graph_v2 *graph, struct graph_canvas *canvas, struct graph_symbol *symbol)
-{
-	if (realloc_graph_symbols(&canvas->symbols, canvas->size, 1))
-		canvas->symbols[canvas->size++] = *symbol;
 }
 
 static void
@@ -532,85 +536,6 @@ continued_down(struct graph_row *row, struct graph_row *next_row, int pos)
 }
 
 static bool
-shift_left(struct graph_row *row, struct graph_row *prev_row, int pos)
-{
-	int i;
-
-	if (!graph_column_has_commit(&row->columns[pos]))
-		return false;
-
-	for (i = pos - 1; i >= 0; i--) {
-		if (!graph_column_has_commit(&row->columns[i]))
-			continue;
-
-		if (row->columns[i].id != row->columns[pos].id)
-			continue;
-
-		if (!continued_down(prev_row, row, i))
-			return true;
-
-		break;
-	}
-
-	return false;
-}
-
-static bool
-new_column(struct graph_row *row, struct graph_row *prev_row, int pos)
-{
-	int i;
-
-	if (!graph_column_has_commit(&prev_row->columns[pos]))
-		return true;
-
-	for (i = pos; i < row->size; i++) {
-		if (row->columns[pos].id == prev_row->columns[i].id)
-			return false;
-	}
-
-	return true;
-}
-
-static bool
-continued_right(struct graph_row *row, int pos, int commit_pos)
-{
-	int i, end;
-
-	if (pos < commit_pos)
-		end = commit_pos;
-	else
-		end = row->size;
-
-	for (i = pos + 1; i < end; i++) {
-		if (row->columns[pos].id == row->columns[i].id)
-			return true;
-	}
-
-	return false;
-}
-
-static bool
-continued_left(struct graph_row *row, int pos, int commit_pos)
-{
-	int i, start;
-
-	if (pos < commit_pos)
-		start = 0;
-	else
-		start = commit_pos;
-
-	for (i = start; i < pos; i++) {
-		if (!graph_column_has_commit(&row->columns[i]))
-			continue;
-
-		if (row->columns[pos].id == row->columns[i].id)
-			return true;
-	}
-
-	return false;
-}
-
-static bool
 parent_down(struct graph_row *parents, struct graph_row *next_row, int pos)
 {
 	int parent;
@@ -621,48 +546,6 @@ parent_down(struct graph_row *parents, struct graph_row *next_row, int pos)
 
 		if (parents->columns[parent].id == next_row->columns[pos].id)
 
-			return true;
-	}
-
-	return false;
-}
-
-static bool
-parent_right(struct graph_row *parents, struct graph_row *row, struct graph_row *next_row, int pos)
-{
-	int parent, i;
-
-	for (parent = 0; parent < parents->size; parent++) {
-		if (!graph_column_has_commit(&parents->columns[parent]))
-			continue;
-
-		for (i = pos + 1; i < next_row->size; i++) {
-			if (parents->columns[parent].id != next_row->columns[i].id)
-				continue;
-
-			if (parents->columns[parent].id != row->columns[i].id)
-				return true;
-		}
-	}
-
-	return false;
-}
-
-static bool
-flanked(struct graph_row *row, int pos, int commit_pos, const char *commit_id)
-{
-	int i, start, end;
-
-	if (pos < commit_pos) {
-		start = 0;
-		end = pos;
-	} else {
-		start = pos + 1;
-		end = row->size;
-	}
-
-	for (i = start; i < end; i++) {
-		if (row->columns[i].id == commit_id)
 			return true;
 	}
 
@@ -681,6 +564,153 @@ below_commit(int pos, struct graph_v2 *graph)
 	return true;
 }
 
+/* Knuth's multiplicative hash; the product's high bits mix all of the
+ * pointer's bits, including the low ones that allocation alignment fixes. */
+static size_t
+graph_id_hash(const char *id)
+{
+	return (size_t) (((uint64_t) (uintptr_t) id * UINT64_C(0x9E3779B97F4A7C15)) >> 32);
+}
+
+/* Make room for a row of `columns` columns and forget the previous row's
+ * ids. */
+static void
+graph_id_index_reset(struct graph_id_index *index, size_t columns)
+{
+	if (index->size < 2 * columns) {
+		size_t size = 16;
+
+		while (size < 2 * columns) {
+			size *= 2;
+		}
+		free(index->slots);
+		index->slots = calloc(size, sizeof(*index->slots));
+		if (!index->slots) {
+			die("Failed to allocate graph index");
+		}
+		index->size = size;
+		index->generation = 0;
+	}
+
+	if (++index->generation == 0) {
+		memset(index->slots, 0, index->size * sizeof(*index->slots));
+		index->generation = 1;
+	}
+}
+
+/* The slot holding `id` since the last reset, or else the free slot where
+ * it would go (whose generation isn't the index's). */
+static struct graph_id_slot *
+graph_id_index_slot(struct graph_id_index *index, const char *id)
+{
+	size_t mask = index->size - 1;
+	size_t i = graph_id_hash(id) & mask;
+
+	while (index->slots[i].generation == index->generation && index->slots[i].id != id) {
+		i = (i + 1) & mask;
+	}
+
+	return &index->slots[i];
+}
+
+/* Set nearest[pos], for each column pos of `row`, to the nearest column
+ * with the same id on the left (from_left) or else on the right; or to -1
+ * or W when there is none.  Afterwards, the index maps each id to its last
+ * column in scan order. */
+static void
+graph_id_index_scan(struct graph_id_index *index, struct graph_row *row, bool from_left, int *nearest)
+{
+	int size = row->size;
+	int none = from_left ? -1 : size;
+	int step = from_left ? 1 : -1;
+	int pos;
+
+	graph_id_index_reset(index, size);
+	for (pos = from_left ? 0 : size - 1; 0 <= pos && pos < size; pos += step) {
+		struct graph_id_slot *slot = graph_id_index_slot(index, row->columns[pos].id);
+
+		nearest[pos] = slot->generation == index->generation ? slot->pos : none;
+		slot->id = row->columns[pos].id;
+		slot->generation = index->generation;
+		slot->pos = pos;
+	}
+}
+
+static void
+graph_row_scan_reserve(struct graph_row_scan *scan, size_t columns)
+{
+	size_t more;
+
+	if (columns <= scan->capacity) {
+		return;
+	}
+
+	more = columns - scan->capacity;
+	realloc_graph_positions(&scan->row_left, scan->capacity, more);
+	realloc_graph_positions(&scan->row_right, scan->capacity, more);
+	realloc_graph_positions(&scan->prev_left, scan->capacity, more);
+	realloc_graph_positions(&scan->prev_last, scan->capacity, more);
+	realloc_graph_positions(&scan->next_right, scan->capacity, more);
+	realloc_graph_flags(&scan->shift_left, scan->capacity, more);
+	scan->capacity = columns;
+}
+
+/* Fill graph->scan for the current rows. */
+static void
+graph_scan_rows(struct graph_v2 *graph)
+{
+	struct graph_row_scan *scan = &graph->scan;
+	struct graph_row *prev_row = &graph->prev_row;
+	struct graph_row *row = &graph->row;
+	struct graph_row *next_row = &graph->next_row;
+	int size = row->size;
+	int pos;
+
+	graph_row_scan_reserve(scan, size);
+
+	/* After the scan of prev_row from the left, the index holds each of
+	 * its ids at its last column. */
+	graph_id_index_scan(&scan->ids, prev_row, true, scan->prev_left);
+	for (pos = 0; pos < size; pos++) {
+		struct graph_id_slot *slot = graph_id_index_slot(&scan->ids, row->columns[pos].id);
+
+		scan->prev_last[pos] = slot->generation == scan->ids.generation ? slot->pos : -1;
+	}
+
+	graph_id_index_scan(&scan->ids, row, true, scan->row_left);
+	graph_id_index_scan(&scan->ids, row, false, scan->row_right);
+	graph_id_index_scan(&scan->ids, next_row, false, scan->next_right);
+
+	/* A column shifts left when the nearest column on its left with its id
+	 * didn't continue down from prev_row. */
+	for (pos = 0; pos < size; pos++) {
+		int left = scan->row_left[pos];
+
+		scan->shift_left[pos] = graph_column_has_commit(&row->columns[pos])
+				     && left >= 0 && !continued_down(prev_row, row, left);
+	}
+
+	scan->commit_first = size;
+	scan->commit_last = -1;
+	for (pos = 0; pos < size; pos++) {
+		if (row->columns[pos].id == graph->id) {
+			if (scan->commit_first == size) {
+				scan->commit_first = pos;
+			}
+			scan->commit_last = pos;
+		}
+	}
+
+	scan->new_parent_last = -1;
+	for (pos = size - 1; pos >= 0; pos--) {
+		if (next_row->columns[pos].id != row->columns[pos].id &&
+		    commit_is_in_row(next_row->columns[pos].id, &graph->parents)) {
+			scan->new_parent_last = pos;
+			break;
+		}
+	}
+}
+
 static void
 graph_generate_symbols(struct graph_v2 *graph, struct graph_canvas *canvas)
 {
@@ -688,40 +718,55 @@ graph_generate_symbols(struct graph_v2 *graph, struct graph_canvas *canvas)
 	struct graph_row *row = &graph->row;
 	struct graph_row *next_row = &graph->next_row;
 	struct graph_row *parents = &graph->parents;
+	struct graph_row_scan *scan = &graph->scan;
 	int commits = commits_in_row(parents);
 	int initial = commits < 1;
 	int merge = commits > 1;
+	int size = row->size;
+	int commit_pos = graph->position;
 	int pos;
 
-	for (pos = 0; pos < row->size; pos++) {
+	assert(prev_row->size == row->size);
+	assert(next_row->size == row->size);
+	assert(0 <= commit_pos && commit_pos < size);
+
+	graph_scan_rows(graph);
+	realloc_graph_symbols(&canvas->symbols, canvas->size, size);
+
+	for (pos = 0; pos < size; pos++) {
 		struct graph_column *column = &row->columns[pos];
 		struct graph_symbol *symbol = &column->symbol;
 		const char *id = next_row->columns[pos].id;
 
-		symbol->commit            = (pos == graph->position);
-		symbol->boundary          = (pos == graph->position && next_row->columns[pos].symbol.boundary);
+		symbol->commit            = (pos == commit_pos);
+		symbol->boundary          = (pos == commit_pos && next_row->columns[pos].symbol.boundary);
 		symbol->initial           = initial;
 		symbol->merge             = merge;
 
+		/* Reads the column's shift_left before it's set below, i.e.
+		 * the 0 that the column carried in from next_row. */
 		symbol->continued_down    = continued_down(row, next_row, pos);
 		symbol->continued_up      = continued_down(prev_row, row, pos);
-		symbol->continued_right   = continued_right(row, pos, graph->position);
-		symbol->continued_left    = continued_left(row, pos, graph->position);
-		symbol->continued_up_left = continued_left(prev_row, pos, prev_row->size);
+		symbol->continued_right   = scan->row_right[pos] < (pos < commit_pos ? commit_pos : size);
+		symbol->continued_left    = graph_column_has_commit(column)
+					    && scan->row_left[pos] >= (pos < commit_pos ? 0 : commit_pos);
+		symbol->continued_up_left = graph_column_has_commit(&prev_row->columns[pos])
+					    && scan->prev_left[pos] >= 0;
 
 		symbol->parent_down       = parent_down(parents, next_row, pos);
-		symbol->parent_right      = (pos > graph->position && parent_right(parents, row, next_row, pos));
+		symbol->parent_right      = (pos > commit_pos && pos < scan->new_parent_last);
 
 		symbol->below_commit      = below_commit(pos, graph);
-		symbol->flanked           = flanked(row, pos, graph->position, graph->id);
-		symbol->next_right        = continued_right(next_row, pos, 0);
+		symbol->flanked           = (pos < commit_pos ? scan->commit_first < pos : scan->commit_last > pos);
+		symbol->next_right        = scan->next_right[pos] < size;
 		symbol->matches_commit    = column->id == graph->id;
 
-		symbol->shift_left        = shift_left(row, prev_row, pos);
-		symbol->continue_shift    = (pos + 1 < row->size) ? shift_left(row, prev_row, pos + 1) : 0;
+		symbol->shift_left        = scan->shift_left[pos];
+		symbol->continue_shift    = (pos + 1 < size && scan->shift_left[pos + 1]);
 		symbol->below_shift       = prev_row->columns[pos].symbol.shift_left;
 
-		symbol->new_column        = new_column(row, prev_row, pos);
+		symbol->new_column        = !graph_column_has_commit(&prev_row->columns[pos])
+					    || scan->prev_last[pos] < pos;
 		symbol->empty             = (!graph_column_has_commit(&row->columns[pos]));
 
 		if (graph_column_has_commit(column)) {
@@ -729,7 +774,7 @@ graph_generate_symbols(struct graph_v2 *graph, struct graph_canvas *canvas)
 		}
 		symbol->color = get_color(graph, id);
 
-		graph_canvas_append_symbol(graph, canvas, symbol);
+		canvas->symbols[canvas->size++] = *symbol;
 	}
 
 	colors_remove_id(&graph->colors, graph->id);
