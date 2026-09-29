@@ -73,7 +73,9 @@ Before the loop, build per-row index arrays in one or two passes each, then
 answer every predicate in O(1).  Ids are interned (`intern_string()`), and the
 code already compares them by pointer, so pointer equality is exact.  A small
 open-addressing table keyed by pointer and sized ~2W, reused across rows,
-is enough for the id → index maps.
+is enough for the id → index maps.  **NULL is a real key** for `next_R`,
+`next_N` and `last_P` below (empty columns match each other), so it can't
+double as the table's empty-slot marker; give NULL its own side slot.
 
 Definitions (−1 / W when there's no such index):
 
@@ -103,13 +105,22 @@ Rewrites (each should be checked against the current helper line by line):
 - parent_right (only evaluated for pos > c): `M > pos`
 - parent_down stays as is (O(P)).
 
-**Trap: keep the evaluation order.**  `continued_down(row, next_row, pos)`
-reads `row->columns[pos].symbol.shift_left`, which is the *stale* value
-carried in from the previous row's copy.  It has to be evaluated before the
-loop overwrites `symbol->shift_left`.  Also, `shift_left` must still be
-computed for every column, because the next row reads it back
-(`below_shift`, `graph_remove_collapsed_columns`, `continued_down(prev_row,
-…)`).
+A reviewer checked each of these rewrites against the current helpers with
+an instrumented build, over this repo's history, 6k nixpkgs commits and 15k
+vscode commits (~1.5M column evaluations), and reported no mismatches.
+
+**The symbol bits are state, too.**  `continued_down(row, next_row, pos)`
+reads `row->columns[pos].symbol.shift_left`, and at that point the bit is
+always 0.  `graph_commit_next_row()` refilled `row` from `next_row`, whose
+symbols only ever get `memset` + `boundary` (`graph_insert_column()`).  So
+that call is just `row[pos].id == next_row[pos].id`, but only because it runs
+before the loop overwrites `symbol->shift_left`.  Either keep that order or
+replace the call with the id comparison, perhaps asserting the bit is 0.
+The computed bits do matter one row later.  `graph_commit_next_row()` copies
+`row`, symbols included, into `prev_row`, where `continued_up`,
+`below_shift`, `shift_left`'s `continued_down(prev_row, …)` and
+`graph_remove_collapsed_columns()` read `shift_left` back.  So `shift_left`
+must still be computed for every column.
 
 Cheap follow-ons in the same file:
 
@@ -148,15 +159,25 @@ widths, a cap would also make the view readable again.
    cmp old.txt new.txt
    ```
 
-   Glyphs can hide flag differences, so consider also a hidden test-graph
-   flag that dumps each symbol's raw bits.  Repeat on more histories (this
-   repo, `~/cloned/vscode`, nixpkgs at 50k+ once it's fast).
-3. Timing: the test-graph run above takes 6.7 s on the 20k log today and is
-   pty-free.  End to end:
-   `python3 doc/slop/benchmarks/BM7/pty-timer.py 3 ~/cloned/nixpkgs - src/tig --max-count=30000`
-   (16.3 s today), then without `--max-count` for the full history.  Set
-   `TIG_SYNTAX_SOCKET` to a private path so runs don't touch the user's live
-   syntax daemon.
+   Glyph output is not enough on its own.  Many flag combinations map to
+   the same glyph, and it doesn't show `symbol->color` at all, which the
+   `colors_get_color()` follow-on changes.  Add a test-graph flag that dumps
+   each symbol's raw bits, color included, and diff that too.  Repeat on
+   more histories (this repo, `~/cloned/vscode`, nixpkgs at 50k+ once it's
+   fast).
+3. Timing: the test-graph run above takes 6.7 s on the 20k log today and
+   needs no pty.  End to end (the binary path must be absolute:
+   `pty-timer.py` chdirs into the repo before exec, and a failed exec just
+   shows up as a ~14 ms run with exit status 256):
+
+   ```sh
+   export TIG_SYNTAX_SOCKET=/tmp/graph-bench.sock   # private daemon, not the user's
+   python3 doc/slop/benchmarks/BM7/pty-timer.py 3 ~/cloned/nixpkgs - "$PWD/src/tig" --max-count=30000
+   doc/slop/benchmarks/kill-sock-daemon.sh "$TIG_SYNTAX_SOCKET"   # stop that daemon afterwards
+   ```
+
+   That's 16.3 s today; then run it without `--max-count` for the full
+   history.  Check the exit_status column is 0.
 
 ## Workaround until then
 
@@ -174,5 +195,5 @@ recommends for large repositories.
   standalone, 10k tags) *after* `git show` (3.7 ms) finishes, in
   `src/diff.c` near `adding_describe_ref`.  Together that's ~16 of the ~24 ms
   per switch with the syntax filter off.
-- mimalloc (in tig and/or git) was measured and gives ≤5% anywhere; see
-  `doc/slop/benchmarks/BM11/`.
+- mimalloc (in tig and/or git) was measured and gives at most 6.4% on any
+  bench (git-side); see `doc/slop/benchmarks/BM11/`.

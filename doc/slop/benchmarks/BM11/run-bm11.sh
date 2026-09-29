@@ -13,14 +13,18 @@ here=$(cd "$(dirname "$0")" && pwd)
 config=$HOME/.config/tig/config
 mi=$(nix-build '<nixpkgs>' -A mimalloc --no-out-link)/lib
 git=$(readlink -f "$(command -v git)")
-mkdir -p "$work/src" "$work/git-glibc" "$work/git-mi" "$out"
+mkdir -p "$work" "$out"
 work=$(cd "$work" && pwd)
+rm -rf "$work/src"
+mkdir -p "$work/src" "$work/git-glibc" "$work/git-mi"
 
-# tig from HEAD, built outside the checkout so its src/tig is left alone
+# tig from HEAD, built outside the checkout so its src/tig is left alone.
+# $work/src starts empty: git archive stamps files with the commit time, so
+# objects left from an earlier run would look newer than the sources.
 git -C "$repo" archive HEAD | tar -x -C "$work/src"
 build() {
 	rm -f "$work/src/src/tig"
-	nix-shell -p ncurses --run "make -C '$work/src' src/tig -j8 DIST_VERSION=bm11 $*" > /dev/null 2>&1
+	nix-shell -p ncurses --run "make -C '$work/src' src/tig -j8 DIST_VERSION=bm11 $*" > /dev/null
 }
 build
 cp "$work/src/src/tig" "$work/tig-base"
@@ -44,6 +48,7 @@ printf '<Enter>\n:quit\n' > "$work/switch-0.tigscript"
 sock=$work/bench.sock
 export TIG_SYNTAX_SOCKET=$sock
 "$here/../kill-sock-daemon.sh" "$sock"
+trap '"$here/../kill-sock-daemon.sh" "$sock"' EXIT
 : | tig-syntax-filter > /dev/null
 
 marker=$(git -C "$nix" log -1 --format=%s | cut -d' ' -f1)
@@ -66,5 +71,4 @@ for mode in on off; do
 			> "$out/switch-$mode-$k.csv"
 	done
 done
-"$here/../kill-sock-daemon.sh" "$sock"
 python3 "$here/summarize.py" "$out"/*.csv > "$out/summary.txt"

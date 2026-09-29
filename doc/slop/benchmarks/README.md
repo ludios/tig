@@ -56,5 +56,5 @@ runners never touch an interactive tig session's daemon.
   (builds both tigs from HEAD plus `gitwrap.c` git shims with/without
   `LD_PRELOAD`), `bench.py` (pty timer: first-screen or TIG_SCRIPT modes,
   combos shuffled per round), `summarize.py`, `results/*.csv` +
-  `results/summary.txt`.  Verdict: ≤5% anywhere, mostly git-side; not
+  `results/summary.txt`.  Verdict: at most 6.4% anywhere, mostly git-side; not
   worth shipping.  Details in `BM11/README.md`.

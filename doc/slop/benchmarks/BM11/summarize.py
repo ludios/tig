@@ -22,6 +22,10 @@ def load(path):
 	return rows[0]["bench"], by
 
 def print_bench(name, by):
+	"""Print one bench's table.
+
+	name: bench name.  by: {(tig, git): [wall_ms, ...]} as load() returns.
+	"""
 	base = st.median(by[COMBOS[0]])
 	print(f"{name} (n={len(by[COMBOS[0]])} per combo)")
 	print(f"  {'tig':6} {'git':6} {'median':>9} {'mean':>9} {'sd':>7} {'min':>9} {'vs base':>8}")
@@ -32,6 +36,11 @@ def print_bench(name, by):
 		print(f"  {key[0]:6} {key[1]:6} {med:9.1f} {st.mean(v):9.1f} {sd} {min(v):9.1f} {100 * (med / base - 1):+7.1f}%")
 
 def print_per_switch(benches):
+	"""Print per-switch costs for each switch-<mode>-0/-300 pair present.
+
+	benches: {bench name: {(tig, git): [wall_ms, ...]}}; the names are the
+	ones run-bm11.sh gives its switch benches.
+	"""
 	for mode in ("on", "off"):
 		pair = benches.get(f"switch-{mode}-0"), benches.get(f"switch-{mode}-300")
 		if None in pair:

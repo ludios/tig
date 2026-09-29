@@ -25,6 +25,10 @@ import signal
 import sys
 import time
 
+# Longest any single run may take: the slowest bench is ~16 s, so anything
+# past this is a hang (e.g. a first-screen marker that never gets drawn).
+RUN_TIMEOUT_S = 90
+
 def run_once(cwd, tigrc, mode, tig, git_dir, argv):
 	"""One timed tig run.
 
@@ -51,6 +55,10 @@ def run_once(cwd, tigrc, mode, tig, git_dir, argv):
 	seen = b""
 	status = None
 	while True:
+		if time.monotonic() - start > RUN_TIMEOUT_S:
+			os.kill(pid, signal.SIGKILL)
+			os.waitpid(pid, 0)
+			sys.exit(f"{tig} {' '.join(argv)}: no result after {RUN_TIMEOUT_S} s ({kind} mode)")
 		r, _, _ = select.select([master], [], [], 0.05)
 		if master in r:
 			try:
