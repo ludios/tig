@@ -69,6 +69,7 @@ struct color_slot {
 struct colors {
 	struct color_slot *slots;
 	size_t size;			/* A power of two, or 0 before the first color. */
+	unsigned int bits;		/* log2(size). */
 	size_t used;			/* Slots in use, at most half of size. */
 	size_t count[GRAPH_COLORS];	/* How many ids have each color. */
 };
@@ -85,6 +86,7 @@ struct graph_id_slot {
 struct graph_id_index {
 	struct graph_id_slot *slots;
 	size_t size;			/* A power of two, at least twice the row. */
+	unsigned int bits;		/* log2(size). */
 	unsigned int generation;
 };
 
@@ -160,12 +162,12 @@ static const char *intern_string(const char *str)
 	return *result;
 }
 
-/* Multiplicative hashing.  Callers use the result's low bits, i.e. bits
- * 32 and up of the product, which mix all of the pointer's low 32 bits. */
+/* Fibonacci hashing: the home slot of `id` in a table of 2^bits slots is
+ * the top `bits` bits of the pointer times 2^64 / golden ratio. */
 static size_t
-graph_id_hash(const char *id)
+graph_id_hash(const char *id, unsigned int bits)
 {
-	return (size_t) (((uint64_t) (uintptr_t) id * UINT64_C(0x9E3779B97F4A7C15)) >> 32);
+	return (size_t) (((uint64_t) (uintptr_t) id * UINT64_C(0x9E3779B97F4A7C15)) >> (64 - bits));
 }
 
 /* The slot holding `id`, or else the free slot where it would go. */
@@ -173,8 +175,9 @@ static size_t
 colors_find(struct colors *colors, const char *id)
 {
 	size_t mask = colors->size - 1;
-	size_t i = graph_id_hash(id) & mask;
+	size_t i = graph_id_hash(id, colors->bits);
 
+	assert(colors->used < colors->size);
 	while (colors->slots[i].color >= 0 && colors->slots[i].id != id) {
 		i = (i + 1) & mask;
 	}
@@ -191,6 +194,7 @@ colors_grow(struct colors *colors)
 	size_t i;
 
 	colors->size = old_size ? 2 * old_size : 64;
+	colors->bits = old_size ? colors->bits + 1 : 6;
 	colors->slots = malloc(colors->size * sizeof(*colors->slots));
 	if (!colors->slots) {
 		die("Failed to allocate colors");
@@ -206,16 +210,18 @@ colors_grow(struct colors *colors)
 	free(old);
 }
 
+/* Forget the color of `id`, if it has one.  Later entries of its probe run
+ * may move to other slots. */
 static void
 colors_remove_id(struct colors *colors, const char *id)
 {
-	size_t mask = colors->size - 1;
-	size_t hole, i;
+	size_t mask, hole, i;
 
 	if (!colors->size) {
 		return;
 	}
 
+	mask = colors->size - 1;
 	hole = colors_find(colors, id);
 	if (colors->slots[hole].color < 0) {
 		return;
@@ -227,7 +233,7 @@ colors_remove_id(struct colors *colors, const char *id)
 	/* Keep every later entry of the probe run findable: move back into
 	 * the hole each one whose probe from its home slot passed the hole. */
 	for (i = (hole + 1) & mask; colors->slots[i].color >= 0; i = (i + 1) & mask) {
-		size_t home = graph_id_hash(colors->slots[i].id) & mask;
+		size_t home = graph_id_hash(colors->slots[i].id, colors->bits);
 
 		if (((i - home) & mask) >= ((i - hole) & mask)) {
 			colors->slots[hole] = colors->slots[i];
@@ -259,19 +265,20 @@ static size_t
 get_color(struct graph_v2 *graph, const char *id)
 {
 	struct colors *colors = &graph->colors;
-	struct color_slot *slot;
+	struct color_slot *slot = colors->size ? &colors->slots[colors_find(colors, id)] : NULL;
+
+	if (slot && slot->color >= 0) {
+		return slot->color;
+	}
 
 	if (2 * (colors->used + 1) > colors->size) {
 		colors_grow(colors);
+		slot = &colors->slots[colors_find(colors, id)];
 	}
-
-	slot = &colors->slots[colors_find(colors, id)];
-	if (slot->color < 0) {
-		slot->id = id;
-		slot->color = colors_get_free_color(colors);
-		colors->count[slot->color]++;
-		colors->used++;
-	}
+	slot->id = id;
+	slot->color = colors_get_free_color(colors);
+	colors->count[slot->color]++;
+	colors->used++;
 
 	return slot->color;
 }
@@ -602,9 +609,11 @@ graph_id_index_reset(struct graph_id_index *index, size_t columns)
 {
 	if (!index->slots || index->size < 2 * columns) {
 		size_t size = 16;
+		unsigned int bits = 4;
 
 		while (size < 2 * columns) {
 			size *= 2;
+			bits++;
 		}
 		free(index->slots);
 		index->slots = calloc(size, sizeof(*index->slots));
@@ -612,6 +621,7 @@ graph_id_index_reset(struct graph_id_index *index, size_t columns)
 			die("Failed to allocate graph index");
 		}
 		index->size = size;
+		index->bits = bits;
 		index->generation = 0;
 	}
 
@@ -627,7 +637,7 @@ static struct graph_id_slot *
 graph_id_index_slot(struct graph_id_index *index, const char *id)
 {
 	size_t mask = index->size - 1;
-	size_t i = graph_id_hash(id) & mask;
+	size_t i = graph_id_hash(id, index->bits);
 
 	while (index->slots[i].generation == index->generation && index->slots[i].id != id) {
 		i = (i + 1) & mask;

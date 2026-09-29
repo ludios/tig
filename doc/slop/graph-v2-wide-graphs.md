@@ -144,9 +144,10 @@ Implemented as proposed.  `graph_scan_rows()` fills the arrays using an
 open-addressing table keyed by the interned pointer, whose slots belong to
 the current scan by a generation stamp (so NULL is an ordinary key and
 nothing is cleared between scans).  Each canvas is allocated once per row.
-The colors moved from a libiberty hashtable keyed by id strings (a malloc,
-copy and string hash per symbol) to an open-addressing table keyed by the
-interned pointer, with backward-shift deletion.
+The same commit keyed the libiberty color map by the interned pointer
+instead of a malloc'd copy of the id.  Its lookups were then still a third
+of the graph's time, so a follow-up replaced it with an open-addressing
+table (linear probing, backward-shift deletion): the "color table" row.
 
 Symbol bits and colors, dumped raw, are identical to the old code on nixpkgs
 (50k topo order, 30k date order, 20k default order, 15k `--all`, 8k with 137
@@ -168,14 +169,13 @@ verbatim); `test/tools/gen-history` generates their inputs.
 
 The guess above was optimistic for the full load: the remaining O(n·W) work,
 roughly 800M symbols (most of the 3.2 GB at 4 bytes each), still costs ~16 s
-over v1.  With the libiberty color lookups gone (they were a third of the
-graph's time), the per-row work is mostly `graph_generate_symbols()` itself
+over v1.  The per-row work is now mostly `graph_generate_symbols()` itself
 and `graph_id_index_scan()`.
 
 ## Still unsolved after that: memory O(n·W)
 
 Each line keeps W 4-byte `struct graph_symbol`s.  Full nixpkgs ≈ 1M × ~900 ×
-4 B ≈ 3.6 GB, consistent with 2.3 GB RSS halfway through (3.2 GB peak for a
+4 B ≈ 3.6 GB, consistent with 2.3 GB RSS halfway through (3.3 GB peak for a
 full load after the fix).  Bounding this means storing/drawing at most K
 lanes per line (with some overflow glyph).  That changes output and needs a UI
 decision (cap value, option name, glyph), so **ask the user** before doing it.
