@@ -5,7 +5,7 @@
 # Graph test: time per row grows linearly with the graph's width
 #
 # 20000 commits, up to ~2500 lanes wide.  On a fast 2026 machine test-graph
-# takes ~2 s of CPU time here (~4 s built with -O0); when each row cost
+# takes ~1.6 s of CPU time here (~3.2 s built with -O0); when each row cost
 # O(W²), it took ~60 s.  The limit is 20 s.
 
 . libtest.sh

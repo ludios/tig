@@ -143,8 +143,10 @@ seconds.  That's a guess; measure it.
 Implemented as proposed.  `graph_scan_rows()` fills the arrays using an
 open-addressing table keyed by the interned pointer, whose slots belong to
 the current scan by a generation stamp (so NULL is an ordinary key and
-nothing is cleared between scans).  The color map is keyed by pointer, and
-each canvas is allocated once per row.
+nothing is cleared between scans).  Each canvas is allocated once per row.
+The colors moved from a libiberty hashtable keyed by id strings (a malloc,
+copy and string hash per symbol) to an open-addressing table keyed by the
+interned pointer, with backward-shift deletion.
 
 Symbol bits and colors, dumped raw, are identical to the old code on nixpkgs
 (50k topo order, 30k date order, 20k default order, 15k `--all`, 8k with 137
@@ -153,21 +155,22 @@ this repo, 30 generated histories up to 814 lanes wide, and 24k fuzzed inputs
 (non-topological orders, duplicate and missing parents, boundary commits).
 New tests: `test/graph/21-wide-history-test` (glyphs and colors, verbatim),
 `22-wide-history-cksum-test` (~530 lanes, by checksum),
-`23-wide-history-speed-test` (~2500 lanes under a 20 s CPU limit: 2.0 s now,
+`23-wide-history-speed-test` (~2500 lanes under a 20 s CPU limit: 1.6 s now,
 60 s before) and `24-wide-history-boundary-test` (boundary commits,
 verbatim); `test/tools/gen-history` generates their inputs.
 
 | main view load (pty, `TIG_SCRIPT=:quit`) | 30k    | 50k    | all 1M                  |
 |------------------------------------------|--------|--------|-------------------------|
 | graph v2 before                          | 16.3 s | 45.1 s | >20 min                 |
-| graph v2 after                           | 1.07 s | 2.08 s | 29.6 s, peak RSS 3.2 GB |
+| graph v2 after O(W) scan                 | 1.07 s | 2.08 s | 29.6 s, peak RSS 3.2 GB |
+| graph v2 after color table               | 0.89 s | 1.67 s | 22.3 s, peak RSS 3.3 GB |
 | graph v1                                 | 0.53 s |        | 6.7 s                   |
 
 The guess above was optimistic for the full load: the remaining O(n·W) work,
-roughly 800M symbols (most of the 3.2 GB at 4 bytes each), still costs ~23 s
-over v1.  About a third of the graph's time is now `get_color()`'s libiberty
-hashtable lookup, one per symbol; a pointer-keyed open-addressing color table
-would remove most of it.
+roughly 800M symbols (most of the 3.2 GB at 4 bytes each), still costs ~16 s
+over v1.  With the libiberty color lookups gone (they were a third of the
+graph's time), the per-row work is mostly `graph_generate_symbols()` itself
+and `graph_id_index_scan()`.
 
 ## Still unsolved after that: memory O(n·W)
 

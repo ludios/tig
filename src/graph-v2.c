@@ -59,9 +59,18 @@ struct graph_row {
 	struct graph_column *columns;
 };
 
+/* Lane colors by id: open addressing with linear probing, keyed by the
+ * interned pointer.  All empty (NULL) columns share one entry. */
+struct color_slot {
+	const char *id;
+	int color;			/* -1 when the slot is free. */
+};
+
 struct colors {
-	htab_t id_map;
-	size_t count[GRAPH_COLORS];
+	struct color_slot *slots;
+	size_t size;			/* A power of two, or 0 before the first color. */
+	size_t used;			/* Slots in use, at most half of size. */
+	size_t count[GRAPH_COLORS];	/* How many ids have each color. */
 };
 
 /* Maps ids to columns of one row at a time.  Open addressing, sized for
@@ -151,36 +160,81 @@ static const char *intern_string(const char *str)
 	return *result;
 }
 
-/* Ids are interned, so the map compares them by pointer.  All empty (NULL)
- * columns share one entry; unlike when the map compared strings, an id ""
- * (only from a malformed `parent` line) has an entry of its own. */
-struct id_color {
-	const char *id;
-	size_t color;
-};
-
-static int
-id_color_eq(const void *entry, const void *element)
+/* Multiplicative hashing.  Callers use the result's low bits, i.e. bits
+ * 32 and up of the product, which mix all of the pointer's low 32 bits. */
+static size_t
+graph_id_hash(const char *id)
 {
-	return ((const struct id_color *) entry)->id == ((const struct id_color *) element)->id;
+	return (size_t) (((uint64_t) (uintptr_t) id * UINT64_C(0x9E3779B97F4A7C15)) >> 32);
 }
 
-static hashval_t
-id_color_hash(const void *node)
+/* The slot holding `id`, or else the free slot where it would go. */
+static size_t
+colors_find(struct colors *colors, const char *id)
 {
-	return htab_hash_pointer(((const struct id_color *) node)->id);
+	size_t mask = colors->size - 1;
+	size_t i = graph_id_hash(id) & mask;
+
+	while (colors->slots[i].color >= 0 && colors->slots[i].id != id) {
+		i = (i + 1) & mask;
+	}
+
+	return i;
+}
+
+/* Double the table, or make the first one. */
+static void
+colors_grow(struct colors *colors)
+{
+	struct color_slot *old = colors->slots;
+	size_t old_size = colors->size;
+	size_t i;
+
+	colors->size = old_size ? 2 * old_size : 64;
+	colors->slots = malloc(colors->size * sizeof(*colors->slots));
+	if (!colors->slots) {
+		die("Failed to allocate colors");
+	}
+	for (i = 0; i < colors->size; i++) {
+		colors->slots[i].color = -1;
+	}
+	for (i = 0; i < old_size; i++) {
+		if (old[i].color >= 0) {
+			colors->slots[colors_find(colors, old[i].id)] = old[i];
+		}
+	}
+	free(old);
 }
 
 static void
 colors_remove_id(struct colors *colors, const char *id)
 {
-	struct id_color key = { id };
-	void **slot = htab_find_slot(colors->id_map, &key, NO_INSERT);
+	size_t mask = colors->size - 1;
+	size_t hole, i;
 
-	if (slot != NULL && *slot != NULL) {
-		colors->count[((struct id_color *) *slot)->color]--;
-		htab_clear_slot(colors->id_map, slot);
+	if (!colors->size) {
+		return;
 	}
+
+	hole = colors_find(colors, id);
+	if (colors->slots[hole].color < 0) {
+		return;
+	}
+	assert(colors->count[colors->slots[hole].color] > 0);
+	colors->count[colors->slots[hole].color]--;
+	colors->used--;
+
+	/* Keep every later entry of the probe run findable: move back into
+	 * the hole each one whose probe from its home slot passed the hole. */
+	for (i = (hole + 1) & mask; colors->slots[i].color >= 0; i = (i + 1) & mask) {
+		size_t home = graph_id_hash(colors->slots[i].id) & mask;
+
+		if (((i - home) & mask) >= ((i - hole) & mask)) {
+			colors->slots[hole] = colors->slots[i];
+			hole = i;
+		}
+	}
+	colors->slots[hole].color = -1;
 }
 
 static size_t
@@ -199,43 +253,27 @@ colors_get_free_color(struct colors *colors)
 	return free_color;
 }
 
-static void
-colors_init(struct colors *colors)
-{
-	if (colors->id_map == NULL) {
-		size_t size = 500;
-
-		colors->id_map = htab_create_alloc(size, id_color_hash, id_color_eq, free, calloc, free);
-	}
-}
-
 /* The color of the lane with `id`, picking the least used color for an id
  * not seen before. */
 static size_t
 get_color(struct graph_v2 *graph, const char *id)
 {
-	struct id_color key = { id };
-	struct id_color *node;
-	void **slot;
+	struct colors *colors = &graph->colors;
+	struct color_slot *slot;
 
-	colors_init(&graph->colors);
-	slot = htab_find_slot(graph->colors.id_map, &key, INSERT);
-	if (!slot) {
-		die("Failed to allocate color");
+	if (2 * (colors->used + 1) > colors->size) {
+		colors_grow(colors);
 	}
 
-	if (!*slot) {
-		node = malloc(sizeof(*node));
-		if (!node) {
-			die("Failed to allocate color");
-		}
-		node->id = id;
-		node->color = colors_get_free_color(&graph->colors);
-		graph->colors.count[node->color]++;
-		*slot = node;
+	slot = &colors->slots[colors_find(colors, id)];
+	if (slot->color < 0) {
+		slot->id = id;
+		slot->color = colors_get_free_color(colors);
+		colors->count[slot->color]++;
+		colors->used++;
 	}
 
-	return ((struct id_color *) *slot)->color;
+	return slot->color;
 }
 
 static void
@@ -278,9 +316,7 @@ done_graph(struct graph *graph_ref)
 {
 	struct graph_v2 *graph = graph_ref->private;
 
-	if (graph->colors.id_map)
-		htab_delete(graph->colors.id_map);
-
+	free(graph->colors.slots);
 	done_graph_rendering(graph_ref);
 
 	free(graph);
@@ -557,14 +593,6 @@ below_commit(int pos, struct graph_v2 *graph)
 		return false;
 
 	return true;
-}
-
-/* Multiplicative hashing.  The index uses the result's low bits, i.e. bits
- * 32 and up of the product, which mix all of the pointer's low 32 bits. */
-static size_t
-graph_id_hash(const char *id)
-{
-	return (size_t) (((uint64_t) (uintptr_t) id * UINT64_C(0x9E3779B97F4A7C15)) >> 32);
 }
 
 /* Make room for a row of `columns` columns and forget the previous row's
