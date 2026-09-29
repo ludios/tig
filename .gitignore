@@ -8,6 +8,8 @@
 /_book
 /config.make
 /node_modules/
+/result
+/result-*
 aclocal.m4
 autom4te.cache
 /compile_commands/
