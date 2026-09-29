@@ -1,0 +1,134 @@
+#!/bin/sh
+#
+# Model-output: Claude Opus 5.5
+#
+# Generate a synthetic history for test-graph, shaped like a busy
+# pull-request-driven project such as nixpkgs: pull requests fork from older
+# master commits and merge back much later, so many lanes stay open at once.
+#
+# Usage: gen-history <commits> <seed> <max-base-age>
+#
+#   commits       number of commits to generate
+#   seed          random seed, 1..2147483646
+#   max-base-age  how many master commits back a pull request may fork from;
+#                 the graph's width grows with it
+#
+# Prints the commits newest first (a valid topological order) in the
+# `commit <id> <parents...>` + indented title format that test-graph reads.
+# Ids are m<n> on master and p<pr>.<n> on pull requests; each title repeats
+# the id and says what the commit merges.
+# The output depends only on the arguments, whatever the awk: the random
+# numbers come from the Park-Miller generator, whose products stay below
+# 2^53 and so are exact in awk's double-precision arithmetic.
+
+if [ "$#" -ne 3 ]; then
+	echo "usage: gen-history <commits> <seed> <max-base-age>" >&2
+	exit 2
+fi
+
+exec awk -v commits="$1" -v seed="$2" -v max_age="$3" '
+function random() {
+	seed = (seed * 16807) % 2147483647
+	return seed / 2147483647
+}
+
+# A random integer in [0, n).
+function pick(n) {
+	return int(random() * n)
+}
+
+function add_commit(id, parents, title) {
+	count++
+	commit_id[count] = id
+	commit_parents[count] = parents
+	commit_title[count] = title
+}
+
+function commit_master(parents, title,    id) {
+	id = "m" (++masters)
+	master[masters] = id
+	add_commit(id, parents, title == "" ? id : id " " title)
+}
+
+# Append a commit to open pull request `j`.
+function commit_pr(j, parents, title,    id) {
+	id = "p" pr_number[j] "." (++pr_length[j])
+	pr_tip[j] = id
+	add_commit(id, parents, title == "" ? id : id " " title)
+}
+
+# Open a pull request; its first commit has `parents` (empty for a root).
+function open_pr(parents, title,    j) {
+	j = ++open
+	pr_number[j] = ++prs
+	pr_length[j] = 0
+	commit_pr(j, parents, title)
+}
+
+# Forget open pull request `j`, merged or abandoned.
+function close_pr(j) {
+	pr_number[j] = pr_number[open]
+	pr_length[j] = pr_length[open]
+	pr_tip[j]    = pr_tip[open]
+	open--
+}
+
+# Merge up to `n` random open pull requests into master in one commit.
+function merge_prs(n,    i, j, parents, title) {
+	parents = master[masters]
+	title = "merge"
+	for (i = 0; i < n && open > 0; i++) {
+		j = pick(open) + 1
+		parents = parents " " pr_tip[j]
+		title = title " p" pr_number[j]
+		close_pr(j)
+	}
+	commit_master(parents, title)
+}
+
+# A random master commit, at most max_age - 1 commits behind the tip.
+function old_master(    age) {
+	age = pick(masters < max_age ? masters : max_age)
+	return master[masters - age]
+}
+
+BEGIN {
+	if (commits < 1 || seed < 1 || seed > 2147483646 || max_age < 1) {
+		print "gen-history: bad arguments" > "/dev/stderr"
+		exit 2
+	}
+
+	# Each step picks one event: commit to master, open a pull request
+	# (from master, from nothing, or stacked on another one), commit to one,
+	# merge one or three, merge master into one, or abandon one.
+	commit_master("", "root")
+	while (count < commits) {
+		r = random()
+		if (r < 0.10) {
+			commit_master(master[masters], "")
+		} else if (r < 0.38) {
+			open_pr(old_master(), "")
+		} else if (r < 0.39) {
+			open_pr("", "root")
+		} else if (open == 0) {
+			continue
+		} else if (r < 0.42) {
+			open_pr(pr_tip[pick(open) + 1], "stacked")
+		} else if (r < 0.64) {
+			j = pick(open) + 1
+			commit_pr(j, pr_tip[j], "")
+		} else if (r < 0.90) {
+			merge_prs(random() < 0.05 ? 3 : 1)
+		} else if (r < 0.94) {
+			j = pick(open) + 1
+			commit_pr(j, pr_tip[j] " " master[masters], "merge " master[masters])
+		} else {
+			close_pr(pick(open) + 1)
+		}
+	}
+
+	for (i = count; i >= 1; i--) {
+		print "commit " commit_id[i] (commit_parents[i] == "" ? "" : " " commit_parents[i])
+		print "    " commit_title[i]
+	}
+}'

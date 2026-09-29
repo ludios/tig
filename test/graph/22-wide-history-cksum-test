@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# Model-output: Claude Opus 5.5
+#
+# Graph test: a history up to ~530 lanes wide, pinned by checksum
+#
+# The output is too wide to review.  If a change to the graph alters it on
+# purpose, review the change on 21-wide-history-test and then update the
+# checksum here.
+
+. libtest.sh
+
+gen-history 4000 1 4000 | test-graph --colors | cksum > cksum
+
+assert_equals cksum strict <<EOF
+2496340348 8077053
+EOF
