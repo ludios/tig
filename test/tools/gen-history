@@ -6,12 +6,15 @@
 # pull-request-driven project such as nixpkgs: pull requests fork from older
 # master commits and merge back much later, so many lanes stay open at once.
 #
-# Usage: gen-history <commits> <seed> <max-base-age>
+# Usage: gen-history <commits> <seed> <max-base-age> [<shown>]
 #
 #   commits       number of commits to generate
 #   seed          random seed, 1..2147483646
-#   max-base-age  how many master commits back a pull request may fork from;
-#                 the graph's width grows with it
+#   max-base-age  pull requests fork from one of the newest <max-base-age>
+#                 master commits; the graph's width grows with it
+#   shown         print only the newest <shown> commits, then the older
+#                 commits they name as parents, marked as boundary commits
+#                 (`commit -<id>`), like `git log --boundary` over a range
 #
 # Prints the commits newest first (a valid topological order) in the
 # `commit <id> <parents...>` + indented title format that test-graph reads.
@@ -21,12 +24,23 @@
 # numbers come from the Park-Miller generator, whose products stay below
 # 2^53 and so are exact in awk's double-precision arithmetic.
 
-if [ "$#" -ne 3 ]; then
-	echo "usage: gen-history <commits> <seed> <max-base-age>" >&2
+usage()
+{
+	echo "usage: gen-history <commits> <seed> <max-base-age> [<shown>]" >&2
 	exit 2
-fi
+}
 
-exec awk -v commits="$1" -v seed="$2" -v max_age="$3" '
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+	usage
+fi
+for arg in "$@"; do
+	case "$arg" in
+		''|*[!0-9]*) usage ;;
+	esac
+done
+
+exec awk -v commits="$1" -v seed="$2" -v max_age="$3" -v shown="${4:-$1}" '
+# The next random number, in (0, 1); the generator state is `seed`.
 function random() {
 	seed = (seed * 16807) % 2147483647
 	return seed / 2147483647
@@ -37,32 +51,33 @@ function pick(n) {
 	return int(random() * n)
 }
 
-function add_commit(id, parents, title) {
+# Record a commit.  `parents` is a space-separated list of ids, empty for a
+# root; the title is the id, followed by `suffix` if any.
+function add_commit(id, parents, suffix) {
 	count++
 	commit_id[count] = id
 	commit_parents[count] = parents
-	commit_title[count] = title
+	commit_title[count] = suffix == "" ? id : id " " suffix
 }
 
-function commit_master(parents, title,    id) {
-	id = "m" (++masters)
-	master[masters] = id
-	add_commit(id, parents, title == "" ? id : id " " title)
+function commit_master(parents, suffix) {
+	masters++
+	master[masters] = "m" masters
+	add_commit(master[masters], parents, suffix)
 }
 
 # Append a commit to open pull request `j`.
-function commit_pr(j, parents, title,    id) {
-	id = "p" pr_number[j] "." (++pr_length[j])
-	pr_tip[j] = id
-	add_commit(id, parents, title == "" ? id : id " " title)
+function commit_pr(j, parents, suffix) {
+	pr_tip[j] = "p" pr_number[j] "." (++pr_length[j])
+	add_commit(pr_tip[j], parents, suffix)
 }
 
-# Open a pull request; its first commit has `parents` (empty for a root).
-function open_pr(parents, title,    j) {
+# Open a pull request; its first commit has `parents`.
+function open_pr(parents, suffix,    j) {
 	j = ++open
 	pr_number[j] = ++prs
 	pr_length[j] = 0
-	commit_pr(j, parents, title)
+	commit_pr(j, parents, suffix)
 }
 
 # Forget open pull request `j`, merged or abandoned.
@@ -74,27 +89,33 @@ function close_pr(j) {
 }
 
 # Merge up to `n` random open pull requests into master in one commit.
-function merge_prs(n,    i, j, parents, title) {
+function merge_prs(n,    i, j, parents, suffix) {
 	parents = master[masters]
-	title = "merge"
+	suffix = "merge"
 	for (i = 0; i < n && open > 0; i++) {
 		j = pick(open) + 1
 		parents = parents " " pr_tip[j]
-		title = title " p" pr_number[j]
+		suffix = suffix " p" pr_number[j]
 		close_pr(j)
 	}
-	commit_master(parents, title)
+	commit_master(parents, suffix)
 }
 
-# A random master commit, at most max_age - 1 commits behind the tip.
+# One of the newest max_age master commits, at random.
 function old_master(    age) {
 	age = pick(masters < max_age ? masters : max_age)
 	return master[masters - age]
 }
 
+# Print commit `i`, with `mark` ("-" for a boundary commit) before its id.
+function print_commit(i, mark) {
+	print "commit " mark commit_id[i] (commit_parents[i] == "" ? "" : " " commit_parents[i])
+	print "    " commit_title[i]
+}
+
 BEGIN {
-	if (commits < 1 || seed < 1 || seed > 2147483646 || max_age < 1) {
-		print "gen-history: bad arguments" > "/dev/stderr"
+	if (commits < 1 || seed < 1 || seed > 2147483646 || max_age < 1 || shown < 1) {
+		print "gen-history: arguments out of range" > "/dev/stderr"
 		exit 2
 	}
 
@@ -127,8 +148,17 @@ BEGIN {
 		}
 	}
 
-	for (i = count; i >= 1; i--) {
-		print "commit " commit_id[i] (commit_parents[i] == "" ? "" : " " commit_parents[i])
-		print "    " commit_title[i]
+	first = shown < count ? count - shown + 1 : 1
+	for (i = count; i >= first; i--) {
+		print_commit(i, "")
+		n = split(commit_parents[i], parents, " ")
+		for (k = 1; k <= n; k++) {
+			boundary[parents[k]] = 1
+		}
+	}
+	for (i = first - 1; i >= 1; i--) {
+		if (commit_id[i] in boundary) {
+			print_commit(i, "-")
+		}
 	}
 }'

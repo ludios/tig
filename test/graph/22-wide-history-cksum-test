@@ -5,12 +5,13 @@
 # Graph test: a history up to ~530 lanes wide, pinned by checksum
 #
 # The output is too wide to review.  If a change to the graph alters it on
-# purpose, review the change on 21-wide-history-test and then update the
-# checksum here.
+# purpose, check the change on 21-wide-history-test, diff this test's stdout
+# against a run with the previous build, and then update the checksum here.
 
 . libtest.sh
 
-gen-history 4000 1 4000 | test-graph --colors | cksum > cksum
+gen-history 4000 1 4000 | test_graph --colors
+cksum < stdout > cksum
 
 assert_equals cksum strict <<EOF
 2496340348 8077053

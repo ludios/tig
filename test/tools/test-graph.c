@@ -37,7 +37,6 @@ struct commit {
 DEFINE_ALLOCATOR(realloc_commits, struct commit *, 8)
 
 static const char *(*graph_fn)(const struct graph_symbol *);
-static bool show_colors;
 
 static bool
 print_symbol(void *__, const struct graph *graph, const struct graph_symbol *symbol, int color_id, bool first)
@@ -64,7 +63,7 @@ print_color(void *__, const struct graph *graph, const struct graph_symbol *symb
 }
 
 static void
-print_commit(struct graph *graph, struct commit *commit, const char *title)
+print_commit(struct graph *graph, struct commit *commit, const char *title, bool show_colors)
 {
 	graph->foreach_symbol(graph, &commit->canvas, print_symbol, NULL);
 	if (show_colors) {
@@ -85,6 +84,7 @@ main(int argc, const char *argv[])
 	struct commit *commit = NULL;
 	bool is_boundary;
 	bool ascii = false;
+	bool show_colors = false;
 	int i;
 
 	if (isatty(STDIN_FILENO)) {
@@ -132,7 +132,7 @@ main(int argc, const char *argv[])
 				graph->render_parents(graph, &commit->canvas);
 
 				if ((line = io_memchr(&buf, line, 0))) {
-					print_commit(graph, commit, line);
+					print_commit(graph, commit, line, show_colors);
 					commit = NULL;
 				}
 
@@ -141,7 +141,7 @@ main(int argc, const char *argv[])
 				if (!commit)
 					continue;
 
-				print_commit(graph, commit, line + 4);
+				print_commit(graph, commit, line + 4, show_colors);
 
 				commit = NULL;
 			}

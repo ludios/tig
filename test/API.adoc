@@ -17,6 +17,10 @@ in_work_dir(command, [args, ...])::
 
 assert_equals(filename, [whitespace, note, ...]) < expected::
 
+	Compare filename with the expected content from stdin.  whitespace is
+	`ignore` (the default: any difference in whitespace passes) or `strict`
+	(or empty); notes are shown when the assertion fails.
+
 assert_not_exists(filename)::
 
 assert_vars(count)::

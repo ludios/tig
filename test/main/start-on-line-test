@@ -15,7 +15,7 @@ EOF
 
 test_tig +42
 
-assert_equals 'position.screen' <<EOF
+assert_equals 'position.screen' strict <<EOF
 2013-10-29 18:46 +0100 Sébastien Doeraene │ ∙ Update for new groupId and package
 2013-10-27 23:05 -0400 Jonas Fonseca      ∙─╯ Add JavaScript benchmark reference
 2013-10-27 18:12 -0400 Jonas Fonseca      ∙ Add check sum calculation for verify

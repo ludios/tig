@@ -1,4 +1,5 @@
 #!/bin/sh
+# Model-output: Claude Opus 5.5
 #
 # Setup test environment.
 #
@@ -310,6 +311,10 @@ filter_file_ok || exit 0   # silently exit caller who sourced this file
 #|
 #| assert_equals(filename, [whitespace, note, ...]) < expected::
 #|
+#|	Compare filename with the expected content from stdin.  whitespace is
+#|	`ignore` (the default: any difference in whitespace passes) or `strict`
+#|	(or empty); notes are shown when the assertion fails.
+#|
 assert_equals()
 {
 	file="$1"; shift
@@ -319,17 +324,20 @@ assert_equals()
 		whitespace_arg="${1:-}"
 		shift
 	fi
-	if [ "$whitespace_arg" = strict ]; then
-		whitespace_arg=''
-	elif [ "$whitespace_arg" = ignore ]; then
-		whitespace_arg='-w'
-	fi
+	case "$whitespace_arg" in
+		strict|'') whitespace_arg='' ;;
+		ignore|-w) whitespace_arg='-w' ;;
+		*) die "assert_equals: unknown whitespace mode '$whitespace_arg'" ;;
+	esac
 
 	file "expected/$file"
 
 	if [ -e "$file" ]; then
-		( IFS=' 	'; git diff --no-index $diff_color_arg $whitespace_arg -- "expected/$file" "$file" > "$file.diff" || true )
-		if [ -s "$file.diff" ]; then
+		diff_status=0
+		( IFS=' 	'; git diff --no-index $diff_color_arg $whitespace_arg -- "expected/$file" "$file" > "$file.diff" ) || diff_status="$?"
+		if [ "$diff_status" -gt 1 ]; then
+			printf '[FAIL] git diff failed comparing %s (status %s)\n' "$file" "$diff_status" >> .test-result
+		elif [ -s "$file.diff" ]; then
 			printf '[FAIL] %s != expected/%s\n' "$file" "$file" >> .test-result
 			if [ -n "$*" ]; then
 				printf '[NOTE] %s\n' "$*" >> .test-result

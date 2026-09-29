@@ -93,6 +93,7 @@ struct graph_row_scan {
 	int *prev_last;			/* Last column of prev_row with the id of row's column, or -1. */
 	int *next_right;		/* Nearest column of next_row to the right with the same id, or W. */
 	bool *shift_left;		/* Each column's symbol.shift_left. */
+	bool *parent_down;		/* Whether the column holds one of the parents in next_row. */
 	int commit_first;		/* First column of row with the commit's id, or W. */
 	int commit_last;		/* Last column of row with the commit's id, or -1. */
 	int new_parent_last;		/* Last column that turns into a parent in next_row, or -1. */
@@ -151,7 +152,8 @@ static const char *intern_string(const char *str)
 }
 
 /* Ids are interned, so the map compares them by pointer.  All empty (NULL)
- * columns share one entry. */
+ * columns share one entry; unlike when the map compared strings, an id ""
+ * (only from a malformed `parent` line) has an entry of its own. */
 struct id_color {
 	const char *id;
 	size_t color;
@@ -246,18 +248,28 @@ graph_row_scan_free(struct graph_row_scan *scan)
 	free(scan->prev_last);
 	free(scan->next_right);
 	free(scan->shift_left);
+	free(scan->parent_down);
 	memset(scan, 0, sizeof(*scan));
 }
 
+static void
+graph_row_free(struct graph_row *row)
+{
+	free(row->columns);
+	memset(row, 0, sizeof(*row));
+}
+
+/* Free the rows and scan state, leaving an empty graph behind.  Safe to
+ * call more than once. */
 static void
 done_graph_rendering(struct graph *graph_ref)
 {
 	struct graph_v2 *graph = graph_ref->private;
 
-	free(graph->prev_row.columns);
-	free(graph->row.columns);
-	free(graph->next_row.columns);
-	free(graph->parents.columns);
+	graph_row_free(&graph->prev_row);
+	graph_row_free(&graph->row);
+	graph_row_free(&graph->next_row);
+	graph_row_free(&graph->parents);
 	graph_row_scan_free(&graph->scan);
 }
 
@@ -269,7 +281,7 @@ done_graph(struct graph *graph_ref)
 	if (graph->colors.id_map)
 		htab_delete(graph->colors.id_map);
 
-	graph_row_scan_free(&graph->scan);
+	done_graph_rendering(graph_ref);
 
 	free(graph);
 
@@ -536,23 +548,6 @@ continued_down(struct graph_row *row, struct graph_row *next_row, int pos)
 }
 
 static bool
-parent_down(struct graph_row *parents, struct graph_row *next_row, int pos)
-{
-	int parent;
-
-	for (parent = 0; parent < parents->size; parent++) {
-		if (!graph_column_has_commit(&parents->columns[parent]))
-			continue;
-
-		if (parents->columns[parent].id == next_row->columns[pos].id)
-
-			return true;
-	}
-
-	return false;
-}
-
-static bool
 below_commit(int pos, struct graph_v2 *graph)
 {
 	if (pos != graph->prev_position)
@@ -564,8 +559,8 @@ below_commit(int pos, struct graph_v2 *graph)
 	return true;
 }
 
-/* Knuth's multiplicative hash; the product's high bits mix all of the
- * pointer's bits, including the low ones that allocation alignment fixes. */
+/* Multiplicative hashing.  The index uses the result's low bits, i.e. bits
+ * 32 and up of the product, which mix all of the pointer's low 32 bits. */
 static size_t
 graph_id_hash(const char *id)
 {
@@ -577,7 +572,7 @@ graph_id_hash(const char *id)
 static void
 graph_id_index_reset(struct graph_id_index *index, size_t columns)
 {
-	if (index->size < 2 * columns) {
+	if (!index->slots || index->size < 2 * columns) {
 		size_t size = 16;
 
 		while (size < 2 * columns) {
@@ -636,6 +631,8 @@ graph_id_index_scan(struct graph_id_index *index, struct graph_row *row, bool fr
 	}
 }
 
+/* Make room in the arrays of `scan` for rows of `columns` columns.  They
+ * only ever grow. */
 static void
 graph_row_scan_reserve(struct graph_row_scan *scan, size_t columns)
 {
@@ -652,6 +649,7 @@ graph_row_scan_reserve(struct graph_row_scan *scan, size_t columns)
 	realloc_graph_positions(&scan->prev_last, scan->capacity, more);
 	realloc_graph_positions(&scan->next_right, scan->capacity, more);
 	realloc_graph_flags(&scan->shift_left, scan->capacity, more);
+	realloc_graph_flags(&scan->parent_down, scan->capacity, more);
 	scan->capacity = columns;
 }
 
@@ -678,8 +676,18 @@ graph_scan_rows(struct graph_v2 *graph)
 	}
 
 	graph_id_index_scan(&scan->ids, row, true, scan->row_left);
-	graph_id_index_scan(&scan->ids, row, false, scan->row_right);
 	graph_id_index_scan(&scan->ids, next_row, false, scan->next_right);
+
+	/* row_left links each column to the previous one with its id; each
+	 * link read backwards gives the next one. */
+	for (pos = 0; pos < size; pos++) {
+		scan->row_right[pos] = size;
+	}
+	for (pos = 0; pos < size; pos++) {
+		if (scan->row_left[pos] >= 0) {
+			scan->row_right[scan->row_left[pos]] = pos;
+		}
+	}
 
 	/* A column shifts left when the nearest column on its left with its id
 	 * didn't continue down from prev_row. */
@@ -702,11 +710,10 @@ graph_scan_rows(struct graph_v2 *graph)
 	}
 
 	scan->new_parent_last = -1;
-	for (pos = size - 1; pos >= 0; pos--) {
-		if (next_row->columns[pos].id != row->columns[pos].id &&
-		    commit_is_in_row(next_row->columns[pos].id, &graph->parents)) {
+	for (pos = 0; pos < size; pos++) {
+		scan->parent_down[pos] = commit_is_in_row(next_row->columns[pos].id, &graph->parents);
+		if (scan->parent_down[pos] && next_row->columns[pos].id != row->columns[pos].id) {
 			scan->new_parent_last = pos;
-			break;
 		}
 	}
 }
@@ -753,7 +760,7 @@ graph_generate_symbols(struct graph_v2 *graph, struct graph_canvas *canvas)
 		symbol->continued_up_left = graph_column_has_commit(&prev_row->columns[pos])
 					    && scan->prev_left[pos] >= 0;
 
-		symbol->parent_down       = parent_down(parents, next_row, pos);
+		symbol->parent_down       = scan->parent_down[pos];
 		symbol->parent_right      = (pos > commit_pos && pos < scan->new_parent_last);
 
 		symbol->below_commit      = below_commit(pos, graph);

@@ -152,9 +152,10 @@ Symbol bits and colors, dumped raw, are identical to the old code on nixpkgs
 this repo, 30 generated histories up to 814 lanes wide, and 24k fuzzed inputs
 (non-topological orders, duplicate and missing parents, boundary commits).
 New tests: `test/graph/21-wide-history-test` (glyphs and colors, verbatim),
-`22-wide-history-cksum-test` (~530 lanes, by checksum) and
-`23-wide-history-speed-test` (~2000 lanes under an 8 s CPU limit: 1.3 s now,
-31 s before); `test/tools/gen-history` generates their inputs.
+`22-wide-history-cksum-test` (~530 lanes, by checksum),
+`23-wide-history-speed-test` (~2500 lanes under a 20 s CPU limit: 2.0 s now,
+60 s before) and `24-wide-history-boundary-test` (boundary commits,
+verbatim); `test/tools/gen-history` generates their inputs.
 
 | main view load (pty, `TIG_SCRIPT=:quit`) | 30k    | 50k    | all 1M                  |
 |------------------------------------------|--------|--------|-------------------------|
