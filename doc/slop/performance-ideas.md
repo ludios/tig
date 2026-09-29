@@ -537,6 +537,11 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   useful.  Either export `NODE_COMPILE_CACHE=<dir>` from
   `bin/tig-syntax-daemon`, or make the entry point a tiny bootstrap that
   enables the cache and then dynamically imports the real daemon.
+  Measured (BM12, 2026-09-29): the env var alone barely helps in practice,
+  since node writes the cache only on clean exit and a daemon usually dies
+  by signal; a bootstrap that also calls `module.flushCompileCache()` once
+  listening cuts spawn → listening 102 → 72 ms (xclank) and 162 → 147 ms
+  median (zclank, ~0.77× paired).
 - **B2. Bundle the daemon / fine-grained shiki imports.**  shiki 4's module
   graph is large; if BM6 shows import time matters, either esbuild-bundle
   daemon + deps into one JS file at build/install time (the nixpkgs patch
@@ -916,7 +921,15 @@ fake daemon is ready to become the CI regression test for A0.
    line 1 — a budget miss can no longer be permanent.  B8's readiness
    pipe was not needed: the connect poll stays at 50 ms.
 
-9. **A3 workers / A7 style spans** — only if the above leaves giant
+10. **Node/V8 flags — measured, none help (BM12, 2026-09-29)**: 14 flag
+   sets (GC sizing and collectors, WASM tiering/inlining/Liftoff, Maglev,
+   Turbolev, Sparkplug, feedback allocation) on two CPUs; tokenization is
+   74 % Oniguruma WASM and 1.3 % GC, and every flag was within ±1 % of the
+   defaults or worse (disabling Liftoff, WASM inlining or dynamic tiering:
+   +11–26 %).  Don't re-propose without new numbers.  Only the compile
+   cache (B1) pays, at startup.
+
+11. **A3 workers / A7 style spans** — only if the above leaves giant
    commits feeling bad; tig's own giant-on cost is 384 ms (BM7), so A7(b)
    is a last-mile improvement, not a necessity.  E5 (`argv_size` at 3.2 %
    of tig cycles on the worst synthetic) rides along with any E-work, not

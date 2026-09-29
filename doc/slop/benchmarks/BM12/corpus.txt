@@ -1,0 +1,21 @@
+# BM12 tokenization corpus: <lang> <path>; ~ expands to $HOME.
+# Checkouts at collection: ~/cloned/nixpkgs d095bb9fd847, ~/cloned/vscode 7dd6daca01e.
+# Mixes what tig users diff here: tig's C, the daemon's TS, VS Code TS,
+# nixpkgs Nix + shell + Python, and this repo's Markdown.
+c ../../../../src/view.c
+c ../../../../src/diff.c
+c ../../../../src/draw.c
+c ../../../../src/main.c
+c ../../../../src/options.c
+typescript ../../../../tools/tig-syntax-filter/src/highlight.ts
+typescript ../../../../tools/tig-syntax-filter/src/git.ts
+typescript ../../../../tools/tig-syntax-filter/src/diff_parser.ts
+typescript ~/cloned/vscode/src/vs/editor/common/model/textModel.ts
+typescript ~/cloned/vscode/src/vs/base/common/async.ts
+nix ~/cloned/nixpkgs/lib/strings.nix
+nix ~/cloned/nixpkgs/nixos/modules/services/web-servers/nginx/default.nix
+nix ~/cloned/nixpkgs/pkgs/top-level/all-packages.nix
+shellscript ~/cloned/nixpkgs/pkgs/stdenv/generic/setup.sh
+python ~/cloned/nixpkgs/maintainers/scripts/hydra-eval-failures.py
+python ~/cloned/nixpkgs/maintainers/scripts/remove-old-aliases.py
+markdown ../../../../doc/slop/syntax-highlighting-plan.md

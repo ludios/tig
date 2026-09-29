@@ -58,3 +58,10 @@ runners never touch an interactive tig session's daemon.
   combos shuffled per round), `summarize.py`, `results/*.csv` +
   `results/summary.txt`.  Verdict: at most 6.4% anywhere, mostly git-side; not
   worth shipping.  Details in `BM11/README.md`.
+- `BM12/` — node/V8 flags for the daemon (added 2026-09-29; Model-output:
+  Claude Opus 5.5): `tokenize-bench.ts` (the daemon's `highlight.ts` over a
+  32k-line corpus, per phase), `run-bm12.py` (14 flag sets, shuffled
+  rounds), `daemon-start.py` (spawn → listening and cold client, with and
+  without the compile cache), `results/` from xclank and zclank.  Verdict:
+  no flag speeds up tokenization; a compile-cache bootstrap cuts daemon
+  startup ~25 %.  Details in `BM12/README.md`.
