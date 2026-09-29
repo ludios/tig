@@ -593,7 +593,8 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   cross-run wasm code cache to lean on; if it's big, the only lever is
   keeping the daemon alive (B5).  Note: switching to shiki's JS regex engine
   would help startup but breaks the engine-lineage fidelity goal — rejected.
-- **B8. Remove the launcher's retry quantization.**  The client polls
+- **B8. Remove the launcher's retry quantization.  [POLL SHORTENED
+  2026-09-29: 50 → 5 ms; the readiness pipe stays undone]**  The client polls
   `connect()` at 50 ms intervals for up to 3 s, so cold start rounds up to
   the next tick.  With B3 (bind before heavy imports) the window shrinks a
   lot on its own; to eliminate it, have `spawn_daemon()` pass a pipe the
@@ -924,7 +925,8 @@ fake daemon is ready to become the CI regression test for A0.
    and the tokenized-line cache now keeps the grammar state so deeper
    or retried requests resume from the prefix instead of restarting at
    line 1 — a budget miss can no longer be permanent.  B8's readiness
-   pipe was not needed: the connect poll stays at 50 ms.
+   pipe was not needed: the connect poll stays at 50 ms (5 ms since
+   2026-09-29, see B8).
 
 10. **Node/V8 flags — measured, none help (BM12, 2026-09-29)**: 14 flag
    sets (GC sizing and collectors, WASM tiering/inlining/Liftoff, Maglev,

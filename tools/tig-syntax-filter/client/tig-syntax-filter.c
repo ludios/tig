@@ -62,8 +62,10 @@
 #endif
 
 #define SPOOL_MAX	(64u * 1024 * 1024)
-/* Interval between connect() attempts while a spawned daemon starts. */
-#define CONNECT_WAIT_MS	50
+/* Interval between connect() attempts while a spawned daemon starts.  A
+ * cold start waits for the first attempt after the daemon listens (~100 ms
+ * after spawn), so keep it short. */
+#define CONNECT_WAIT_MS	5
 /* Default limit on waiting for a spawned daemon to start listening;
  * overridable via TIG_SYNTAX_SPAWN_WAIT_MS.  Only a daemon that neither
  * listens nor exits runs into it (see connect_daemon). */
