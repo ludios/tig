@@ -1,5 +1,6 @@
 # BM12 tokenization corpus: <lang> <path>; ~ expands to $HOME.
-# Checkouts at collection: ~/cloned/nixpkgs d095bb9fd847, ~/cloned/vscode 7dd6daca01e.
+# Checkouts at collection: ~/cloned/nixpkgs d095bb9fd847, ~/cloned/vscode 7dd6daca01e,
+# this repository e74db9a8.
 # Mixes what tig users diff here: tig's C, the daemon's TS, VS Code TS,
 # nixpkgs Nix + shell + Python, and this repo's Markdown.
 c ../../../../src/view.c

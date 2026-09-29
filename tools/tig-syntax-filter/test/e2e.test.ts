@@ -40,6 +40,8 @@ function filter_env(overrides: Record<string, string>): Record<string, string> {
 	delete env.TIG_SYNTAX_SOCKET;
 	delete env.XDG_RUNTIME_DIR;
 	delete env.TMPDIR;
+	delete env.NODE_COMPILE_CACHE;
+	delete env.NODE_DISABLE_COMPILE_CACHE;
 	env.TIG_SYNTAX_DAEMON = daemon_script;
 	env.XDG_STATE_HOME = join(work, "state");
 	env.XDG_CACHE_HOME = join(work, "cache");
@@ -200,6 +202,41 @@ describe("client + daemon end to end", () => {
 			TIG_SYNTAX_SOCKET: join(work, "e2e.sock"),
 		}));
 		expect_highlighted(output);
+	}, 60000);
+
+	it("writes its compile cache while running, not only at exit", () => {
+		const cache_home = join(work, "cache-running");
+		const output = run_filter(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "cache-running.sock"),
+			XDG_CACHE_HOME: cache_home,
+		}));
+		expect_highlighted(output);
+		// The daemon is still running: node's write at clean exit has
+		// not happened, so these came from the flush after listening.
+		const cache_dir = join(cache_home, "tig-syntax", "node-compile-cache");
+		expect(readdirSync(cache_dir, { recursive: true }).length).toBeGreaterThan(10);
+	}, 60000);
+
+	it("still highlights without a usable compile cache directory", () => {
+		// A regular file where the cache home should be: the cache
+		// cannot be created there.
+		const file_home = join(work, "cache-is-a-file");
+		writeFileSync(file_home, "");
+		expect_highlighted(run_filter(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "cache-file.sock"),
+			XDG_CACHE_HOME: file_home,
+		})));
+		// A relative cache home would land inside the viewed repository,
+		// whose contents may be hostile: ignored, as the XDG spec says,
+		// in favor of the home directory's.
+		const home = join(work, "home");
+		expect_highlighted(run_filter(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "cache-relative.sock"),
+			XDG_CACHE_HOME: "relative-cache",
+			HOME: home,
+		})));
+		expect(readdirSync(repo)).not.toContain("relative-cache");
+		expect(readdirSync(join(home, ".cache", "tig-syntax", "node-compile-cache")).length).toBe(1);
 	}, 60000);
 
 	it("falls back to the $TMPDIR socket when $XDG_RUNTIME_DIR is unusable", () => {

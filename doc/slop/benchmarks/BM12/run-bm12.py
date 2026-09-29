@@ -6,8 +6,9 @@ Usage: run-bm12.py <out.csv> <rounds> <passes> <variant>...
 
 Each round runs every named variant once, in a fresh shuffled order, so
 load drift on a shared machine spreads across variants instead of biasing
-one.  Rows are appended to <out.csv> as they finish.  Variants are defined
-in VARIANTS below: node argv flags plus extra environment.
+one.  Rows are written to <out.csv>, which must not exist yet, as they
+finish.  Variants are defined in VARIANTS below: node argv flags plus
+extra environment.
 """
 import csv
 import json
@@ -63,11 +64,11 @@ def main():
 	# Prime the compile cache so the variant measures a warm cache.
 	if "compile-cache" in names:
 		run_variant("compile-cache", 2)
-	fresh = not os.path.exists(out_path)
-	with open(out_path, "a", newline="") as f:
+	# Exclusive: rounds are numbered from 0 per file, so appending a second
+	# run would pair its rounds with the first run's.
+	with open(out_path, "x", newline="") as f:
 		writer = csv.DictWriter(f, fieldnames=FIELDS)
-		if fresh:
-			writer.writeheader()
+		writer.writeheader()
 		for r in range(rounds):
 			order = names[:]
 			random.shuffle(order)

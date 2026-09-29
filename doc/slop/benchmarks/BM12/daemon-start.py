@@ -118,7 +118,8 @@ def client_ms(name, entry, extra, repo, sha):
 	env = base_env({"TIG_SYNTAX_DAEMON": launcher(name, entry, extra)})
 	client = os.path.join(FILTER, "bin/tig-syntax-filter")
 	start = time.perf_counter()
-	subprocess.run(f"git show {sha} | {client} > /dev/null", shell=True, cwd=repo, env=env, check=True)
+	subprocess.run(["bash", "-c", f"set -o pipefail; git show {sha} | {client} > /dev/null"],
+	               cwd=repo, env=env, check=True)
 	elapsed = (time.perf_counter() - start) * 1000
 	stop_daemons()
 	return elapsed

@@ -340,4 +340,6 @@ async function main(): Promise<void> {
 	});
 }
 
+// start.mjs flushes node's compile cache once this resolves, so main()
+// must resolve only after the highlighter is up and listening has begun.
 await main();

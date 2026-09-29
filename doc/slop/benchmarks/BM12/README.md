@@ -38,7 +38,7 @@ killed by signal or logout never reaches).
   to the P-cores (`taskset -c 0-7`); `daemon-start.py` unpinned, hence its
   bimodal spread (P- vs E-core scheduling).
 
-## Tokenization (`summarize.py results/explore.csv`)
+## Tokenization (`summarize.py results/explore.csv`, `... results/zclank-explore.csv`)
 
 A CPU profile of the benchmark: 74 % Oniguruma WASM, 20 % shiki JS
 (vscode-textmate + the onig glue), 2 % `highlight.ts`, 1.3 % GC.  Median
@@ -69,7 +69,7 @@ The compile cache is the only variant that moves anything: `import_ms`
 benchmark's peak RSS on both machines (378 → 352 MB, 383 → 343 MB);
 not investigated.
 
-## Cold start (`summarize.py results/*daemon-start.csv`)
+## Cold start (`summarize.py results/daemon-start.csv`, `... results/zclank-daemon-start.csv`)
 
 Medians, ms (paired ratio against plain):
 

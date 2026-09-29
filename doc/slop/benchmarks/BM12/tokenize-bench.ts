@@ -30,7 +30,11 @@ function read_corpus(manifest: string): corpus_file[] {
 		if (line === "" || line.startsWith("#")) {
 			continue;
 		}
-		const [lang, spec] = line.split(/\s+/);
+		const fields = line.split(/\s+/);
+		if (fields.length !== 2) {
+			throw new Error(`${manifest}: want "<lang> <path>", got ${JSON.stringify(line)}`);
+		}
+		const [lang, spec] = fields;
 		const path = spec.startsWith("~/") ? resolve(homedir(), spec.slice(2)) : resolve(base, spec);
 		files.push({ lang, path, content: readFileSync(path, "utf8") });
 	}

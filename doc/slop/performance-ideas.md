@@ -153,11 +153,10 @@ alt-review):
 ### BM2: end-to-end filter latency, cold vs warm
 
 ```sh
-# cold: kill the daemon between runs.  The launcher execs
-# "node .../src/daemon.ts", so the live process has no "tig-syntax-daemon"
-# in its argv; match the script path, bracket-escaped so the pattern never
-# matches the pkill/hyperfine command lines themselves.
-hyperfine --prepare 'pkill -f "[t]ig-syntax-filter/src/daemon\.ts"; sleep 0.2' \
+# cold: kill the daemon between runs, found by the socket it owns (the
+# daemon's argv names neither tig-syntax-daemon nor, since 2026-09-29,
+# daemon.ts, and argv patterns risk killing someone else's daemon).
+hyperfine --prepare 'doc/slop/benchmarks/kill-sock-daemon.sh <socket>' \
 	'git -C <repo> show <sha> | tig-syntax-filter > /dev/null'
 # warm: run once to prime, then measure
 hyperfine --warmup 2 'git -C <repo> show <sha> | tig-syntax-filter > /dev/null'
@@ -165,9 +164,7 @@ hyperfine --warmup 2 'git -C <repo> show <sha> | tig-syntax-filter > /dev/null'
 
 (`hyperfine` via `nix-shell -p hyperfine`, or a plain `time` loop.)  Gates:
 everything in sections A–C; this is the headline number.  Verify the prepare
-step actually kills the daemon (check the log for a fresh "listening" line);
-a cleaner alternative is resolving the PID of whatever owns the bench socket
-via `ss -xlp src <socket>` and killing that.
+step actually kills the daemon (check the log for a fresh "listening" line).
 
 ### BM3: time-to-first-frame and per-section latency profile
 
@@ -594,9 +591,9 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   keeping the daemon alive (B5).  Note: switching to shiki's JS regex engine
   would help startup but breaks the engine-lineage fidelity goal — rejected.
 - **B8. Remove the launcher's retry quantization.  [POLL SHORTENED
-  2026-09-29: 50 → 5 ms; the readiness pipe stays undone]**  The client polls
-  `connect()` at 50 ms intervals for up to 3 s, so cold start rounds up to
-  the next tick.  With B3 (bind before heavy imports) the window shrinks a
+  2026-09-29: 50 → 5 ms; the readiness pipe stays undone]**  The client
+  polled `connect()` at 50 ms intervals (then for up to 3 s; the spawn wait
+  is 60 s since 2026-09-18), so cold start rounded up to the next tick.  With B3 (bind before heavy imports) the window shrinks a
   lot on its own; to eliminate it, have `spawn_daemon()` pass a pipe the
   daemon closes once listening (readiness signal), or lean on B5's socket
   activation.  Longer term: tig could hold one persistent daemon connection
