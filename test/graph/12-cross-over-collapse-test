@@ -25,7 +25,7 @@ commit Z
     Commit Z
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─┬─╮ Commit A - merge B, D, and E
 ∙ │ │ Commit B - after F
 │ ∙ │ Commit D - after F

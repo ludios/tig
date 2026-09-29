@@ -6,7 +6,7 @@
 
 test_graph < "$source_dir/$test.in"
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ∙ tig-2.0.2
 ∙ Fix release script to work for patch versions
 ∙ Fix documentation of author width option

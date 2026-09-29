@@ -17,7 +17,7 @@ commit D
     Commit D
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─┬─╮ Commit A - Merges B, C, and D
 │ ∙ │ Commit C after E
 │ ●─│─╮ Commit E - Merges D and B

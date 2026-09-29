@@ -47,7 +47,7 @@ commit V W
     Commit V after W
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─╮ Commit P - Merge O into N
 │ ∙ Commit O after M
 ●─│─╮ Commit N - Merge M into L

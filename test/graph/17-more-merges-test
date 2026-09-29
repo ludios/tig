@@ -79,7 +79,7 @@ commit 9
     Commit 9
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─┬─┬─╮ Commit A - merge B, C, D, and E
 │ │ ∙ │ Commit D - after B
 │ ∙ │ │ Commit C - after F

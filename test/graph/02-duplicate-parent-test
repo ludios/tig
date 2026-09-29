@@ -25,7 +25,7 @@ commit H
     Commit H
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─╮ Commit A - Merge C into B
 ●─│─╮ Commit B - Merge E into C
 ∙─╯ │ Commit C after D

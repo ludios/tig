@@ -292,7 +292,7 @@ committer Jonas Fonseca <fonseca@diku.dk> 1381189194 -0400
     Fix and improve inter-document linking
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─╮ On fix-graph: debug printout stuff
 │ ∙ index on fix-graph: 85e82d0 One more fix
 ∙─╯ One more fix

@@ -23,7 +23,7 @@ commit b a
     Optionally show commit IDs for branches and tree entries
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ∙ Do not include merges in the announcement's change log
 ●─╮ Merge pull request #81 from esc/fix/reading_git_colors_256
 ●─│─╮ Merge pull request #80 from esc/fix/option_name_mismatch

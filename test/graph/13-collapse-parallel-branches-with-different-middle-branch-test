@@ -27,7 +27,7 @@ commit J
     Commit J
 EOF
 
-assert_equals stdout <<EOF
+assert_equals stdout strict <<EOF
 ●─┬─┬─┬─╮ Commit A - merge B, C, D, E, and F
 │ │ ∙ │ │ Commit D - after I
 │ │ │ ∙ │ Commit E - after J
