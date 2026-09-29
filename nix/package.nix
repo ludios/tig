@@ -147,11 +147,13 @@ stdenv.mkDerivation (finalAttrs: {
       --add-flags "$filter_root/src/daemon.ts" \
       --suffix PATH ':' "${git}/bin"
 
-    # Prefer the git in PATH, but add a fallback one in case there isn't one.
-    # Also let `set diff-syntax-filter = tig-syntax-filter` resolve without
-    # the profile's bin on PATH.
+    # `set diff-syntax-filter = tig-syntax-filter` must find this build's
+    # client even when another install's is on PATH, so it stays paired
+    # with this tig.  For git, prefer the one in PATH, but add a fallback
+    # one in case there isn't one.
     wrapProgram $out/bin/tig \
-      --suffix PATH ':' "${git}/bin:$out/bin"
+      --prefix PATH ':' "$out/bin" \
+      --suffix PATH ':' "${git}/bin"
   '';
 
   outputs = [
