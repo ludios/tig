@@ -5,7 +5,7 @@ CFLAGS ?= -Wall -Wextra -O2
 # Everything that decides how the daemon behaves.  Its hash is part of the
 # socket name, so a changed daemon gets a fresh socket instead of clients
 # reusing a daemon still running the old code, which then idles out.
-DAEMON_INPUTS = $(sort $(wildcard ../src/*.ts ../themes/*)) ../package.json \
+DAEMON_INPUTS = $(sort $(wildcard ../src/*.ts ../src/*.mjs ../themes/*)) ../package.json \
 	../pnpm-lock.yaml ../bin/tig-syntax-daemon
 SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 'shasum -a 256')
 BUILD_ID = $(shell $(SHA256) $(DAEMON_INPUTS) | $(SHA256) | cut -c1-12)

@@ -20,6 +20,11 @@ in the repository root.
   tokenizes with shiki, validates every hunk line against the source,
   and injects per-token foreground SGR. Logs to
   `$XDG_STATE_HOME/tig-syntax/daemon.log`.
+- `src/start.mjs` — the daemon's entry point: turns on node's compile
+  cache in `$XDG_CACHE_HOME/tig-syntax/node-compile-cache` so restarts
+  listen sooner, then runs `src/daemon.ts`.  The cache is safe to
+  delete; installs at a new path (e.g. each Nix upgrade) leave their old
+  entries behind.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at

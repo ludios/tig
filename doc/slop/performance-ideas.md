@@ -529,7 +529,7 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
 
 ### B. Faster cold start
 
-- **B1. V8 compile cache** (Node ≥ 22; this machine runs 26): caches
+- **B1. V8 compile cache.  [IMPLEMENTED 2026-09-29]** (Node ≥ 22; this machine runs 26): caches
   compilation (including the type-stripped TS) across daemon restarts.  It
   must be enabled *before* the module graph loads — a
   `module.enableCompileCache()` call inside `daemon.ts` runs after all its
@@ -541,7 +541,12 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   since node writes the cache only on clean exit and a daemon usually dies
   by signal; a bootstrap that also calls `module.flushCompileCache()` once
   listening cuts spawn → listening 102 → 72 ms (xclank) and 162 → 147 ms
-  median (zclank, ~0.77× paired).
+  median (zclank, ~0.77× paired).  Shipped as `src/start.mjs`, the
+  launchers' entry point: plain JS because a TS entry, the one module
+  loaded before the cache is on, makes node start its type stripper
+  (~13 ms) on every launch.  Via `bin/tig-syntax-daemon`: 117 → 85 ms; a
+  first start with an empty cache pays ~4 ms extra to write it.  The
+  cache lives in `$XDG_CACHE_HOME/tig-syntax/node-compile-cache`.
 - **B2. Bundle the daemon / fine-grained shiki imports.**  shiki 4's module
   graph is large; if BM6 shows import time matters, either esbuild-bundle
   daemon + deps into one JS file at build/install time (the nixpkgs patch
@@ -927,7 +932,7 @@ fake daemon is ready to become the CI regression test for A0.
    74 % Oniguruma WASM and 1.3 % GC, and every flag was within ±1 % of the
    defaults or worse (disabling Liftoff, WASM inlining or dynamic tiering:
    +11–26 %).  Don't re-propose without new numbers.  Only the compile
-   cache (B1) pays, at startup.
+   cache (B1) pays, at startup; shipped as `src/start.mjs`.
 
 11. **A3 workers / A7 style spans** — only if the above leaves giant
    commits feeling bad; tig's own giant-on cost is 384 ms (BM7), so A7(b)

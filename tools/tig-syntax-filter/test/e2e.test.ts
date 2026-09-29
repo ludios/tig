@@ -29,7 +29,7 @@ let repo: string;
 let show_output: Buffer;
 
 /** Environment for a filter run: inherited, minus daemon-locating
- * variables, plus isolated state/log and `overrides`. */
+ * variables, plus isolated state/log/cache and `overrides`. */
 function filter_env(overrides: Record<string, string>): Record<string, string> {
 	const env: Record<string, string> = {};
 	for (const [key, value] of Object.entries(process.env)) {
@@ -42,6 +42,7 @@ function filter_env(overrides: Record<string, string>): Record<string, string> {
 	delete env.TMPDIR;
 	env.TIG_SYNTAX_DAEMON = daemon_script;
 	env.XDG_STATE_HOME = join(work, "state");
+	env.XDG_CACHE_HOME = join(work, "cache");
 	return { ...env, ...overrides };
 }
 
@@ -94,7 +95,7 @@ function write_launcher(name: string, body: string): string {
  * daemons by default; with "", also launchers still sleeping before they
  * exec the daemon.  Empty without procfs (e.g. macOS); spawned daemons
  * then outlive the suite until they idle-exit. */
-function daemon_pids(marker: string, cmdline_needle = "daemon.ts"): number[] {
+function daemon_pids(marker: string, cmdline_needle = "start.mjs"): number[] {
 	const pids: number[] = [];
 	let entries: string[];
 	try {

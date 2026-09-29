@@ -155,7 +155,7 @@ stdenv.mkDerivation (finalAttrs: {
     # TypeScript directly) and guarantees git for its cat-file/check-attr
     # calls.  The client finds this launcher next to its own binary.
     makeWrapper ${lib.getExe nodejs-slim_26} $out/bin/tig-syntax-daemon \
-      --add-flags "$filter_root/src/daemon.ts" \
+      --add-flags "$filter_root/src/start.mjs" \
       --suffix PATH ':' "${git}/bin"
 
     # `set diff-syntax-filter = tig-syntax-filter` must find this build's
