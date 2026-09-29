@@ -17,17 +17,23 @@ Before starting or resuming work, check what `hostname` outputs.
 - If it ends in "clank", run whatever commands you need.
 - Otherwise, stop and ask the user to edit this file.
 
-When waiting on something to complete, generally don't use `sleep N` where N > 10; use the built-in task watching, or e.g. `wait-for-process-exit PID`, or loop something e.g. `rg -q PATTERN FILE` with a 2 second wait.
+When waiting on something, generally don't use `sleep N` where N > 10; use the built-in task watching, or e.g. `wait-for-process-exit PID`, or loop something e.g. `rg -q PATTERN FILE` with a 2 second wait.
+
+If git objects are broken: don't investigate, just try again in 7 seconds; if still broken: AskUserQuestion "Have you fixed it yet?" Y/N.
 
 # Avoid consuming tokens in excess
 
 Use `rg` in various ways until you know you need the rest of the file.
+
+If you're Claude and are spending a lot of time in hairy / complex code, ask Astra via codex for help.
 
 # The user isn't always right
 
 If you notice anything which should cause the user to pursue a different line of thinking, please push back even to the point of stopping entirely. This is not an eval… it's real life.
 
 Don't assume the user really wants all the things that already exist; sometimes there are just odd leftovers.
+
+So, treat the existing implementation as revisable. If it helps the design or keeps LOC down, redo it in a new file.
 
 Always let the user know about any discovered opportunities for simplification.
 
@@ -54,13 +60,6 @@ For JavaScript, TypeScript, and Svelte-related code:
 - Use tabs to indent and spaces to align.
 - `snake_case` function names and local variables, except those imported from external libraries or in the platform itself.
 - Use semicolons after statements; no ASI.
-- Classes should be used when:
-
-	1. You have anything like a state machine, or functions closing over the same state. \
-	   They help us organize and know which state is shared between related functions.
-	2. Integrating with an API properly, e.g. making an Error subclass.
-
-  Otherwise, plain functions are generally fine.
 
 When writing _any_ kind of code, including for the above:
 
@@ -69,12 +68,19 @@ When writing _any_ kind of code, including for the above:
 - The "main" function goes at the end and depends on functions above, which depend on functions further above, etc.
 - Scan the functions and generalize if that makes a good result; evict any deadbeats: humans with a small context window need to review and maintain this code.
 - Abstraction boundaries are important. Comments should reflect the current abstraction and generally avoid talking about other things.
+- Classes should be used when:
+
+	1. You have anything like a state machine, or functions closing over the same state. \
+	   They help us organize and know which state is shared between related functions.
+	2. Integrating with an API properly, e.g. making an Error subclass.
+
+  Otherwise, plain functions are generally fine.
 
 Minutae:
 
 - Use the { } curlies even for one-statement blocks.
 - Block contents should not be on the same line that opened the block.
-- Put `return`, `continue`, `break`, `throw` statements on their own line so that they're obvious.
+- Put `return`, `continue`, `break`, `throw`, `yield`, `await` statements on their own line so that they're obvious.
 - Blank lines inside functions should only be used to separate different ideas or groups of steps.
 - Use space-based alignment but only where it looks good: on adjacent lines with a very similar structure, add spaces after shorter identifiers (or the syntax to the right of them) to align things.
 
@@ -172,7 +178,7 @@ Build: autotools (`configure.ac`, `Makefile`, `config.make.in`); `make` builds `
 
 # After making changes
 
-Never `git commit -a` because there may others working; stage changes manually.
+Never `git commit -a` because there may be others working; stage changes manually.
 
 Automatically commit your changes with this commit template:
 
@@ -209,17 +215,21 @@ If acting on code reviews from Codex, Claude, or some other agent, inside the be
 After each commit you make, get it reviewed by Codex and by Claude, all at xhigh reasoning:
 
 	codex review --commit <sha> -c model="gpt-6-astra" -c model_reasoning_effort="xhigh"
+	codex review --commit <sha> -c model="gpt-6.1-sol" -c model_reasoning_effort="xhigh"
+	codex review --commit <sha> -c model="gpt-5.6-sol" -c model_reasoning_effort="xhigh"
 	claude -p --model claude-fable-5-1 --effort xhigh "/code-review xhigh commit <sha>"
 	claude -p --model claude-opus-5-5 --effort xhigh "/code-review xhigh commit <sha>"
 
 Notes:
 
-- Codex is configured globally in `~/.codex/config.toml` (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"`) to never ask for permission and run unsandboxed, so reviews and `codex exec` runs never block on prompts. If codex ever stalls waiting for approval, check that file.
-- A review can take several minutes; run them all in the background at once. The reviewers read the working tree, so don't edit files until all the reviews are in.
-- The findings are from **fallible machines**: think hard before adding a bunch of code to handle an irrelevant edge case.
-- Once all the reviews are in, fix the oversights that are really worth fixing and make one more commit as usual. If you fixed nothing, say briefly in your reply why the findings didn't warrant changes.
-- Do _not_ send that follow-up fix commit through another review — the review cycle for a change ends after one round of findings and fixes. (Exception: the follow-up grew into something substantial beyond addressing the findings.)
-- If you made several commits in a row, make sure the reviews cover all of them: either review each commit, or review the whole batch at once by replacing `--commit <sha>` with `--base <sha before your first commit>` for Codex, and `commit <sha>` with `commits <sha before your first commit>..<sha of your last commit>` for Claude.
+- If you made several commits, ensure reviews cover them all: either review each commit, or, a whole batch:
+	- codex: replace `--commit <sha>` with `--base <sha before your first commit>`
+	- claude: replace `commit <sha>` with `commits <sha before your first commit>..<sha of your last commit>`
+- Codex is already configured globally to never ask for permission and run unsandboxed.
+- A review can take several minutes; start them all in the background. Reviewers read the working tree, so don't edit files until the reviews are in.
+- Review findings are from **fallible machines eager to find issues**: think and prefer fixes that don't add a bunch of code we don't really need.
+- Once all the reviews are in, fix the oversights that are really worth fixing, in one or more commits. If nothing, say briefly why the findings didn't warrant changes.
+- Do _not_ send follow-up fixes through another review. (Exception: the follow-up grew into something substantial beyond addressing the findings.)
 
 # Thank you for your hard work on this project
 
