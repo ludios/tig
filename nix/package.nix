@@ -30,10 +30,13 @@
 }:
 
 let
-  # The last tagged version, from the Makefile's `VERSION	= x.y.z` line.
-  base_version = lib.removePrefix "VERSION\t= " (
-    lib.findFirst (lib.hasPrefix "VERSION\t= ") (throw "tig: no VERSION line in Makefile") (
-      lib.splitString "\n" (builtins.readFile "${src}/Makefile")
+  # The last tagged version: the Makefile's `VERSION = x.y.z` line, not the
+  # `VERSION = $(COMMIT)...` one it computes in a git checkout.
+  base_version = lib.head (
+    lib.findFirst (match: match != null) (throw "tig: no `VERSION = x.y.z` line in Makefile") (
+      map (builtins.match "VERSION[ \t]*=[ \t]*([0-9.]+)") (
+        lib.splitString "\n" (builtins.readFile "${src}/Makefile")
+      )
     )
   );
 in
@@ -44,7 +47,7 @@ stdenv.mkDerivation (finalAttrs: {
   inherit src;
 
   # Without a .git directory, the Makefile would call this plain `x.y.z`;
-  # use the same `x.y.z-gSHA1[-dirty]` form as a build from a git checkout.
+  # add the commit, as it does itself when `git describe` finds no tag.
   env.DIST_VERSION = finalAttrs.version;
 
   nativeBuildInputs = [
@@ -100,6 +103,12 @@ stdenv.mkDerivation (finalAttrs: {
   # those files are inherently impure, we'll handle the corresponding dependencies.
   postPatch = ''
     rm contrib/config.make-*
+
+    # A `path:` flake of a work tree also carries its untracked build
+    # outputs, which make would take as up to date.
+    make clean
+    make -C tools/tig-syntax-filter/client clean
+    rm -rf tools/tig-syntax-filter/node_modules
   '';
 
   enableParallelBuilding = true;
@@ -110,6 +119,8 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   installPhase = ''
+    runHook preInstall
+
     make install
     make install-doc
 
@@ -154,6 +165,8 @@ stdenv.mkDerivation (finalAttrs: {
     wrapProgram $out/bin/tig \
       --prefix PATH ':' "$out/bin" \
       --suffix PATH ':' "${git}/bin"
+
+    runHook postInstall
   '';
 
   outputs = [
@@ -166,7 +179,7 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://github.com/ludios/tig";
     description = "Text-mode interface for git, with syntax-highlighted truecolor diffs";
     license = lib.licenses.gpl2Plus;
-    # The syntax filter's client locates its daemon via /proc/self/exe.
+    # Only tried on Linux so far; the Darwin libiconv input is upstream's.
     platforms = lib.platforms.linux;
     mainProgram = "tig";
   };
