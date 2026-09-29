@@ -17,35 +17,47 @@ These would stay even if porffor had no bugs:
 
 - **No Node APIs.** Porffor's module loader rejects every `node:`
   specifier (`compiler/modules.js:92`: "node builtin modules are not
-  supported"). The daemon uses `node:net` for the unix socket,
-  `node:child_process` for `git cat-file --batch` and `check-attr`,
-  `node:fs/promises`, `node:crypto`, `node:path`, `node:url` and
-  `node:timers/promises`. Porffor's only I/O is `console`, a
-  fetch/HTTP-server runtime (uWebSockets) and inline C
-  (`` Porffor.c`...` ``, which `--safe` rejects). Running the daemon would
-  mean rewriting its I/O layer in porffor-specific inline C.
+  supported"). Under `tools/tig-syntax-filter/src/`, the daemon imports:
+  - `node:net` for the unix socket;
+  - `node:child_process` for `git cat-file --batch-command` (or `--batch`
+    before git 2.36), `git check-attr` and `git rev-parse --local-env-vars`;
+  - `node:fs/promises`, `node:fs`, `node:util`, `node:crypto`, `node:path`,
+    `node:url`, `node:timers/promises` and `node:stream` (types only).
+
+  `@logtape/file` also pulls in `node:fs` and `node:events`. Porffor's
+  only I/O is `console`, a fetch/HTTP-server runtime (uWebSockets) and
+  inline C (`` Porffor.c`...` ``, which `--safe` rejects). Running the
+  daemon would mean rewriting its I/O layer in porffor-specific inline C.
 - **No `WebAssembly`.** The daemon deliberately runs shiki on the
-  Oniguruma WASM engine for VS Code fidelity (`src/highlight.ts`,
-  `init_highlighter`). Under porffor, the only option is shiki's JS regex
-  engine (`shiki/engine/javascript`), which translates each Oniguruma
-  pattern into a JS `RegExp` via oniguruma-to-es. On the two files tested
+  Oniguruma WASM engine for VS Code fidelity
+  (`tools/tig-syntax-filter/src/highlight.ts`, `init_highlighter`). Under
+  porffor, the only option is shiki's JS regex engine
+  (`shiki/engine/javascript`), which translates each Oniguruma pattern into
+  a JS `RegExp` via oniguruma-to-es. On the two files tested
   (`tools/tig-syntax-filter/src/highlight.ts` and `src/draw.c`), node gave
   byte-identical SGR output with either engine, so this cost looked
   tolerable. Two files are not proof, though.
+- **Grammar loading.** The daemon uses the full `shiki` bundle with
+  `langs: []` and loads grammars on demand with `loadLanguage`. The bundle
+  reaches its 242 grammars through dynamic `import()`. Porffor would have to
+  inline all of them, or the daemon would need a static grammar list.
+  Neither was tried.
 
 ## What was tested
 
 Everything below is about the part that could in principle work: shiki
-core, vscode-textmate and the JS regex engine.
+core, vscode-textmate and the JS regex engine, with two grammars.
 
-The probe mirrors the daemon's tokenization core, minus I/O:
+The probe approximates the daemon's tokenization core, minus I/O. It uses
 `createHighlighterCoreSync` with the One Monokai theme (including the
-`Comment` override), statically imported `@shikijs/langs/typescript` and
-`@shikijs/langs/c`, and `codeToTokensBase` in 128-line chunks that carry
-`grammarState` across (as `CHUNK_LINES` does). The tokens then go through
-the same SGR emission as `emit_sgr_lines`. The sample sources are embedded
-as a JS module, because porffor has no fs. The probe runs three ways and
-the outputs are byte-compared:
+`Comment` override), and statically imported `@shikijs/langs/typescript` and
+`@shikijs/langs/c`. It runs `codeToTokensBase` in 128-line chunks that carry
+`grammarState` across, as `CHUNK_LINES` does, then an SGR emission modeled
+on `emit_sgr_lines`. Differences from the daemon: a sync core with static
+grammars instead of async `createHighlighter` plus `loadLanguage`; no
+`MAX_RUNS_PER_LINE` plain-text fallback; no CR handling (`cr_suffix`). The
+sample sources are embedded as a JS module, because porffor has no fs. The
+probe runs three ways and the outputs are byte-compared:
 
 1. porffor native binary (JS engine)
 2. node, JS engine
@@ -57,21 +69,22 @@ Practical notes:
   dependencies are looked up from the symlink's path, not its real path.
   Install into a scratch dir with `pnpm install --config.node-linker=hoisted`.
 - `node ~/cloned/porffor/runtime/index.js native entry.mjs -o probe`
-  compiled the whole shiki stack in about 5–8 s (72 C units, a 3.9 MB
-  binary). Hello world takes about 8 s the first time and 230 KB.
+  compiled the stack with those two grammars in about 5–8 s (72 C units, a
+  3.9 MB binary). The daemon's full grammar set would be much bigger.
 - Porffor's stdout is fully buffered and lost on SIGSEGV. Run binaries under
-  `stdbuf -o0` when bisecting a crash. `-d` gives a debug build with symbols
-  for `gdb`.
+  `stdbuf -o0` when bisecting a crash. `-d` keeps porffor's function names
+  (it turns off LTO), which is enough for a `gdb` backtrace. There is no
+  line info, and the C is still built at `-O3` unless you pass `-O0`.
+  `porf c file.mjs -o file.c` shows the generated C.
 - To isolate regex problems, dump every Oniguruma pattern the JS engine
   compiles in node (wrap `regexConstructor`), then have a porffor binary
-  translate and compile each one. TypeScript plus C use 404 patterns; 25 of
-  their translations are `EmulatedRegExp` instances.
+  translate and compile each one. TypeScript plus C use 404 patterns.
 
 ## Porffor bugs found
 
-All of these reproduce with tiny programs. Bugs 1 and 2 were fixed locally
-(see the appendix), which got every regex compiling. Bug 5 is where we
-stopped.
+All of these are confirmed on unmodified porffor. Bugs 1 and 2 were fixed
+locally (see the appendix), which got every regex compiling. Bugs 5 and 6
+are where we stopped.
 
 ### 1. Out-of-range string indexing reads past the string
 
@@ -84,9 +97,10 @@ console.log("ab"[-1]);                 // SIGSEGV
 ```
 
 `strGet` in `generateMember` (`compiler/codegen.js`) loads
-`ptr + 4 + index` with no bounds check. Array destructuring lowers to plain
-indexing, so `const [s, a] = token` hits it too. Typed-array reads
-(`taGet`) look equally unchecked from the code, but that wasn't tested.
+`ptr + 4 + index × unit size` with no bounds check. Array destructuring
+lowers to plain indexing, so `const [s, a] = token` hits it too. Typed-array
+reads (`taGet`) look equally unchecked from the code, but that wasn't
+tested.
 
 Effect here: oniguruma-parser's tokenizer does `const [s, a] = t` and
 branches on `a === "*"`. The out-of-bounds read picked up a stale `*` from
@@ -99,22 +113,41 @@ Jump targets are u16 offsets (`if (bcTop > 0xFFF0) throw new SyntaxError('Regex 
 in `compiler/builtins/regexp.ts`). Class ops store their whole range table
 inline (`[nR u16][32B bitmap][lo u32, hi u32]*nR`). oniguruma-to-es turns
 `[:alpha:]` into `\p{Alpha}`, which has hundreds of ranges above U+00FF.
-As a result, TypeScript grammar patterns of only 1.1–1.5 KB of Oniguruma
-source, each with around 18 such classes, fail to compile: 4 of the 404
-patterns as porffor translates them, and 10 of node's (longer) translations.
 
-### 3. Segfault on a class with only non-Latin-1 ranges over a UTF-16 input
+10 of the 404 patterns exceed the cap:
+
+- 4 fail when constructed. Each has only 1.1–1.5 KB of Oniguruma source,
+  with 10–12 `\p{Alpha}` classes in its translation.
+- 6 have translations of 3000+ characters. shiki compiles those lazily
+  (`lazyCompileLength: 3e3`, an `EmulatedRegExp` that calls `super("")`),
+  so they would fail on first `exec` instead.
+
+### 3. Integer subtraction in typed builtins saturates instead of going negative; regex segfaults
 
 ```js
-"ΣΣ".match(/[٠-٩]/);    // SIGSEGV in __Porffor_regex_attempt
-"aΣ".match(/[٠-٩]+/);   // SIGSEGV
-"ab".match(/[٠-٩]+/);   // fine (Latin-1 input)
-"ΣΣ".match(/[a-zĀ]+/);  // fine (class has a range <= 255)
+"Ж1".match(/\p{Nd}/v);     // SIGSEGV
+"ΔΣ 12".match(/[0-9٠-٩]/); // SIGSEGV
+"ΣΣ".match(/[٠-٩]/);       // SIGSEGV
+"—1".match(/\p{Nd}/v);     // fine: U+2014 is above \p{Nd}'s first wide range
+"ab".match(/[٠-٩]+/);      // fine: Latin-1 input
 ```
 
-This happens in unmodified porffor too. The cause wasn't found. The
-emitter and the first-unit prefilter looked fine on a read-through. It
-was found by delta-debugging `"abc_1 déf ΔΣω 12 x3 42x".matchAll(/(?<=[\p{Alpha}])\p{Nd}{2,3}/gv)`.
+It crashes whenever a UTF-16 input has a code unit above U+00FF but below
+the class's lowest wide range. In the TypeScript and C grammars, about 20
+of the 404 patterns use `\p{Nd}` outside an Alpha class, so any line with
+Greek or Cyrillic text would crash tokenization.
+
+Root cause: the wide-range binary search in `__Porffor_regex_attempt` does
+`hi = mid - 1` on `i32` variables. That compiles to
+
+```c
+hi = porf_f64_to_i32((f64)((u32)mid - 1u));
+```
+
+The subtraction wraps in u32, and `porf_f64_to_i32` saturates, so
+`0 - 1` gives `2147483647` instead of `-1`. The loop keeps going with a
+huge `mid` and reads out of bounds. The same lowering presumably affects
+any i32-typed builtin code that can go below zero.
 
 ### 4. `\p{Script=…}` is unsupported
 
@@ -138,52 +171,70 @@ r.exec("baab");           // null (node: match "aa" at 1, indices [[1,3]])
 ```
 
 oniguruma-to-es returns an `EmulatedRegExp` (a `RegExp` subclass with
-private fields and overridden `exec`/`source`) whenever a pattern needs
-emulation, e.g. hidden or transferred captures and search-start strategies.
-shiki's scanner calls `.exec` on it. In the probe, the first tokenization
-threw a value that turned out to be a corrupt RegExp object: porffor
-printed `Uncaught /`, and in a `-d` build, `String(e)` ran out of memory
-inside `RegExp.prototype.toString` (building a string from a garbage
-source length).
+private fields and overridden `exec`/`source`) for 25 of the 404 patterns.
+7 of those are there because their translations are 3000+ characters and
+shiki compiles them lazily (6 are the too-large ones from bug 2). The other
+18 need emulation (hidden or transferred captures, search-start
+strategies). shiki's scanner calls `.exec` on all of them.
 
-### Not a bug: regex translations differ by target
+### 6. `RegExp.prototype.source` returns corrupted strings
+
+For 27 of 401 translated grammar patterns, `new RegExp(pattern, "dgv").source`
+comes back with NULs between the characters and the wrong length. For
+example, a 242-character pattern starting `^(///)\p{space}*` gives a
+245-character source starting `^\0(\0\/\0\/\0\/\0)\0\\\0p\0{`. It looks like
+UTF-16 data read as one byte per character. The pattern string itself is
+intact. This isn't minimized: literals, `slice`d UTF-16 strings and
+`join`ed strings all came out fine. Reproduce it by running oniguruma-to-es's
+`toRegExpDetails` (target `ES2024`) over the grammar patterns and comparing
+each `.source` with its input.
+
+### Where the probe stopped
+
+The first tokenization threw a value that turned out to be a corrupt
+RegExp object. Porffor printed `Uncaught /`. In a `-d` build, a `catch`
+calling `String(e)` ran out of memory inside `RegExp.prototype.toString`,
+building a string from a garbage source length. Bugs 5 and 6 both fit;
+which one caused it wasn't determined.
+
+### Regex translations differ by target, but only slightly
 
 With `target: "auto"`, oniguruma-to-es probes the runtime's RegExp
-support. Node gets ES2025 output, which uses pattern modifiers
-`(?i:…)`, and porffor's parser rejects those ("invalid group"). Under
-porffor the probe picks a lower target by itself, so 75 of the 404
-translated sources differ from node's. So even a working porffor build
-would run a different set of JS regexes than node's JS engine. Before
-trusting its output, pin `target` to the same value on both sides, or diff
-the tokens as the probe does.
-
-## Timings (node only)
-
-The porffor binary never got far enough to time. Cold single runs in node
-(including JIT and engine warm-up) took 216 ms for `highlight.ts` and 149 ms
-for `draw.c` with the JS engine, and 179 ms and 91 ms with Oniguruma.
+support. Node gets ES2025 output, which uses pattern modifiers `(?i:…)`,
+and porffor's parser rejects those ("invalid group"). Under porffor the
+probe picks a lower target by itself. In node, the ES2024 and ES2025
+translations differ on only 4 of the 404 patterns. When compared under
+porffor, 75 translations differed from node's, but those were artifacts of
+bugs 5 and 6 (undefined `flags`, corrupted `source`). Once those are fixed,
+pinning `target: "ES2024"` on both sides should make porffor's regexes
+match node's.
 
 ## Where things are
 
 - `~/cloned/porffor`, branch `local-probe-fixes`: fixes 1 and 2 as
   uncommitted working-tree changes, plus a regenerated
   `compiler/builtins_precompiled.js` (`node compiler/precompile.js`, needed
-  after editing any `compiler/builtins/*.ts`).
+  after editing any `compiler/builtins/*.ts`). Both diffs are in the
+  appendix, in case that checkout is lost.
 - `/tmp/porf/hl`: the probe (`entry_js.mjs`, `entry_onig.mjs`, `core.mjs`,
   `gen.mjs`, `dump_patterns.mjs`, `check_patterns.mjs`). It lives in `/tmp`,
   so expect it to vanish; the design above is enough to rebuild it.
 - `/tmp/porf/porffor-orig`: an unmodified porffor worktree, for checking
   whether a bug predates the local fixes.
 
-Porffor's `AI_POLICY.md` requires disclosing AI use and says PR and issue
-text must not be LLM-written. Any upstream report of bugs 1, 3 or 5 has to
-be written by a human. The snippets above are the repros.
+Upstream reports: bugs 1, 3 and 5 have short repros above, and bug 2 has a
+fix. Porffor's `AI_POLICY.md` requires disclosing all AI use and fully
+understanding any change you submit. PR descriptions and comments must not
+be LLM-generated (for issues, the same rule is "less strictly enforced").
+So the fixes below, which are LLM-written, would need a human who
+understands them to submit them and write the text.
 
 ## Worth rechecking when
 
-Porffor fixes RegExp subclassing (bug 5) and out-of-bounds indexing
-(bug 1). Even then, only the tokenizer would run, on the JS regex engine.
-The daemon itself would still need its I/O rewritten.
+Upstream fixes bugs 1, 2, 3, 5 and 6; each of them blocks tokenization on
+its own. Even then, only the tokenizer would run, on the JS regex engine,
+and with a static grammar list. The daemon itself would still need its I/O
+rewritten.
 
 ## Appendix: the local porffor fixes
 
@@ -222,19 +273,77 @@ Fix 2 (`compiler/builtins/regexp.ts`) keeps each class op's 32-byte bitmap
 inline but replaces its wide-range list with a u32 offset (`rangesAt`)
 into a table appended after the code, once the u16 jump fixups are applied.
 Jumps then only span the code, whatever the size of the Unicode classes.
-The changes:
+The analysis passes (first-unit bitmap, minimum length, anchoring) walk the
+AST, not the bytecode, so they needed no change. All 404 grammar patterns
+compiled afterwards. A differential test of Unicode-class regexes against
+node couldn't run to completion because of bug 3.
 
-- `__Porffor_regex_eClassPayload` records `[field offset, nWide, lo, hi, …]`
-  in a new `__Porffor_regex_eWide` array and emits a zero u32 placeholder
-  instead of the ranges.
-- `__Porffor_regex_compileBlob` initializes that array. After the
-  `Regex too large` check (which now covers only the code), it appends
-  each range table and patches its placeholder with the table's offset.
-- The executor reads `ranges` as `code + loadI32(code + pc, 35)` for
-  `class` (op now 39 bytes) and `code + loadI32(code + pc, 40)` for
-  `runClass` (op now 44 bytes).
-
-The analysis passes (first-unit bitmap, minimum length, anchoring) walk
-the AST, not the bytecode, so they needed no change. A differential test of
-Unicode-class regexes against node couldn't run to completion because of
-bug 3, but all 404 grammar patterns compiled afterwards.
+```diff
+@@ bytecode ops comment @@
+-//   0x05 class [nR u16][32B bitmap][lo u32, hi u32]*nR
++//   0x05 class [nR u16][32B bitmap][rangesAt u32]
+ //        cp < 256: bitmap, else bsearch ranges (all >255), negation baked in
+ //   0x06 any1                           - consume one unit/cp unconditionally
+ //   0x07 runChar [backward u8][min u16][max u16][unit u16]
+ //   0x08 runBitmap [backward u8][min u16][max u16][32B]
+ //   0x09 runClass [backward u8][min u16][max u16][class payload]
++//   wide ranges ([lo u32, hi u32]*nR) live in a table after the code, at rangesAt,
++//   so big unicode classes don't count against the u16 jump range
+@@ globals @@
+ let __Porffor_regex_bufBc: any = 0;
++// [payload ranges field at, nR, lo, hi, ...] per class, appended after the code
++let __Porffor_regex_eWide: any = 0;
+ let __Porffor_regex_capBc: i32 = 0;
+@@ __Porffor_regex_eClassPayload @@
+-// [nR u16][32B bitmap][lo u32, hi u32]*, wide ranges only
++// [nR u16][32B bitmap][rangesAt u32], wide ranges only, into the side table
+ export const __Porffor_regex_eClassPayload = (start: i32, count: i32): void => {
+   ...
+   __Porffor_regex_bcTop += 32;
++  const wide: any[] = __Porffor_regex_eWide;
++  Porffor.array.fastPush(wide, __Porffor_regex_bcTop);
++  Porffor.array.fastPush(wide, nWide);
++  __Porffor_regex_e32(0);
+   for (let i: i32 = start; i < start + count; i++) {
+   ...
+     if (hi > 255) {
+       const wLo: i32 = lo > 256 ? lo : 256;
+-      __Porffor_regex_e32(wLo);
+-      __Porffor_regex_e32(hi);
++      Porffor.array.fastPush(wide, wLo);
++      Porffor.array.fastPush(wide, hi);
+     }
+@@ __Porffor_regex_attempt, class (0x05) @@
+               // bsearch the wide ranges
+               ok = false;
+-              const ranges: i32 = code + pc + 35;
++              const ranges: i32 = code + Porffor.IR.loadI32(code + pc, 35);
+   ...
+-            pc += op == 0x05 ? 35 + Porffor.IR.loadU16(code + pc, 1) * 8 : 1;
++            pc += op == 0x05 ? 39 : 1;
+@@ __Porffor_regex_attempt, runClass (0x09) @@
+         const bitmap: i32 = code + pc + 8;
+-        const ranges: i32 = code + pc + 40;
+-        const afterPc: i32 = pc + (isClass ? 40 + rangeCount * 8 : 6);
++        const ranges: i32 = isClass ? code + Porffor.IR.loadI32(code + pc, 40) : 0;
++        const afterPc: i32 = pc + (isClass ? 44 : 6);
+@@ __Porffor_regex_compileBlob @@
+   __Porffor_regex_eFixups = Porffor.array.new(16);
++  __Porffor_regex_eWide = Porffor.array.new(16);
+ 
+   __Porffor_regex_emitNode(root, 0);
+   ...
+   if (__Porffor_regex_bcTop > 0xFFF0) throw new SyntaxError('Regex too large');
+ 
++  // wide range tables after the code
++  const wide: any[] = __Porffor_regex_eWide;
++  for (let i: i32 = 0; i < wide.length;) {
++    const at: i32 = wide[i];
++    const n: i32 = wide[i + 1];
++    Porffor.IR.storeI32(Porffor.IR.ptr(__Porffor_regex_bufBc) + at, 0, __Porffor_regex_bcTop);
++    for (let j: i32 = 0; j < n * 2; j++) __Porffor_regex_e32(wide[i + 2 + j]);
++    i += 2 + n * 2;
++  }
++
+   // analysis
+```
