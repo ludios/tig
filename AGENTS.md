@@ -114,16 +114,6 @@ Sometimes a program can log or assert to generate interesting observations which
 
 When there are multiple good ways to implement something, especially involving state or the definition of a type: please ask the user. User loves AskUserQuestion.
 
-# TypeScript libraries to use
-
-- `ayy` to assert things when it's okay to raise `AssertionError` instead of a domain-specific error.
-- `logtape` for logging. Logs teach us about anomalies and the causes of things; log what a human operator would probably be interested in when observing the system.
-
-For unit tests:
-
-- Use `vitest` for unit tests. Writing more tests is fine.
-- Use `fast-check` for property-based testing, i.e. to check a bunch of variations on e.g. a string or number.
-
 # Project map
 
 This repo is `tig`, the ncurses-based text-mode interface for git, written in C (2.6.1-dev fork).
