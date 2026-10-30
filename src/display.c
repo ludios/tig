@@ -47,21 +47,26 @@ struct display_tty {
 };
 static struct display_tty opt_tty = { NULL, -1, NULL, -1 };
 
-/* The stream ncurses draws the screen to. */
-static FILE *display_out;
+/* The file descriptor ncurses draws the screen to. */
+static int display_fd = -1;
 
 /* Tell a terminal that lays out bidi text (ECMA-48 BDSM; e.g. mintty, VTE)
  * whether to leave the layout to us (`explicit`).  Otherwise it reorders
  * whole screen rows, moving text between the views side by side.  The
  * terminal applies its current mode to lines as they get cleared, so this
  * must come before ncurses next clears the screen; it goes out at once,
- * not through ncurses' buffer (nor putp()'s, which is stdout's). */
+ * not through ncurses' buffer, nor putp()'s (stdout's), nor that of the
+ * tty stream tig also reads from. */
 static void
 set_bidi_explicit(bool explicit)
 {
-	assert(display_out);
-	fputs(explicit ? "\033[8l" : "\033[8h", display_out);
-	fflush(display_out);
+	const char *mode = explicit ? "\033[8l" : "\033[8h";
+	ssize_t written;
+
+	assert(display_fd != -1);
+	written = write(display_fd, mode, strlen(mode));
+	/* A terminal that does not take it has nothing to lay out. */
+	(void) written;
 }
 
 static struct io script_io = { -1 };
@@ -697,13 +702,17 @@ init_display(void)
 	if (!no_display && isatty(STDIN_FILENO)) {
 		/* Needed for ncurses 5.4 compatibility. */
 		cursed = !!initscr();
-		display_out = stdout;
+		display_fd = STDOUT_FILENO;
 	} else {
 		/* Leave stdin and stdout alone when acting as a pager. */
-		display_out = no_display ? fopen("/dev/null", "w+") : opt_tty.file;
-		if (!display_out)
+		FILE *out_tty;
+
+		out_tty = no_display ? fopen("/dev/null", "w+") : opt_tty.file;
+		if (!out_tty) {
 			die("Failed to open tty for output");
-		cursed = !!newterm(NULL, display_out, opt_tty.file);
+		}
+		cursed = !!newterm(NULL, out_tty, opt_tty.file);
+		display_fd = fileno(out_tty);
 	}
 
 	if (!cursed)
