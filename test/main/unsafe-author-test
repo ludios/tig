@@ -1,0 +1,38 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+#
+# Fields such as the author are drawn like other text, so a bidi control,
+# a control character or an invalid byte in one takes the column it is
+# counted as, and the columns after it stay aligned.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=6
+export COLUMNS=60
+
+steps ':save-display screen'
+
+# commit <id> <parent> <author> <title>
+commit()
+{
+	printf 'commit > %s %s\0%s <a@b> 1440007968 -0700\0%s <a@b> 1440007968 -0700\0%s\n' \
+		"$1" "$2" "$3" "$3" "$4"
+}
+
+{
+	commit 1111111 2222222 'Ab' 'Plain'
+	commit 2222222 3333333 "$(printf 'A\342\200\217b')" 'RLM'
+	commit 3333333 4444444 "$(printf 'A\033b')" 'ESC'
+	commit 4444444 '' "$(printf 'A\370b')" 'Invalid'
+} > unsafe.in
+
+test_tig --pretty=raw < unsafe.in
+
+assert_equals 'screen' strict <<EOF
+2015-08-19 11:12 -0700 Ab  Plain
+2015-08-19 11:12 -0700 A�b RLM
+2015-08-19 11:12 -0700 A b ESC
+2015-08-19 11:12 -0700 A�b Invalid
+[main] 1111111 - commit 1 of 4                          100%
+EOF

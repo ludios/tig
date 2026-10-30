@@ -258,7 +258,7 @@ draw_field(struct view *view, enum line_type type, const char *text, int width, 
 		}
 	}
 
-	return draw_chars(view, type, text, -1, max - 1, trim)
+	return draw_text_expanded(view, type, text, -1, max - 1, trim, view->col)
 	    || draw_space(view, type, max - (view->col - col), max);
 }
 
