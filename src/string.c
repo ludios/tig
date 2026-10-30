@@ -103,17 +103,23 @@ unicode_is_bidi_control(utf8proc_int32_t c)
 
 /* Decode the character at the start of `string`, which has `length` > 0
  * bytes left, into the character drawn for it: a control character other
- * than tab and NUL becomes a space, and an invalid byte or a bidi
- * formatting character becomes U+FFFD.  Left to ncurses, these would
- * take a width other than the one counted here, or reach the terminal
- * as something it acts on.  Stores the character in `unicode` and
- * returns the number of bytes it takes up in `string`. */
+ * than tab and NUL, or a line or paragraph separator, becomes a space, and
+ * an invalid byte or a bidi formatting character becomes U+FFFD.  Left to
+ * ncurses, these would take a width other than the one counted here, or
+ * reach the terminal as something it acts on.  Stores the character in
+ * `unicode` and returns the number of bytes it takes up in `string`. */
 static size_t
 utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode)
 {
+	const unsigned char c = string[0];
 	utf8proc_ssize_t bytes;
 
 	assert(length > 0);
+	if (c >= 0x20 && c < 0x7f) {
+		*unicode = c;
+		return 1;
+	}
+
 	bytes = utf8proc_iterate((const utf8proc_uint8_t *) string, length, unicode);
 	if (bytes < 1 || *unicode < 0) {
 		*unicode = UNICODE_REPLACEMENT_CHARACTER;
@@ -122,9 +128,13 @@ utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode)
 
 	if (unicode_is_bidi_control(*unicode)) {
 		*unicode = UNICODE_REPLACEMENT_CHARACTER;
-	} else if (*unicode != '\t' && *unicode != '\0' &&
-		   (*unicode < 0x20 || (*unicode >= 0x7f && *unicode <= 0x9f))) {
-		*unicode = ' ';
+	} else if (*unicode != '\t' && *unicode != '\0') {
+		utf8proc_category_t category = utf8proc_category(*unicode);
+
+		if (category == UTF8PROC_CATEGORY_CC || category == UTF8PROC_CATEGORY_ZL ||
+		    category == UTF8PROC_CATEGORY_ZP) {
+			*unicode = ' ';
+		}
 	}
 	return bytes;
 }
