@@ -50,13 +50,20 @@ static struct display_tty opt_tty = { NULL, -1, NULL, -1 };
 /* The file descriptor ncurses draws the screen to. */
 static int display_fd = -1;
 
+/* Set when the process continues after being stopped, e.g. by Ctrl-Z. */
+static volatile sig_atomic_t display_continued;
+
+static void
+handle_sigcont(int sig)
+{
+	display_continued = true;
+}
+
 /* Tell a terminal that lays out bidi text (ECMA-48 BDSM; e.g. mintty, VTE)
  * whether to leave the layout to us (`explicit`).  Otherwise it reorders
- * whole screen rows, moving text between the views side by side.  The
- * terminal applies its current mode to lines as they get cleared, so this
- * must come before ncurses next clears the screen; it goes out at once,
- * not through ncurses' buffer, nor putp()'s (stdout's), nor that of the
- * tty stream tig also reads from. */
+ * whole screen rows, moving text between the views side by side.  This
+ * goes out at once, not through ncurses' buffer, nor putp()'s (stdout's),
+ * nor that of the tty stream tig also reads from. */
 static void
 set_bidi_explicit(bool explicit)
 {
@@ -67,6 +74,18 @@ set_bidi_explicit(bool explicit)
 	written = write(display_fd, mode, strlen(mode));
 	/* A terminal that does not take it has nothing to lay out. */
 	(void) written;
+}
+
+/* Have the terminal leave bidi layout to us, once ncurses has (re)entered
+ * the screen: entering may save the terminal's mode along with the cursor,
+ * to restore on leaving.  The terminal applies its mode to lines as they
+ * get cleared, so have the next refresh clear the whole screen. */
+static void
+take_bidi_layout(void)
+{
+	doupdate();
+	set_bidi_explicit(true);
+	clearok(curscr, true);
 }
 
 static struct io script_io = { -1 };
@@ -112,8 +131,8 @@ open_external_viewer(const char *argv[], const char *dir, bool silent, bool conf
 		signal(SIGINT, SIG_IGN);
 		clear();
 		refresh();
-		set_bidi_explicit(false);
 		endwin();                  /* restore original tty modes */
+		set_bidi_explicit(false);
 		tcsetattr(opt_tty.fd, TCSAFLUSH, opt_tty.attr);
 		ok = io_run_fg(argv, dir, opt_tty.fd);
 		if (confirm || !ok) {
@@ -627,8 +646,8 @@ done_display(void)
 			doupdate();
 		}
 		curs_set(1);
-		set_bidi_explicit(false);
 		endwin();
+		set_bidi_explicit(false);
 	}
 	cursed = false;
 
@@ -652,7 +671,7 @@ set_terminal_modes(void)
 	noecho();	/* Don't echo input */
 	curs_set(0);
 	leaveok(stdscr, false);
-	set_bidi_explicit(true);
+	take_bidi_layout();
 }
 
 void
@@ -718,6 +737,9 @@ init_display(void)
 	if (!cursed)
 		die("Failed to initialize curses");
 
+	if (signal(SIGCONT, handle_sigcont) == SIG_ERR) {
+		die("Failed to setup signal handler");
+	}
 	set_terminal_modes();
 	init_colors();
 
@@ -831,6 +853,11 @@ get_input(int prompt_position, struct key *key)
 	while (true) {
 		int delay = -1;
 
+		if (display_continued) {
+			display_continued = false;
+			take_bidi_layout();
+		}
+
 		if (opt_refresh_mode != REFRESH_MODE_MANUAL) {
 			bool refs_refreshed = false;
 
@@ -901,11 +928,9 @@ get_input(int prompt_position, struct key *key)
 			redraw_display(true);
 
 		} else if (key_value == KEY_CTL('z')) {
+			/* SIGCONT has the bidi layout taken back. */
 			set_bidi_explicit(false);
 			raise(SIGTSTP);
-			/* ncurses repainted on resume, before this mode. */
-			set_bidi_explicit(true);
-			clearok(curscr, true);
 
 		} else {
 			int pos, key_length;
