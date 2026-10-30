@@ -95,9 +95,11 @@ void string_copy_rev_from_commit_line(char *dst, const char *src);
 #define string_concat_path(dst, path1, path2) \
 	string_format(dst, !*path1 || path1[strlen(path1) - 1] == '/' ? "%s%s" : "%s/%s", path1, path2)
 
-/* Expand tabs to spaces and blank out other whitespace and control
- * characters.  `col` is the display column at which `src` starts, so that
- * text expanded in pieces gets the same tab stops as when expanded whole.
+/* Expand tabs to spaces, blank out other whitespace and control
+ * characters, and replace each invalid UTF-8 byte and bidi formatting
+ * character with U+FFFD.  `col` is the display column at which `src`
+ * starts, so that text expanded in pieces gets the same tab stops as when
+ * expanded whole.
  * Returns the number of bytes consumed from `src`: short of `srclen` when
  * `dst` fills up, in which case the rest continues in another call. */
 size_t string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col);
@@ -129,8 +131,9 @@ unsigned long utf8_to_unicode(const char *string, size_t length);
 
 /* Calculates how much of string can be shown within the given maximum width
  * and sets trimmed parameter to non-zero value if all of string could not be
- * shown. If the reserve flag is TRUE, it will reserve at least one
- * trailing character, which can be useful when drawing a delimiter.
+ * shown, measuring the characters string_expand() draws. If the reserve
+ * flag is TRUE, it will reserve at least one trailing character, which can
+ * be useful when drawing a delimiter.
  *
  * Returns the number of bytes to output from string to satisfy max_width. */
 size_t utf8_length(const char **start, int max_bytes, size_t skip, int *width, size_t max_width, int *trimmed, bool reserve, int tab_size);

@@ -90,6 +90,45 @@ string_copy_rev_from_commit_line(char *dst, const char *src)
 	string_copy_rev(dst, src);
 }
 
+#define UNICODE_REPLACEMENT_CHARACTER 0xfffd
+
+/* Whether `c` is a bidi formatting character, which a terminal doing
+ * bidi layout would act on instead of showing. */
+static bool
+unicode_is_bidi_control(utf8proc_int32_t c)
+{
+	return c == 0x061c || c == 0x200e || c == 0x200f ||
+	       (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
+}
+
+/* Decode the character at the start of `string`, which has `length` > 0
+ * bytes left, into the character drawn for it: a control character other
+ * than tab and NUL becomes a space, and an invalid byte or a bidi
+ * formatting character becomes U+FFFD.  Left to ncurses, these would
+ * take a width other than the one counted here, or reach the terminal
+ * as something it acts on.  Stores the character in `unicode` and
+ * returns the number of bytes it takes up in `string`. */
+static size_t
+utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode)
+{
+	utf8proc_ssize_t bytes;
+
+	assert(length > 0);
+	bytes = utf8proc_iterate((const utf8proc_uint8_t *) string, length, unicode);
+	if (bytes < 1 || *unicode < 0) {
+		*unicode = UNICODE_REPLACEMENT_CHARACTER;
+		return 1;
+	}
+
+	if (unicode_is_bidi_control(*unicode)) {
+		*unicode = UNICODE_REPLACEMENT_CHARACTER;
+	} else if (*unicode != '\t' && *unicode != '\0' &&
+		   (*unicode < 0x20 || (*unicode >= 0x7f && *unicode <= 0x9f))) {
+		*unicode = ' ';
+	}
+	return bytes;
+}
+
 size_t
 string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize, size_t col)
 {
@@ -97,7 +136,8 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 	size_t size = 0, pos = 0;
 
 	while (pos < end && src[pos] && size < dstlen - 1) {
-		const unsigned char c = src[pos];
+		utf8proc_int32_t c;
+		size_t bytes = utf8_decode_drawn(src + pos, end - pos, &c);
 
 		if (c == '\t') {
 			size_t expanded = tabsize - (col % tabsize);
@@ -113,34 +153,20 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 			memset(dst + size, ' ', expanded);
 			size += expanded;
 			col += expanded;
-			pos++;
-
-		} else if (c >= 0x80) {
-			/* Tab stops count display columns, not bytes; invalid
-			 * UTF-8 counts one column per byte, as in utf8_length(). */
-			utf8proc_int32_t unicode;
-			utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t *) src + pos,
-								  end - pos, &unicode);
-			int width = 1;
-
-			if (bytes < 1 || unicode < 0) {
-				bytes = 1;
-			} else {
-				width = utf8proc_charwidth(unicode);
-			}
-			if (size + bytes > dstlen - 1) {
-				break;
-			}
-			memcpy(dst + size, src + pos, bytes);
-			size += bytes;
-			col += width;
-			pos += bytes;
 
 		} else {
-			dst[size++] = isspace(c) || iscntrl(c) ? ' ' : c;
-			col++;
-			pos++;
+			/* Tab stops count display columns, not bytes. */
+			utf8proc_uint8_t encoded[4];
+			utf8proc_ssize_t encoded_bytes = utf8proc_encode_char(c, encoded);
+
+			if (size + encoded_bytes > dstlen - 1) {
+				break;
+			}
+			memcpy(dst + size, encoded, encoded_bytes);
+			size += encoded_bytes;
+			col += utf8proc_charwidth(c);
 		}
+		pos += bytes;
 	}
 
 	dst[size] = 0;
@@ -263,8 +289,9 @@ utf8_to_unicode(const char *string, size_t length)
 
 /* Calculates how much of string can be shown within the given maximum width
  * and sets trimmed parameter to non-zero value if all of string could not be
- * shown. If the reserve flag is true, it will reserve at least one
- * trailing character, which can be useful when drawing a delimiter.
+ * shown, measuring the characters string_expand() draws. If the reserve
+ * flag is true, it will reserve at least one trailing character, which can
+ * be useful when drawing a delimiter.
  *
  * Returns the number of bytes to output from string to satisfy max_width. */
 size_t
@@ -279,20 +306,14 @@ utf8_length(const char **start, int max_chars, size_t skip, int *width, size_t m
 	*trimmed = 0;
 
 	while (string < end) {
-		/* Change representation to figure out whether it is a
-		 * single- or double-width character and assume a width
-		 * and size of 1 for invalid UTF-8 encoding (can be
-		 * ISO-8859-1, Windows-1252, ...). */
+		/* Measure the character string_expand() draws in its
+		 * place, so that, e.g., each invalid byte (can be
+		 * ISO-8859-1, Windows-1252, ...) takes one column. */
 		utf8proc_int32_t unicode;
-		utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t *) string,
-							  end - string, &unicode);
-		int ucwidth;
+		size_t bytes = utf8_decode_drawn(string, end - string, &unicode);
+		int ucwidth = unicode == '\t' ? tab_size - (*width % tab_size)
+					      : utf8proc_charwidth(unicode);
 
-		if (unicode < 0)
-			ucwidth = bytes = 1;
-		else
-			ucwidth = unicode == '\t' ? tab_size - (*width % tab_size)
-						  : utf8proc_charwidth(unicode);
 		if (skip > 0) {
 			skip -= ucwidth <= skip ? ucwidth : skip;
 			*start += bytes;

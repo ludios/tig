@@ -1,0 +1,43 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+#
+# Bytes that ncurses would draw in some other width than tig counts, or
+# that a terminal would act on, are drawn as one column each: controls
+# as spaces, invalid UTF-8 and bidi formatting characters as U+FFFD.
+# Wrapping splits lines by the same widths, so nothing spills or gets lost.
+
+. libtest.sh
+. libgit.sh
+
+export COLUMNS=24
+export LINES=10
+
+steps '
+	:save-display diff.screen
+'
+
+tigrc <<EOF
+set wrap-lines = yes
+EOF
+
+printf '@@ -0,0 +1,3 @@\n' > unsafe.diff
+# C1 NEL, RLO, a lone lead byte, a lone continuation byte, C0 and DEL, ALM.
+printf '+A[\302\205]B[\342\200\256]C[\370]D[\206]E[\001\177]F[\330\234]G\n' >> unsafe.diff
+# A lone lead byte must not swallow the "]" after it.
+printf '+\370]\370]\370]\370]\370]\370]\370]\370]\370]\370]\370]\370]\n' >> unsafe.diff
+# Right-to-left letters and wide characters are drawn as they are.
+printf '+\327\251\327\234\327\225\327\235 \344\270\255\346\226\207\n' >> unsafe.diff
+
+test_tig show < unsafe.diff
+
+assert_equals 'diff.screen' strict <<EOF
+@@ -0,0 +1,3 @@
++A[ ]B[�]C[�]D[�]E[  ]F[
++�]G
++�]�]�]�]�]�]�]�]�]�]�]�
++]
++שלום 中文
+ 
+ 
+[diff] HEAD - line  100%
+EOF
