@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -45,6 +47,23 @@ struct display_tty {
 };
 static struct display_tty opt_tty = { NULL, -1, NULL, -1 };
 
+/* The stream ncurses draws the screen to. */
+static FILE *display_out;
+
+/* Tell a terminal that lays out bidi text (ECMA-48 BDSM; e.g. mintty, VTE)
+ * whether to leave the layout to us (`explicit`).  Otherwise it reorders
+ * whole screen rows, moving text between the views side by side.  The
+ * terminal applies its current mode to lines as they get cleared, so this
+ * must come before ncurses next clears the screen; it goes out at once,
+ * not through ncurses' buffer (nor putp()'s, which is stdout's). */
+static void
+set_bidi_explicit(bool explicit)
+{
+	assert(display_out);
+	fputs(explicit ? "\033[8l" : "\033[8h", display_out);
+	fflush(display_out);
+}
+
 static struct io script_io = { -1 };
 
 bool
@@ -88,6 +107,7 @@ open_external_viewer(const char *argv[], const char *dir, bool silent, bool conf
 		signal(SIGINT, SIG_IGN);
 		clear();
 		refresh();
+		set_bidi_explicit(false);
 		endwin();                  /* restore original tty modes */
 		tcsetattr(opt_tty.fd, TCSAFLUSH, opt_tty.attr);
 		ok = io_run_fg(argv, dir, opt_tty.fd);
@@ -602,6 +622,7 @@ done_display(void)
 			doupdate();
 		}
 		curs_set(1);
+		set_bidi_explicit(false);
 		endwin();
 	}
 	cursed = false;
@@ -626,6 +647,7 @@ set_terminal_modes(void)
 	noecho();	/* Don't echo input */
 	curs_set(0);
 	leaveok(stdscr, false);
+	set_bidi_explicit(true);
 }
 
 void
@@ -675,14 +697,13 @@ init_display(void)
 	if (!no_display && isatty(STDIN_FILENO)) {
 		/* Needed for ncurses 5.4 compatibility. */
 		cursed = !!initscr();
+		display_out = stdout;
 	} else {
 		/* Leave stdin and stdout alone when acting as a pager. */
-		FILE *out_tty;
-
-		out_tty = no_display ? fopen("/dev/null", "w+") : opt_tty.file;
-		if (!out_tty)
+		display_out = no_display ? fopen("/dev/null", "w+") : opt_tty.file;
+		if (!display_out)
 			die("Failed to open tty for output");
-		cursed = !!newterm(NULL, out_tty, opt_tty.file);
+		cursed = !!newterm(NULL, display_out, opt_tty.file);
 	}
 
 	if (!cursed)
@@ -871,7 +892,11 @@ get_input(int prompt_position, struct key *key)
 			redraw_display(true);
 
 		} else if (key_value == KEY_CTL('z')) {
+			set_bidi_explicit(false);
 			raise(SIGTSTP);
+			/* ncurses repainted on resume, before this mode. */
+			set_bidi_explicit(true);
+			clearok(curscr, true);
 
 		} else {
 			int pos, key_length;
