@@ -1,4 +1,5 @@
 /* Model-output: Claude Fable 5 */
+/* Model-output: Claude Opus 5.5 */
 
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
@@ -481,8 +482,11 @@ readline_init(void)
 	rl_prep_term_function = NULL;
 }
 
+/* The SIGINT handler from before read_prompt() took SIGINT over. */
+static void (*prompt_saved_sigint)(int) = SIG_DFL;
+
 static void sigint_absorb_handler(int sig) {
-	signal(SIGINT, SIG_DFL);
+	signal(SIGINT, prompt_saved_sigint);
 	prompt_interrupted = true;
 	rl_done = 1;
 }
@@ -499,13 +503,15 @@ read_prompt(const char *prompt)
 	}
 
 	curs_set(1);
-	if (signal(SIGINT, sigint_absorb_handler) == SIG_ERR)
+	prompt_saved_sigint = signal(SIGINT, sigint_absorb_handler);
+	if (prompt_saved_sigint == SIG_ERR)
 		die("Failed to setup sigint handler");
+	assert(prompt_saved_sigint != sigint_absorb_handler);
 	noraw();
 	cbreak();
 	line = readline(prompt);
 	raw();
-	if (signal(SIGINT, SIG_DFL) == SIG_ERR)
+	if (signal(SIGINT, prompt_saved_sigint) == SIG_ERR)
 		die("Failed to remove sigint handler");
 	curs_set(0);
 
