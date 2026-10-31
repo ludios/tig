@@ -50,20 +50,15 @@ static struct display_tty opt_tty = { NULL, -1, NULL, -1 };
 /* The file descriptor ncurses draws the screen to. */
 static int display_fd = -1;
 
-/* Set when the process continues after being stopped, e.g. by Ctrl-Z. */
-static volatile sig_atomic_t display_continued;
-
-static void
-handle_sigcont(int sig)
-{
-	display_continued = true;
-}
+/* Whether tig's last BDSM write had the terminal leave bidi layout to tig. */
+static volatile sig_atomic_t display_bidi_explicit;
 
 /* Tell a terminal that lays out bidi text (ECMA-48 BDSM; e.g. mintty, VTE)
  * whether to leave the layout to us (`explicit`).  Otherwise it reorders
  * whole screen rows, moving text between the views side by side.  This
  * goes out at once, not through ncurses' buffer, nor putp()'s (stdout's),
- * nor that of the tty stream tig also reads from. */
+ * nor that of the tty stream tig also reads from, and can be called from a
+ * signal handler. */
 static void
 set_bidi_explicit(bool explicit)
 {
@@ -71,6 +66,7 @@ set_bidi_explicit(bool explicit)
 	ssize_t written;
 
 	assert(display_fd != -1);
+	display_bidi_explicit = explicit;
 	written = write(display_fd, mode, strlen(mode));
 	/* A terminal that does not take it has nothing to lay out. */
 	(void) written;
@@ -86,6 +82,70 @@ take_bidi_layout(void)
 	doupdate();
 	set_bidi_explicit(true);
 	clearok(curscr, true);
+}
+
+/* The signals on which ncurses' handlers leave the screen: to exit (SIGINT,
+ * SIGTERM), or to stop until continued (SIGTSTP, e.g. from Ctrl-Z). */
+static const int screen_signals[] = { SIGINT, SIGTERM, SIGTSTP };
+
+/* ncurses' handlers, by the index of their signal in screen_signals. */
+static struct sigaction ncurses_screen_actions[ARRAY_SIZE(screen_signals)];
+
+/* Hand the bidi layout back to the terminal before ncurses' handler for
+ * `sig` leaves the screen, and take the layout back if that handler
+ * returns, which it does once tig continues after a stop. */
+static void
+handle_screen_signal(int sig)
+{
+	const bool explicit = display_bidi_explicit;
+	const int saved_errno = errno;
+	size_t i;
+
+	/* This handler is only installed for screen_signals. */
+	for (i = 0; screen_signals[i] != sig; i++) {
+		assert(i + 1 < ARRAY_SIZE(screen_signals));
+	}
+
+	if (explicit) {
+		set_bidi_explicit(false);
+	}
+	ncurses_screen_actions[i].sa_handler(sig);
+	/* Only a stop returns here: ncurses has entered the screen again and
+	 * redrawn it, in implicit bidi mode. */
+	if (explicit) {
+		take_bidi_layout();
+		doupdate();
+	}
+	errno = saved_errno;
+}
+
+/* Route each of the screen_signals that ncurses handles through
+ * handle_screen_signal(). */
+static void
+wrap_screen_signals(void)
+{
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(screen_signals); i++) {
+		struct sigaction *ncurses = &ncurses_screen_actions[i];
+		struct sigaction wrapper;
+
+		if (sigaction(screen_signals[i], NULL, ncurses)) {
+			die("Failed to read signal handler");
+		}
+		/* ncurses installs no handler for a signal that was ignored
+		 * when it started, and none that takes SA_SIGINFO. */
+		if (ncurses->sa_handler == SIG_DFL || ncurses->sa_handler == SIG_IGN ||
+		    (ncurses->sa_flags & SA_SIGINFO)) {
+			continue;
+		}
+
+		wrapper = *ncurses;
+		wrapper.sa_handler = handle_screen_signal;
+		if (sigaction(screen_signals[i], &wrapper, NULL)) {
+			die("Failed to setup signal handler");
+		}
+	}
 }
 
 static struct io script_io = { -1 };
@@ -738,9 +798,7 @@ init_display(void)
 	if (!cursed)
 		die("Failed to initialize curses");
 
-	if (signal(SIGCONT, handle_sigcont) == SIG_ERR) {
-		die("Failed to setup signal handler");
-	}
+	wrap_screen_signals();
 	set_terminal_modes();
 	init_colors();
 
@@ -854,11 +912,6 @@ get_input(int prompt_position, struct key *key)
 	while (true) {
 		int delay = -1;
 
-		if (display_continued) {
-			display_continued = false;
-			take_bidi_layout();
-		}
-
 		if (opt_refresh_mode != REFRESH_MODE_MANUAL) {
 			bool refs_refreshed = false;
 
@@ -929,8 +982,7 @@ get_input(int prompt_position, struct key *key)
 			redraw_display(true);
 
 		} else if (key_value == KEY_CTL('z')) {
-			/* SIGCONT has the bidi layout taken back. */
-			set_bidi_explicit(false);
+			/* handle_screen_signal() hands over the bidi layout. */
 			raise(SIGTSTP);
 
 		} else {
