@@ -50,7 +50,7 @@ static struct display_tty opt_tty = { NULL, -1, NULL, -1 };
 /* The file descriptor ncurses draws the screen to. */
 static int display_fd = -1;
 
-/* Whether tig's last BDSM write had the terminal leave bidi layout to tig. */
+/* Whether the terminal may be in explicit bidi mode, at tig's request. */
 static volatile sig_atomic_t display_bidi_explicit;
 
 /* Tell a terminal that lays out bidi text (ECMA-48 BDSM; e.g. mintty, VTE)
@@ -66,10 +66,15 @@ set_bidi_explicit(bool explicit)
 	ssize_t written;
 
 	assert(display_fd != -1);
-	display_bidi_explicit = explicit;
+	/* Whenever the terminal may be in explicit mode, the flag says so,
+	 * so that handle_screen_signal() does not skip handing it back. */
+	if (explicit) {
+		display_bidi_explicit = true;
+	}
 	written = write(display_fd, mode, strlen(mode));
 	/* A terminal that does not take it has nothing to lay out. */
 	(void) written;
+	display_bidi_explicit = explicit;
 }
 
 /* Have the terminal leave bidi layout to us, once ncurses has (re)entered
