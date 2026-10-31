@@ -248,6 +248,29 @@ be appended:
 [main] 77d9e40fbcea3238015aea403e06f61542df9a31 - commit 1 of 779 loading 5s 0%
 -------------------------------------------------------------------------------
 
+[[special-characters]]
+Special Characters
+~~~~~~~~~~~~~~~~~~
+
+Tig draws a tab as spaces up to the next tab stop, and draws each other
+control character, line separator and paragraph separator as a space. Tig
+draws each bidi formatting character (such as U+202E RIGHT-TO-LEFT OVERRIDE)
+as U+FFFD REPLACEMENT CHARACTER. In a UTF-8 locale, Tig also draws each byte
+that is not part of valid UTF-8 as U+FFFD; in other locales, Tig sends such
+bytes to the terminal unchanged.
+
+A terminal that lays out bidirectional text by itself (for example, mintty
+or VTE) reorders each screen row as a whole, which can move text between
+views that are shown side by side. While Tig has the screen, it switches such
+a terminal to explicit mode (ECMA-48 BDSM reset, `CSI 8 l`). The terminal then
+shows right-to-left text, such as Hebrew or Arabic, from left to right in the
+order in which the text is stored, so that the text reads backwards.
+
+Tig switches the terminal to implicit mode (`CSI 8 h`) whenever it gives the
+screen back: on exit, before it runs an external command in the foreground,
+and when it is suspended. Tig does this even if the terminal was in explicit
+mode before Tig started.
+
 [[env-variables]]
 Environment Variables
 ---------------------
