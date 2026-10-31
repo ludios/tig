@@ -30,8 +30,9 @@ enum align {
 bool draw_text(struct view *view, enum line_type type, const char *string);
 
 /* Add the first `length` bytes of `text` (all of it if -1) to `win`, as
- * string_expand() draws them, with each tab as one space.  For text drawn
- * outside of views, e.g. in the title and status windows. */
+ * string_expand() draws them, with each tab as one space, and in the
+ * locale's character set.  For text drawn outside of views, e.g. in the
+ * title and status windows. */
 void waddnstr_expanded(WINDOW *win, const char *text, int length);
 bool PRINTF_LIKE(3, 4) draw_formatted(struct view *view, enum line_type type, const char *format, ...);
 bool draw_graphic(struct view *view, enum line_type type, const chtype graphic[], size_t size, bool separator);

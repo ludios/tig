@@ -185,9 +185,13 @@ waddnstr_expanded(WINDOW *win, const char *text, int length)
 
 	while (length > 0 && *text) {
 		size_t pos = string_expand(expanded, sizeof(expanded), text, length, 1, 0);
+		const char *drawn = expanded;
 
 		assert(pos > 0);
-		waddstr(win, expanded);
+		if (opt_iconv_out != ICONV_NONE) {
+			drawn = encoding_iconv(opt_iconv_out, expanded, strlen(expanded));
+		}
+		waddstr(win, drawn);
 		text += pos;
 		length -= pos;
 	}
