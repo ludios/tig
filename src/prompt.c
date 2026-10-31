@@ -449,7 +449,7 @@ readline_display_matches(char **matches, int num_matches, int max_length)
 
 	/* matches[0] is the incomplete word */
 	for (i = 1; i < num_matches + 1; ++i) {
-		waddstr(status_win, matches[i]);
+		waddnstr_expanded(status_win, matches[i], -1);
 		waddch(status_win, ' ');
 	}
 

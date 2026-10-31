@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -703,7 +705,8 @@ update_view_title(struct view *view)
 	mvwprintw(window, 0, 0, "[%s]", view->name);
 
 	if (*view->ref) {
-		wprintw(window, " %s", view->ref);
+		waddch(window, ' ');
+		waddnstr_expanded(window, view->ref, -1);
 	}
 
 	if (!view_has_flags(view, VIEW_CUSTOM_STATUS) && view->line != NULL) {

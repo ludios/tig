@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -16,6 +18,7 @@
 #include "tig/repo.h"
 #include "tig/prompt.h"
 #include "tig/display.h"
+#include "tig/draw.h"
 #include "tig/view.h"
 #include "tig/ui.h"
 
@@ -124,16 +127,22 @@ file_finder_draw_line(struct file_finder *finder, struct file_finder_line *line)
 	const char *pos;
 
 	for (; *text && search && *search && (pos = strstr(text, *search)); search++) {
-		if (text < pos)
-			waddnstr(finder->win, text, pos - text);
+		/* Highlight the whole matched key (a character), not just its
+		 * first byte. */
+		size_t match = strlen(*search);
+
+		if (text < pos) {
+			waddnstr_expanded(finder->win, text, pos - text);
+		}
 		wattron(finder->win, A_STANDOUT);
-		waddnstr(finder->win, pos, 1);
+		waddnstr_expanded(finder->win, pos, match);
 		wattroff(finder->win, A_STANDOUT);
-		text = pos + 1;
+		text = pos + match;
 	}
 
-	if (*text)
-		waddstr(finder->win, text);
+	if (*text) {
+		waddnstr_expanded(finder->win, text, -1);
+	}
 }
 
 static void

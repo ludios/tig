@@ -174,6 +174,25 @@ draw_text(struct view *view, enum line_type type, const char *string)
 	return draw_text_expanded(view, type, string, -1, VIEW_MAX_LEN(view), false, view->col);
 }
 
+void
+waddnstr_expanded(WINDOW *win, const char *text, int length)
+{
+	char expanded[SIZEOF_STR];
+
+	if (length == -1) {
+		length = strlen(text);
+	}
+
+	while (length > 0 && *text) {
+		size_t pos = string_expand(expanded, sizeof(expanded), text, length, 1, 0);
+
+		assert(pos > 0);
+		waddstr(win, expanded);
+		text += pos;
+		length -= pos;
+	}
+}
+
 static bool
 draw_text_overflow(struct view *view, const char *text, enum line_type type,
 		   int overflow_length, int offset)

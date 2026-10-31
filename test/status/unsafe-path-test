@@ -1,0 +1,56 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+#
+# A path holding a bidi control or a control character is drawn like other
+# text in view titles too, so that neither reaches the terminal.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+export COLUMNS=60
+
+steps '
+	:set vertical-split = no
+	:view-status
+	:7
+	:save-display status.screen
+	:enter
+	:save-display stage.screen
+'
+
+git_init
+
+test_setup_work_dir()
+{
+	touch tracked
+	git add tracked
+	git_commit -m "Initial"
+	printf 'text\n' > "$(printf 'a\342\200\256b\033c')"
+}
+
+test_tig
+
+assert_equals 'status.screen' strict <<EOF
+On branch master
+Changes to be committed:
+  (no files)
+Changes not staged for commit:
+  (no files)
+Untracked files:
+? a�b c
+ 
+[status] Press u to stage 'a�b c' for addition          100%
+EOF
+
+assert_equals 'stage.screen' strict <<EOF
+  (no files)
+Untracked files:
+? a�b c
+[status] Press u to stage 'a�b c' for addition          100%
+text
+ 
+ 
+ 
+[stage] Untracked file a�b c - line 1 of 1              100%
+EOF

@@ -614,7 +614,10 @@ update_status_window(struct view *view, const char *context, const char *msg, va
 	if (!status_empty || *msg) {
 		wmove(status_win, 0, 0);
 		if (*msg) {
-			vw_printw(status_win, msg, args);
+			char text[SIZEOF_STR];
+
+			vsnprintf(text, sizeof(text), msg, args);
+			waddnstr_expanded(status_win, text, -1);
 			status_empty = false;
 		} else {
 			status_empty = true;
