@@ -65,6 +65,12 @@ If you can't fetch something, use google-chrome or curl_chrome150 on this machin
 
 Files with any LLM-authored code (not counting mechanistic sed-like changes) begin with a comment like `// Model-output: <model name>`, one per model that contributed (e.g. "Claude Mythos 5.1", "ChatGPT 6 Astra"); keep existing lines.
 
+# English
+
+All new English must be maximally unambiguous, even if it becomes slightly longer! Think as a reader, and read the text every possible way. For example, never write "cannot change a hash once set" instead of "cannot change a hash (if already set)".
+
+You can ask Astra via codex to rewrite stuff.
+
 # Code conventions
 
 For JavaScript, TypeScript, and Svelte-related code:
@@ -225,7 +231,7 @@ After each commit made, `git clone --shared` the repo into some /tmp/ folder and
 	claude -p --model claude-mythos-5-1 --effort xhigh "/code-review xhigh commit <sha>"
 	claude -p --model claude-opus-5-5 --effort xhigh "/code-review xhigh commit <sha>"
 
-Ensure that the output of each review gets written or copied to ~/.ai-code-reviews/{model}/{commit} or /{commit-range}, then delete the clone.
+Ensure that the output of each review gets written or copied to ~/.ai-code-reviews/{model}/{full commit hash} or /{full commit hash-final full commit hash}, then delete the clone.
 
 Notes:
 
