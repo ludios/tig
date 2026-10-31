@@ -252,12 +252,13 @@ be appended:
 Special Characters
 ~~~~~~~~~~~~~~~~~~
 
-Tig draws a tab as spaces up to the next tab stop, and draws each other
-control character, line separator and paragraph separator as a space. Tig
-draws each bidi formatting character (such as U+202E RIGHT-TO-LEFT OVERRIDE)
-as U+FFFD REPLACEMENT CHARACTER. Tig decodes text that is not valid UTF-8 in
-the character set of the locale (for example, ISO-8859-1), and draws each byte
-that the locale's character set cannot decode either as U+FFFD.
+In views, Tig draws a tab as spaces up to the next tab stop; in title windows,
+the status window and the file finder, Tig draws a tab as one space. Tig draws
+each other control character, line separator and paragraph separator as a
+space. Tig draws each bidi formatting character (such as U+202E RIGHT-TO-LEFT
+OVERRIDE) as U+FFFD REPLACEMENT CHARACTER. Tig decodes text that is not valid
+UTF-8 in the character set of the locale (for example, ISO-8859-1), and draws
+each byte that the locale's character set cannot decode either as U+FFFD.
 
 A terminal that lays out bidirectional text by itself (for example, mintty
 or VTE) reorders each screen row as a whole, which can move text between
@@ -268,8 +269,9 @@ order in which the text is stored, so that the text reads backwards.
 
 Tig switches the terminal to implicit mode (`CSI 8 h`) whenever it gives the
 screen back: on exit, before it runs an external command in the foreground,
-and when it is suspended. Tig does this even if the terminal was in explicit
-mode before Tig started.
+and when it is suspended. Tig does not find out which mode the terminal was in
+before Tig started, so a terminal that was in explicit mode before can be left
+in implicit mode.
 
 [[env-variables]]
 Environment Variables
