@@ -95,9 +95,16 @@ void string_copy_rev_from_commit_line(char *dst, const char *src);
 #define string_concat_path(dst, path1, path2) \
 	string_format(dst, !*path1 || path1[strlen(path1) - 1] == '/' ? "%s%s" : "%s/%s", path1, path2)
 
+/* Whether string_expand() copies each invalid UTF-8 byte as it is, rather
+ * than replacing it with U+FFFD.  Set this when the terminal takes a
+ * character set other than UTF-8: such bytes are most likely in that
+ * character set. */
+extern bool string_expand_keeps_invalid_utf8;
+
 /* Expand tabs to spaces, blank out other whitespace and control
- * characters, and replace each invalid UTF-8 byte and bidi formatting
- * character with U+FFFD.  `col` is the display column at which `src`
+ * characters, and replace each invalid UTF-8 byte (unless
+ * string_expand_keeps_invalid_utf8) and bidi formatting character with
+ * U+FFFD.  `col` is the display column at which `src`
  * starts, so that text expanded in pieces gets the same tab stops as when
  * expanded whole.
  * Returns the number of bytes consumed from `src`: short of `srclen` when

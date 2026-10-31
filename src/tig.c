@@ -1,3 +1,5 @@
+/* Model-output: Claude Opus 5.5 */
+
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
@@ -863,6 +865,7 @@ main(int argc, const char *argv[])
 			opt_iconv_out = iconv_open(codeset, ENCODING_UTF8);
 		if (opt_iconv_out == ICONV_NONE)
 			die("Failed to initialize character set conversion");
+		string_expand_keeps_invalid_utf8 = true;
 	}
 
 	die_if_failed(load_refs(false), "Failed to load refs.");

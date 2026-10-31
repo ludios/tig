@@ -92,6 +92,8 @@ string_copy_rev_from_commit_line(char *dst, const char *src)
 
 #define UNICODE_REPLACEMENT_CHARACTER 0xfffd
 
+bool string_expand_keeps_invalid_utf8 = false;
+
 /* Whether `c` is a bidi formatting character, which a terminal doing
  * bidi layout would act on instead of showing. */
 static bool
@@ -169,6 +171,12 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 			memset(dst + size, ' ', expanded);
 			size += expanded;
 			col += expanded;
+
+		} else if (string_expand_keeps_invalid_utf8 && bytes == 1 &&
+			   c == UNICODE_REPLACEMENT_CHARACTER) {
+			/* Only an invalid byte decodes to U+FFFD from one byte. */
+			dst[size++] = src[pos];
+			col += width;
 
 		} else {
 			/* Tab stops count display columns, not bytes. */
