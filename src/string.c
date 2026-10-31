@@ -107,14 +107,20 @@ unicode_is_bidi_control(utf8proc_int32_t c)
  * an invalid byte or a bidi formatting character becomes U+FFFD.  Left to
  * ncurses, these would take a width other than the one counted here, or
  * reach the terminal as something it acts on.  Stores the character in
- * `unicode` and returns the number of bytes it takes up in `string`. */
+ * `unicode` and the number of columns it takes in `width` (0 for a tab,
+ * which takes up to the next tab stop), and returns the number of bytes it
+ * takes up in `string`. */
 static size_t
-utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode)
+utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode, int *width)
 {
 	const unsigned char c = string[0];
+	const utf8proc_property_t *property;
 	utf8proc_ssize_t bytes;
 
 	assert(length > 0);
+	/* Printable ASCII takes one column, as do the space and U+FFFD drawn
+	 * in place of other characters. */
+	*width = 1;
 	if (c >= 0x20 && c < 0x7f) {
 		*unicode = c;
 		return 1;
@@ -126,15 +132,14 @@ utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode)
 		return 1;
 	}
 
+	property = utf8proc_get_property(*unicode);
 	if (unicode_is_bidi_control(*unicode)) {
 		*unicode = UNICODE_REPLACEMENT_CHARACTER;
-	} else if (*unicode != '\t' && *unicode != '\0') {
-		utf8proc_category_t category = utf8proc_category(*unicode);
-
-		if (category == UTF8PROC_CATEGORY_CC || category == UTF8PROC_CATEGORY_ZL ||
-		    category == UTF8PROC_CATEGORY_ZP) {
-			*unicode = ' ';
-		}
+	} else if ((property->category == UTF8PROC_CATEGORY_CC && *unicode != '\t' && *unicode != '\0') ||
+		   property->category == UTF8PROC_CATEGORY_ZL || property->category == UTF8PROC_CATEGORY_ZP) {
+		*unicode = ' ';
+	} else {
+		*width = property->charwidth;
 	}
 	return bytes;
 }
@@ -147,7 +152,8 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 
 	while (pos < end && src[pos] && size < dstlen - 1) {
 		utf8proc_int32_t c;
-		size_t bytes = utf8_decode_drawn(src + pos, end - pos, &c);
+		int width;
+		size_t bytes = utf8_decode_drawn(src + pos, end - pos, &c, &width);
 
 		if (c == '\t') {
 			size_t expanded = tabsize - (col % tabsize);
@@ -174,7 +180,7 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 			}
 			memcpy(dst + size, encoded, encoded_bytes);
 			size += encoded_bytes;
-			col += utf8proc_charwidth(c);
+			col += width;
 		}
 		pos += bytes;
 	}
@@ -320,9 +326,12 @@ utf8_length(const char **start, int max_chars, size_t skip, int *width, size_t m
 		 * place, so that, e.g., each invalid byte (can be
 		 * ISO-8859-1, Windows-1252, ...) takes one column. */
 		utf8proc_int32_t unicode;
-		size_t bytes = utf8_decode_drawn(string, end - string, &unicode);
-		int ucwidth = unicode == '\t' ? tab_size - (*width % tab_size)
-					      : utf8proc_charwidth(unicode);
+		int ucwidth;
+		size_t bytes = utf8_decode_drawn(string, end - string, &unicode, &ucwidth);
+
+		if (unicode == '\t') {
+			ucwidth = tab_size - (*width % tab_size);
+		}
 
 		if (skip > 0) {
 			skip -= ucwidth <= skip ? ucwidth : skip;
