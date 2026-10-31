@@ -1,0 +1,37 @@
+#!/bin/sh
+# Model-output: Claude Opus 5.5
+#
+# In the C locale, bytes that are not ASCII are drawn as '?', each taking
+# the one column it is counted as, so the text after them stays in place.
+
+. libtest.sh
+. libgit.sh
+
+export LANG=C
+export LC_ALL=C
+export COLUMNS=40
+export LINES=8
+
+steps '
+	:save-display c-locale.screen
+'
+
+printf '%s\n' \
+	'diff --git a/f b/f' \
+	'--- a/f' \
+	'+++ b/f' \
+	'@@ -1 +1 @@' \
+	"$(printf -- '-L1:caf\351|C1:\206\233|end')" \
+	"$(printf -- '+U8:caf\303\251|RLO:\342\200\256|end')" > c-locale.diff
+
+test_tig < c-locale.diff
+
+assert_equals 'c-locale.screen' strict <<EOF
+diff --git a/f b/f
+--- a/f
++++ b/f
+@@ -1 +1 @@
+-L1:caf?|C1:??|end
++U8:caf?|RLO:?|end
+[pager] - line 1 of 6               100%
+EOF

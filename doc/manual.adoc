@@ -255,9 +255,9 @@ Special Characters
 Tig draws a tab as spaces up to the next tab stop, and draws each other
 control character, line separator and paragraph separator as a space. Tig
 draws each bidi formatting character (such as U+202E RIGHT-TO-LEFT OVERRIDE)
-as U+FFFD REPLACEMENT CHARACTER. In a UTF-8 locale, Tig also draws each byte
-that is not part of valid UTF-8 as U+FFFD; in other locales, Tig sends such
-bytes to the terminal unchanged.
+as U+FFFD REPLACEMENT CHARACTER. Tig decodes text that is not valid UTF-8 in
+the character set of the locale (for example, ISO-8859-1), and draws each byte
+that the locale's character set cannot decode either as U+FFFD.
 
 A terminal that lays out bidirectional text by itself (for example, mintty
 or VTE) reorders each screen row as a whole, which can move text between

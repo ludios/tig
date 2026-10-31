@@ -92,8 +92,6 @@ string_copy_rev_from_commit_line(char *dst, const char *src)
 
 #define UNICODE_REPLACEMENT_CHARACTER 0xfffd
 
-bool string_expand_keeps_invalid_utf8 = false;
-
 /* Whether `c` is a bidi formatting character, which a terminal doing
  * bidi layout would act on instead of showing. */
 static bool
@@ -104,9 +102,39 @@ unicode_is_bidi_control(utf8proc_int32_t c)
 }
 
 /* Decode the character at the start of `string`, which has `length` > 0
+ * bytes left and is not valid UTF-8, in the locale's character set: in a
+ * locale other than UTF-8 (e.g. ISO-8859-1), text that is not UTF-8 is most
+ * likely in that character set.  Stores the character in `unicode` and
+ * returns the number of bytes it takes up in `string`, or 0 if the locale's
+ * character set cannot decode it either. */
+static size_t
+locale_decode(const char *string, size_t length, utf8proc_int32_t *unicode)
+{
+#ifdef __STDC_ISO_10646__
+	/* wchar_t holds Unicode code points in every locale. */
+	mbstate_t state;
+	wchar_t wc;
+	size_t bytes;
+
+	memset(&state, 0, sizeof(state));
+	bytes = mbrtowc(&wc, string, length, &state);
+	/* Also covers (size_t) -1 for an invalid sequence and (size_t) -2
+	 * for one cut short. */
+	if (bytes == 0 || bytes > length || !utf8proc_codepoint_valid(wc)) {
+		return 0;
+	}
+	*unicode = wc;
+	return bytes;
+#else
+	return 0;
+#endif
+}
+
+/* Decode the character at the start of `string`, which has `length` > 0
  * bytes left, into the character drawn for it: a control character other
  * than tab and NUL, or a line or paragraph separator, becomes a space, and
- * an invalid byte or a bidi formatting character becomes U+FFFD.  Left to
+ * a bidi formatting character, or a byte that neither UTF-8 nor the
+ * locale's character set decodes, becomes U+FFFD.  Left to
  * ncurses, these would take a width other than the one counted here, or
  * reach the terminal as something it acts on.  Stores the character in
  * `unicode` and the number of columns it takes in `width` (0 for a tab,
@@ -130,6 +158,9 @@ utf8_decode_drawn(const char *string, size_t length, utf8proc_int32_t *unicode, 
 
 	bytes = utf8proc_iterate((const utf8proc_uint8_t *) string, length, unicode);
 	if (bytes < 1 || *unicode < 0) {
+		bytes = locale_decode(string, length, unicode);
+	}
+	if (bytes < 1) {
 		*unicode = UNICODE_REPLACEMENT_CHARACTER;
 		return 1;
 	}
@@ -171,12 +202,6 @@ string_expand(char *dst, size_t dstlen, const char *src, int srclen, int tabsize
 			memset(dst + size, ' ', expanded);
 			size += expanded;
 			col += expanded;
-
-		} else if (string_expand_keeps_invalid_utf8 && bytes == 1 &&
-			   c == UNICODE_REPLACEMENT_CHARACTER) {
-			/* Only an invalid byte decodes to U+FFFD from one byte. */
-			dst[size++] = src[pos];
-			col += width;
 
 		} else {
 			/* Tab stops count display columns, not bytes. */
