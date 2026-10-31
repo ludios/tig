@@ -504,15 +504,17 @@ read_prompt(const char *prompt)
 
 	curs_set(1);
 	prompt_saved_sigint = signal(SIGINT, sigint_absorb_handler);
-	if (prompt_saved_sigint == SIG_ERR)
+	if (prompt_saved_sigint == SIG_ERR) {
 		die("Failed to setup sigint handler");
+	}
 	assert(prompt_saved_sigint != sigint_absorb_handler);
 	noraw();
 	cbreak();
 	line = readline(prompt);
 	raw();
-	if (signal(SIGINT, prompt_saved_sigint) == SIG_ERR)
+	if (signal(SIGINT, prompt_saved_sigint) == SIG_ERR) {
 		die("Failed to remove sigint handler");
+	}
 	curs_set(0);
 
 	/* readline can leave the virtual cursor out-of-place */
