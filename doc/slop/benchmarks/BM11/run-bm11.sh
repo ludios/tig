@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 # BM11 runner: does mimalloc, in tig and/or in the git it spawns, speed tig up
 # on nixpkgs?  Builds tig from HEAD with and without mimalloc, two git shims
 # (with/without LD_PRELOAD=libmimalloc.so), then times every {tig, git}

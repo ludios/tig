@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM5 runner: CPU-profile the SHIPPED daemon over a replay (giant x2 to get
 # both cold-cache and warm-cache samples, plus medium and synth-eof).
 # --cpu-prof flushes only on clean exit, so the daemon runs under a wrapper

@@ -1,7 +1,5 @@
 #!/bin/sh
 #
-# Model-output: Claude Opus 5.5
-#
 # Graph test: time per row grows linearly with the graph's width
 #
 # 20000 commits, up to ~2500 lanes wide.  On a fast 2026 machine test-graph

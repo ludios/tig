@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * Git plumbing for the daemon.  Each operation takes the client's working
  * directory, resolved once (and cached) to canonical repository

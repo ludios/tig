@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * Tokenization and SGR emission.  Wraps shiki (vscode-textmate +
  * vscode-oniguruma, the engine lineage VS Code uses) with One Monokai and

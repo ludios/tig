@@ -1,6 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-
 /**
  * A byte-budgeted LRU map.  An entry-count bound lets a few multi-megabyte
  * values dominate memory; a byte budget bounds what matters.  Sizes are

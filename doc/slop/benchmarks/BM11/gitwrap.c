@@ -1,4 +1,3 @@
-/* Model-output: Claude Opus 5.5 */
 /* git shim for benchmarks: optionally preload an allocator, then exec the real git. */
 #include <stdio.h>
 #include <stdlib.h>

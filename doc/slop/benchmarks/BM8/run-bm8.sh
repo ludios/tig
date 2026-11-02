@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM8 runner: perf call-graph profiles of tig itself (via the BM7 pty
 # harness) for the giant commit (filter on and off) and the runs-per-line
 # synthetic (filter on), with a warm daemon and primed caches so the

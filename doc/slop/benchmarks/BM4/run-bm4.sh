@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM4 runner: replay the corpus through the INSTRUMENTED daemon (see
 # instrumentation.patch; built by copying tools/tig-syntax-filter and
 # applying the patch) and collect per-section stage timings ("SECTION"

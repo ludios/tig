@@ -1,7 +1,5 @@
 #!/bin/sh
 #
-# Model-output: Claude Opus 5.5
-#
 # Graph test: a range of a wide history, with its boundary commits
 
 . libtest.sh

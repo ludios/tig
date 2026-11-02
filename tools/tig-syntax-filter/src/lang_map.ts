@@ -1,6 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-
 /**
  * Mapping from file names to shiki (VS Code) language identifiers.
  * Only languages in shiki's bundled grammar set are returned; anything

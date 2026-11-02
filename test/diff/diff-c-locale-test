@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 #
 # In the C locale, bytes that are not ASCII are drawn as '?', each taking
 # the one column it is counted as, so the text after them stays in place.

@@ -1,4 +1,3 @@
-// Model-output: Claude Fable 5
 // BM3: speak the client side of the tig-syntax protocol and timestamp every
 // frame the daemon returns.
 //

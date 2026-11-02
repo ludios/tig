@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # A2/A9 acceptance runner.  Prints the two metrics for the CURRENT daemon
 # code; run before and after a change to compare.
 #   concurrent: latency of a warm small request issued 120 ms into another

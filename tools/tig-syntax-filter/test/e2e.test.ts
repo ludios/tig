@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * End-to-end tests of the C client: against the real daemon over a unix
  * socket, fed `git show` output from a scratch repository (highlighting,

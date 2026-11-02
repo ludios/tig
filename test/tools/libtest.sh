@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 #
 # Setup test environment.
 #

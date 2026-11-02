@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Fable 5
 # BM7: run tig under a pty and time spawn -> exit.
 #
 # tig runs with TIG_SCRIPT pointing at a script whose only command is :quit.

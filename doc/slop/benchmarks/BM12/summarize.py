@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Opus 5.5
 """Summarize run-bm12.py or daemon-start.py CSVs: per variant, the median
 of each metric and the median per-round ratio against the baseline
 variant (`base` or `plain`; paired within a round of one file, so a round

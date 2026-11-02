@@ -1,8 +1,5 @@
 # Benchmark data for doc/slop/performance-ideas.md
 
-Model-output: Claude Fable 5
-Model-output: Claude Opus 5.5
-
 Raw data collected 2026-08-10; machine and caveats in `environment.txt`.
 Benchmark definitions (what gates what) live in `../performance-ideas.md`.
 This directory is data + the scripts that produced it; the analysis lives

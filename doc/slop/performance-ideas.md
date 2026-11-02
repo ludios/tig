@@ -1,7 +1,5 @@
 # Performance ideas for diff syntax highlighting
 
-Model-output: Claude Fable 5
-
 Status: 2026-08-10 — ideas collected, all gating benchmarks (BM1–BM10)
 run (raw data in `benchmarks/`, findings in "Measured results" below, the
 implementation order at the end is data-ranked), and **A0, A1, A6, and A8

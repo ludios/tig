@@ -1,7 +1,5 @@
 # Can porffor AOT-compile the syntax-highlighting daemon?
 
-Model-output: Claude Opus 5.5
-
 Status: 2026-09-29. We stopped here because
 [porffor](https://github.com/CanadaHonk/porffor) isn't ready for this code.
 The daemon can't be compiled at all. The part that does compile (shiki,

@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * Canonical repository identities (subdirectories and linked worktrees
  * share the object store), textconv lookups from the worktree top level,

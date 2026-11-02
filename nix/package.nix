@@ -1,5 +1,3 @@
-# Model-output: Claude Opus 5.5
-#
 # tig with the syntax-highlighting filter, built from this checkout.  Adapted
 # from pkgs/by-name/ti/tig/package.nix in nixpkgs; flake.nix calls it.
 {

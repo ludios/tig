@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * The tig-syntax highlight daemon: a unix-socket server that accepts a
  * unified diff stream plus repository context and returns the same diff

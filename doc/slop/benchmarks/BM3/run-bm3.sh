@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM3 runner: per-frame latency profile against the SHIPPED daemon.
 # For each corpus commit: dump the diff, then profile two passes on one
 # fresh daemon — "first" (cold caches) and "revisit" (warm caches).

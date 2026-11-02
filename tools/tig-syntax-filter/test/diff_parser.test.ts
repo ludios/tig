@@ -1,6 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { SectionSplitter, parse_file_section, unquote_git_path, type diff_section } from "../src/diff_parser.ts";

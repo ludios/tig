@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Opus 5.5
 """Summarize bench.py CSVs: per {tig, git} combo median/mean/sd/min and the
 median's change vs glibc/glibc; for each switch-<mode>-0/-300 pair, also the
 per-switch cost (difference of medians / 300).  Usage: summarize.py <csv>..."""

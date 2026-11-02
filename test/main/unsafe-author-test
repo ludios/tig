@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 #
 # Fields such as the author are drawn like other text, so a bidi control,
 # a control character or an invalid byte in one takes the column it is

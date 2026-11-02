@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Opus 5.5
 """BM12 cold start: the real daemon with and without node's compile cache.
 
 Usage: daemon-start.py <out.csv> <rounds> <repo> <sha>

@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM7 runner: tig end-to-end (pty) with the syntax filter off vs on,
 # per corpus commit.  `tig show <sha>` + TIG_SCRIPT=:quit measures load
 # to completion.  Warm daemon throughout (daemon cold start is BM6's

@@ -1,7 +1,5 @@
 #!/bin/sh
 #
-# Model-output: Claude Opus 5.5
-#
 # Generate a synthetic history for test-graph, shaped like a busy
 # pull-request-driven project such as nixpkgs: pull requests fork from older
 # master commits and merge back much later, so many lanes stay open at once.

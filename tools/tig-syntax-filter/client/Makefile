@@ -1,5 +1,3 @@
-# Model-output: Claude Fable 5
-# Model-output: Claude Opus 5.5
 CFLAGS ?= -Wall -Wextra -O2
 
 # Everything that decides how the daemon behaves.  Its hash is part of the

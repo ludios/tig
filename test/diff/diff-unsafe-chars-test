@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 #
 # Bytes that ncurses would draw in some other width than tig counts, or
 # that a terminal would act on, are drawn as one column each: controls

@@ -1,5 +1,3 @@
-// Model-output: Claude Opus 5.5
-
 /**
  * Bytes that editors strip before tokenizing — a UTF-8 byte-order mark
  * (the norm for C# written in Visual Studio) and CRLF carriage returns —

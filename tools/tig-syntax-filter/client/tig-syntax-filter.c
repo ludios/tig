@@ -1,7 +1,3 @@
-/* Model-output: Claude Fable 5 */
-/* Model-output: Claude Opus 5.5 */
-/* Model-output: ChatGPT 6 Astra */
-
 /* For struct ucred (SO_PEERCRED). */
 #define _GNU_SOURCE
 

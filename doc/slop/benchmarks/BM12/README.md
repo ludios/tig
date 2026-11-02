@@ -1,7 +1,5 @@
 # BM12: node/V8 flags for the daemon (2026-09-29)
 
-Model-output: Claude Opus 5.5
-
 Question: can any node or V8 command-line flag make the syntax daemon
 faster?  Answer: not tokenization; V8's defaults are the best of 14 flag
 sets on two CPUs.  The one runtime lever that pays is node's compile cache

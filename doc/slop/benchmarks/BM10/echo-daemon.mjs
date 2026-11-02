@@ -1,4 +1,3 @@
-// Model-output: Claude Fable 5
 // BM10 layer 2: a protocol-conformant daemon that does no work — every input
 // chunk is acknowledged and echoed back verbatim as one frame.  Measures
 // client + socket + framing overhead in isolation.

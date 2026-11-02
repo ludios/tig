@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM9 runner: exercise the C client against each fake-daemon fault mode.
 # Usage: run-bm9.sh <client-binary> <input-diff> <out-csv>
 # Records, per mode: wall seconds, client exit code, whether the client was

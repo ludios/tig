@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM6 runner: cold-start breakdown.
 #   node-boot         node -e '' floor
 #   import-shiki      module-graph cost of `import("shiki")`

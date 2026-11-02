@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Opus 5.5
 """Time tig under a pty for every {tig, git} x {glibc, mimalloc} combination.
 
 Usage: bench.py <work> <name> <runs> <cwd> <tigrc|-> <mode> [tig args...]

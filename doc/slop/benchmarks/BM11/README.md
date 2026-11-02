@@ -1,7 +1,5 @@
 # BM11: mimalloc for tig and for the git it spawns
 
-Model-output: Claude Opus 5.5
-
 Question: does linking tig against mimalloc, and/or preloading mimalloc into
 the git commands tig runs, make tig faster on a huge repo?  Collected
 2026-09-28 on xclank (32 cores), `~/cloned/nixpkgs` at d095bb9fd847

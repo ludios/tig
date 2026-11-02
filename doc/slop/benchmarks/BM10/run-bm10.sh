@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM10 runner: layer decomposition over selected corpus commits.
 #   L1 git-show      git show alone
 #   L2 echo          client + protocol-conformant echo daemon (no work)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Model-output: Claude Opus 5.5
 """BM12 runner: tokenize-bench.ts under each node flag set, interleaved.
 
 Usage: run-bm12.py <out.csv> <rounds> <passes> <variant>...

@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # Kill the process(es) listening on unix socket path $1, and remove the
 # socket file.  Scoped: never touches daemons on other sockets (e.g. an
 # interactive tig session's daemon on the default socket).

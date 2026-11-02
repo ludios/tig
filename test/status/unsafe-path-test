@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Opus 5.5
 #
 # A path holding a bidi control or a control character is drawn like other
 # text in view titles too, so that neither reaches the terminal.

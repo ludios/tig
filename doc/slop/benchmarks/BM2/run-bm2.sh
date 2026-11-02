@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM2 runner: end-to-end `git show | tig-syntax-filter` latency, cold vs warm,
 # plus a two-pass sequence run (warm daemon: first visit, then cache-hit).
 # Usage: run-bm2.sh <tig-repo> <synth-repo> <out-dir>

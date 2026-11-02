@@ -1,5 +1,3 @@
-/* Model-output: Claude Fable 5 */
-
 /* Copyright (c) 2006-2026 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or

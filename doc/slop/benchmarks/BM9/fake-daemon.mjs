@@ -1,4 +1,3 @@
-// Model-output: Claude Fable 5
 // BM9: fake daemons with injectable protocol faults, for exercising the C
 // client's stall/fallback behavior.
 //

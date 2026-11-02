@@ -1,5 +1,4 @@
 #!/bin/sh
-# Model-output: Claude Fable 5
 # BM1: generate the deterministic synthetic benchmark repo.
 # Usage: gen-synthetic.sh <target-dir>   (target must not exist)
 # Commits are deterministic (fixed author/committer/dates), so SHAs recorded

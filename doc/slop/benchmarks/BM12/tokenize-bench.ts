@@ -1,4 +1,3 @@
-// Model-output: Claude Opus 5.5
 // BM12: the daemon's tokenize-and-emit path (highlight.ts, unmodified) in a
 // fresh process, timed per phase so node/V8 flags can be compared on cold
 // start, first use, and steady state.

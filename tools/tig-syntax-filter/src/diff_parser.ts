@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * Byte-exact parsing of `git diff`/`git show` output into per-file sections.
  * All splitting works on Buffers so that untouched parts of the stream can

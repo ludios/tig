@@ -1,4 +1,3 @@
-// Model-output: Claude Fable 5
 // A9 acceptance metric: how much input a never-reading client can push into
 // the daemon, and how large the daemon grows doing it.  Without
 // backpressure the daemon accepts and processes the whole stream, queueing

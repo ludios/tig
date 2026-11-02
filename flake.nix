@@ -1,5 +1,3 @@
-# Model-output: Claude Opus 5.5
-#
 # tig with syntax-highlighted diffs, for Nix.
 #
 #   nix run github:ludios/tig             # try it

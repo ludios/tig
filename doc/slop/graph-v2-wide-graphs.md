@@ -1,7 +1,5 @@
 # graph-v2 on very wide histories (nixpkgs): O(W²) work per row
 
-Model-output: Claude Opus 5.5
-
 **Fixed 2026-09-29** as proposed below; see [Result](#result).  The rest is
 the original handoff.
 

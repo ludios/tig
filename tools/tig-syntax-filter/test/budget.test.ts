@@ -1,7 +1,3 @@
-// Model-output: Claude Fable 5
-// Model-output: Claude Opus 5.5
-// Model-output: ChatGPT 6 Astra
-
 /**
  * Chunked tokenization equals one-shot tokenization, budget exhaustion
  * falls back (with prefix caching and depth-scoped fail-fast), and

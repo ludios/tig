@@ -1,4 +1,3 @@
-// Model-output: Claude Fable 5
 // A2 acceptance metric: latency of a small cache-warm request (client B)
 // issued while another connection (client A) is mid-tokenization.
 // Without event-loop yields, B waits for A's synchronous chunk loop (up to

@@ -1,5 +1,3 @@
-// Model-output: Claude Opus 5.5
-
 /**
  * Entry point of the tig-syntax highlight daemon (daemon.ts).
  *
