@@ -91,13 +91,15 @@ let theme_name = "one-monokai";
 let theme_fg = "#bbbbbb";
 let theme_bg = "#282c34";
 
-/** A cached tokenization prefix: SGR-annotated lines (without newlines)
- * and the grammar state after the last one, from which a deeper request
- * resumes.  Retries after a missed budget resume too, so a slow document
- * can highlight eventually. */
+/** A cached tokenization prefix: SGR-annotated lines (without newlines),
+ * the grammar state after the last one, from which a deeper request
+ * resumes, and the grammar that produced both (see current_grammar()).
+ * Retries after a missed budget resume too, so a slow document can
+ * highlight eventually. */
 interface cached_prefix {
 	lines: string[],
 	state: unknown,
+	grammar: unknown,
 }
 
 /** Byte-budgeted LRU: content identity -> cached prefix.  Sized by
@@ -110,6 +112,8 @@ const line_cache = new ByteLRU<cached_prefix>(config.line_cache_mb * 1048576,
 export const stats = {
 	/** Source lines run through the grammar (cache hits excluded). */
 	tokenized_lines: 0,
+	/** Tokenizations that started over because their grammar was rebuilt. */
+	grammar_restarts: 0,
 };
 
 /** In-flight tokenizations by cache key.  Tokenization yields to the
@@ -196,6 +200,25 @@ export async function ensure_lang(lang: string): Promise<boolean> {
 	})();
 	loading_langs.set(lang, attempt);
 	return attempt;
+}
+
+/**
+ * The grammar that `hl` tokenizes `lang` with now.  Loading another
+ * language can make shiki replace it with a rebuilt grammar (loading
+ * python rebuilds markdown, which embeds python lazily), whose rules are
+ * numbered differently and may color differently: a grammar state from
+ * the old grammar must not resume under the new one, and lines from the
+ * old one are stale.
+ */
+function current_grammar(hl: Highlighter, lang: string): unknown {
+	return hl.getInternalContext().getLanguage(lang);
+}
+
+/** The cached prefix for `key` if `grammar` produced it; an entry from an
+ * older grammar counts as absent, and the next store replaces it. */
+function cached_prefix_for(key: string, grammar: unknown): cached_prefix | undefined {
+	const entry = line_cache.get(key);
+	return entry !== undefined && entry.grammar === grammar ? entry : undefined;
 }
 
 /**
@@ -314,7 +337,9 @@ function cr_suffix(line: string): string {
  * Tokenization runs in CHUNK_LINES batches, continued via shiki's
  * GrammarState (token-identical to one-shot tokenization), yielding to
  * the event loop between batches so other connections and timers get to
- * run.  Before each batch it checks `deadline` (a performance.now()
+ * run.  If shiki rebuilds the grammar during a yield (another request
+ * loaded a language), tokenization starts over from line 1 under the
+ * new grammar.  Before each batch it checks `deadline` (a performance.now()
  * timestamp, or null) and `cancelled`; if either trips, the lines so far
  * are cached with their grammar state for later requests to resume from,
  * and null is returned.  A missed deadline also records the requested
@@ -330,8 +355,9 @@ export async function highlight_lines(identity: string, lang: string, content: s
 					last_line: number, deadline: number | null,
 					cancelled?: () => boolean): Promise<string[] | null> {
 	A(highlighter !== null, "highlighter not initialized");
+	const hl = highlighter;
 	const key = `${identity}|${lang}`;
-	const cached = line_cache.get(key);
+	const cached = cached_prefix_for(key, current_grammar(hl, lang));
 	if (cached !== undefined && cached.lines.length >= last_line) {
 		return cached.lines;
 	}
@@ -351,7 +377,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		}
 		// They aborted or fell short; their partial or failure depth may
 		// still answer for us.
-		const after = line_cache.get(key);
+		const after = cached_prefix_for(key, current_grammar(hl, lang));
 		if (after !== undefined && after.lines.length >= last_line) {
 			return after.lines;
 		}
@@ -361,7 +387,6 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		}
 	}
 
-	const hl = highlighter;
 	const work = async (): Promise<string[] | null> => {
 	if (deadline !== null && performance.now() > deadline) {
 		return null;
@@ -381,8 +406,9 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	const started = performance.now();
 	// A shorter cached prefix is a head start: its lines are reused as
 	// they are and tokenization resumes from its grammar state.
-	const resume = line_cache.get(key);
-	const prefix = resume === undefined ? [] : resume.lines;
+	let grammar = current_grammar(hl, lang);
+	const resume = cached_prefix_for(key, grammar);
+	let prefix = resume === undefined ? [] : resume.lines;
 	A(prefix.length < last_line, "cached prefix already covers the request");
 	A(resume === undefined || resume.state !== undefined, "cached prefix lacks its grammar state");
 	const token_lines: ThemedToken[][] = [];
@@ -393,9 +419,10 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	// concurrent call for the same identity may have cached a longer
 	// prefix than the snapshot taken at entry, and it must survive.
 	const keep_if_longer = (lines: string[]): void => {
-		const current = line_cache.get(key);
+		A(grammar === current_grammar(hl, lang), "storing lines from a rebuilt grammar");
+		const current = cached_prefix_for(key, grammar);
 		if (current === undefined || lines.length > current.lines.length) {
-			line_cache.set(key, { lines, state });
+			line_cache.set(key, { lines, state, grammar });
 		}
 	};
 	const emit = (): string[] => emit_sgr_lines(token_lines).map((line, i) =>
@@ -405,9 +432,22 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			keep_if_longer(prefix.concat(emit()));
 		}
 	};
-	for (let start = prefix.length; start < needed; start += CHUNK_LINES) {
+	let start = prefix.length;
+	while (start < needed) {
 		if (start > prefix.length) {
 			await setImmediate();
+			const now = current_grammar(hl, lang);
+			if (now !== grammar) {
+				logger.info("{lang}'s grammar was rebuilt at line {done}/{needed}; starting over", () => ({
+					lang, done: start, needed,
+				}));
+				stats.grammar_restarts++;
+				grammar = now;
+				prefix = [];
+				token_lines.length = 0;
+				state = undefined;
+				start = 0;
+			}
 		}
 		if (cancelled !== undefined && cancelled()) {
 			keep_partial();
@@ -440,6 +480,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		state = get_state(chunk_tokens);
 		token_lines.push(...chunk_tokens);
 		stats.tokenized_lines += chunk_tokens.length;
+		start += CHUNK_LINES;
 	}
 	const elapsed = performance.now() - started;
 	if (elapsed > 200) {
