@@ -142,6 +142,8 @@ function apply_token_color_overrides(theme: { tokenColors?: unknown }): void {
  * Initialize the shiki highlighter with the One Monokai theme and an
  * explicitly-instantiated Oniguruma WASM engine (shiki also offers a
  * JavaScript regex engine, which would break engine-lineage fidelity).
+ * The engine gets the WASM file's bytes: shiki's "shiki/wasm" module
+ * instead decodes a base64 copy of it and gunzips that on every start.
  */
 export async function init_highlighter(): Promise<void> {
 	A(highlighter === null, "init_highlighter called twice");
@@ -152,7 +154,7 @@ export async function init_highlighter(): Promise<void> {
 	highlighter = await createHighlighter({
 		themes: [theme],
 		langs: [],
-		engine: createOnigurumaEngine(import("shiki/wasm")),
+		engine: createOnigurumaEngine(readFile(fileURLToPath(import.meta.resolve("shiki/onig.wasm")))),
 	});
 	const loaded = highlighter.getTheme(theme_name);
 	theme_fg = loaded.fg || theme_fg;
