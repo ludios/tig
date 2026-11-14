@@ -344,15 +344,14 @@ function cr_suffix(line: string): string {
  * the event loop between batches so other connections and timers get to
  * run.  If shiki rebuilds the grammar during a yield (another request
  * loaded a language), tokenization starts over under the new grammar,
- * from its longest cached prefix.  Before each batch it checks
- * `deadline` (a performance.now() timestamp, or null) and `cancelled`;
- * if either trips, the lines so far
- * are cached with their grammar state for later requests to resume from,
- * and null is returned.  A missed deadline also records the requested
- * depth for fail-fast, but only when the call tokenized for most of the
- * budget; a cancellation, or a side left with its sibling's leftovers,
- * says nothing about cost.  The deadline is wall time, so under
- * contention sections give up a little earlier.
+ * from its longest cached prefix.  Before each batch it checks `deadline`
+ * (a performance.now() timestamp, or null) and `cancelled`; if either
+ * trips, the lines so far are cached with their grammar state for later
+ * requests to resume from, and null is returned.  A missed deadline also
+ * records the requested depth for fail-fast, but only when the call
+ * tokenized for most of the budget; a cancellation, or a side left with
+ * its sibling's leftovers, says nothing about cost.  The deadline is wall
+ * time, so under contention sections give up a little earlier.
  *
  * Also returns null when the request is deeper than the configured line
  * cap or a line exceeds MAX_LINE_CHARS.
