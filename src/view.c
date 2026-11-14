@@ -927,7 +927,9 @@ static struct view *sorting_view;
 #define apply_comparator(cmp, o1, o2) \
 	(!(o1) || !(o2)) ? !!(o2) - !!(o1) : cmp(o1, o2)
 
-#define number_compare(size1, size2)	(*(size1) - *(size2))
+/* Not a subtraction: the difference of two file sizes may not fit in an
+ * int. */
+#define number_compare(num1, num2)	((*(num1) > *(num2)) - (*(num1) < *(num2)))
 
 #define mode_is_dir(mode)		((mode) && S_ISDIR(*(mode)))
 
