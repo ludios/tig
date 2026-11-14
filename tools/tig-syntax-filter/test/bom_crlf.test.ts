@@ -12,7 +12,6 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { configure } from "@logtape/logtape";
 import { SectionSplitter } from "../src/diff_parser.ts";
 import { init_highlighter, ensure_lang, highlight_lines } from "../src/highlight.ts";
 import { process_section } from "../src/process.ts";
@@ -73,13 +72,6 @@ async function commit(side: 0 | 1): Promise<void> {
 }
 
 beforeAll(async () => {
-	await configure({
-		sinks: {},
-		loggers: [
-			{ category: ["tig-syntax"], lowestLevel: "fatal", sinks: [] },
-			{ category: ["logtape", "meta"], lowestLevel: "fatal", sinks: [] },
-		],
-	});
 	await init_highlighter();
 	repo = await mkdtemp(join(tmpdir(), "tig-syntax-bom-crlf-test-"));
 	git("init", "-q");

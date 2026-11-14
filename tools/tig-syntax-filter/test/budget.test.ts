@@ -11,7 +11,6 @@ import { createHighlighter, type Highlighter } from "shiki";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { configure } from "@logtape/logtape";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
 import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
@@ -23,13 +22,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 let reference: Highlighter;
 
 beforeAll(async () => {
-	await configure({
-		sinks: {},
-		loggers: [
-			{ category: ["tig-syntax"], lowestLevel: "fatal", sinks: [] },
-			{ category: ["logtape", "meta"], lowestLevel: "fatal", sinks: [] },
-		],
-	});
 	await init_highlighter();
 	await ensure_lang("typescript");
 	const theme = JSON.parse(await readFile(join(HERE, "..", "themes", "one-monokai.json"), "utf8"));

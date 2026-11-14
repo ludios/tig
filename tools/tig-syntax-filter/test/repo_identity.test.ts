@@ -9,7 +9,6 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configure } from "@logtape/logtape";
 import { repo_info, has_textconv, shed_git_state } from "../src/git.ts";
 import { ByteLRU } from "../src/lru.ts";
 
@@ -20,13 +19,6 @@ function git(...args: string[]): string {
 }
 
 beforeAll(async () => {
-	await configure({
-		sinks: {},
-		loggers: [
-			{ category: ["tig-syntax"], lowestLevel: "fatal", sinks: [] },
-			{ category: ["logtape", "meta"], lowestLevel: "fatal", sinks: [] },
-		],
-	});
 	repo = await mkdtemp(join(tmpdir(), "tig-syntax-repo-test-"));
 	execFileSync("git", ["-C", repo, "init", "-q"]);
 	await mkdir(join(repo, "sub", "dir"), { recursive: true });

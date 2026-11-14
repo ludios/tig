@@ -9,7 +9,6 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configure } from "@logtape/logtape";
 import { cat_blob, content_identity, has_textconv, shed_git_state } from "../src/git.ts";
 
 let repo: string;
@@ -17,13 +16,6 @@ let big_oid: string;
 let small_oid: string;
 
 beforeAll(async () => {
-	await configure({
-		sinks: {},
-		loggers: [
-			{ category: ["tig-syntax"], lowestLevel: "fatal", sinks: [] },
-			{ category: ["logtape", "meta"], lowestLevel: "fatal", sinks: [] },
-		],
-	});
 	repo = await mkdtemp(join(tmpdir(), "tig-syntax-git-test-"));
 	execFileSync("git", ["-C", repo, "init", "-q"]);
 	// 9 MiB: above the daemon's 8 MiB blob limit.

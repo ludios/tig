@@ -65,16 +65,5 @@
 		"@logtape/require-meta-sink": "warn",
 		// We know; sometimes we need to interpolate to pluralize a word.
 		"@logtape/no-message-interpolation": "off"
-	},
-
-	"overrides": [
-		{
-			"files": ["test/**"],
-			"rules": {
-				// The tests silence all logging, LogTape's own included, so the
-				// meta logger is configured on purpose without any sinks.
-				"@logtape/require-meta-sink": "off"
-			}
-		}
-	]
+	}
 }
