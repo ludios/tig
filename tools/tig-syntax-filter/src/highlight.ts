@@ -20,12 +20,6 @@ import { getLogger } from "@logtape/logtape";
 const logger = getLogger(["tig-syntax", "highlight"]);
 
 /**
- * Bump when the emission format or an emitted color changes, to invalidate
- * cache keys.
- */
-const EMIT_VERSION = 3;
-
-/**
  * Foreground overrides for the vendored theme, keyed by the name of the
  * `tokenColors` rule they patch.  The vendored JSON stays a verbatim copy of
  * upstream so it can be re-imported wholesale; terminal-readability
@@ -308,8 +302,9 @@ function cr_suffix(line: string): string {
  * SGR-annotated string per source line, through `last_line` (1-based) or
  * beyond when cached; later lines can't change earlier tokens, so they
  * are not tokenized.  Removing the SGR and unframing literal-ESC markers
- * yields the source lines exactly.  Lines are cached under `identity` +
- * lang + emit version.
+ * yields the source lines exactly.  Lines are cached in memory under
+ * `identity` + lang, with no version: other code, theme or dependencies
+ * make a different daemon (the client's build id covers them).
  *
  * Like an editor, the grammar never sees a CRLF line's carriage return;
  * it follows the line's final reset, unstyled.
@@ -333,14 +328,13 @@ export async function highlight_lines(identity: string, lang: string, content: s
 					last_line: number, deadline: number | null,
 					cancelled?: () => boolean): Promise<string[] | null> {
 	A(highlighter !== null, "highlighter not initialized");
-	const key = `${identity}|${lang}|v${EMIT_VERSION}`;
+	const key = `${identity}|${lang}`;
 	const cached = line_cache.get(key);
 	if (cached !== undefined && cached.lines.length >= last_line) {
 		return cached.lines;
 	}
 
-	const fail_key = `${identity}|${lang}`;
-	const failed_at = fail_cache_depth(fail_key);
+	const failed_at = fail_cache_depth(key);
 	if (failed_at !== undefined && last_line >= failed_at) {
 		return null;
 	}
@@ -359,7 +353,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		if (after !== undefined && after.lines.length >= last_line) {
 			return after.lines;
 		}
-		const failed_after = fail_cache_depth(fail_key);
+		const failed_after = fail_cache_depth(key);
 		if (failed_after !== undefined && last_line >= failed_after) {
 			return null;
 		}
@@ -429,7 +423,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			// that dies early must not shrink an existing entry.
 			keep_partial();
 			if (verdict) {
-				fail_cache_put(fail_key, last_line);
+				fail_cache_put(key, last_line);
 			}
 			return null;
 		}

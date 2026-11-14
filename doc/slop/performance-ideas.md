@@ -688,9 +688,10 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   documents dwarf their source (every style run adds a ~20-byte escape
   plus JS string/array overhead), so entry counts let a few giants own
   memory; byte budgets track what matters.
-- **C7. Persistent on-disk cache.**  Key `oid | lang | EMIT_VERSION |
-  theme-hash` → SGR lines, stored via `node:sqlite` (built into this node)
-  in `XDG_CACHE_HOME/tig-syntax/`.  Survives daemon restarts and combines
+- **C7. Persistent on-disk cache.**  Key `oid | lang | build id` (the
+  client's hash of the daemon's sources, theme and lockfile) → SGR lines,
+  stored via `node:sqlite` (built into this node) in
+  `XDG_CACHE_HOME/tig-syntax/`.  Survives daemon restarts and combines
   with B4/B5 so even a cold daemon serves repeat commits instantly.  Needs an
   eviction story (LRU by mtime, size cap) and the usual concurrent-writer
   care (sqlite gives this cheaply).
