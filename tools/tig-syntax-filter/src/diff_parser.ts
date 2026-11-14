@@ -189,12 +189,13 @@ export function unquote_git_path(quoted: string): string | null {
 			"a": 0x07, "b": 0x08, "f": 0x0c, "n": 0x0a, "r": 0x0d,
 			"t": 0x09, "v": 0x0b, "\\": 0x5c, "\"": 0x22,
 		};
-		if (esc in simple) {
-			bytes.push(simple[esc]);
+		const simple_byte = simple[esc];
+		if (simple_byte !== undefined) {
+			bytes.push(simple_byte);
 		} else if (esc >= "0" && esc <= "7") {
 			let octal = esc;
-			while (octal.length < 3 && inner[i] >= "0" && inner[i] <= "7") {
-				octal += inner[i];
+			while (octal.length < 3 && inner.charAt(i) >= "0" && inner.charAt(i) <= "7") {
+				octal += inner.charAt(i);
 				i++;
 			}
 			bytes.push(parseInt(octal, 8));
@@ -243,9 +244,9 @@ function parse_hunk_header(text: string): { old_start: number, old_count: number
 		return null;
 	}
 	return {
-		old_start: parseInt(m[1], 10),
+		old_start: parseInt(m[1]!, 10),
 		old_count: m[2] === undefined ? 1 : parseInt(m[2], 10),
-		new_start: parseInt(m[3], 10),
+		new_start: parseInt(m[3]!, 10),
 		new_count: m[4] === undefined ? 1 : parseInt(m[4], 10),
 	};
 }
@@ -267,12 +268,12 @@ export function parse_file_section(section: diff_section): file_info | null {
 	const hunks: hunk[] = [];
 	let old_last_line = 0;
 	let new_last_line = 0;
-	const prefixed = has_default_prefixes(section.lines[0].bytes.toString("utf8"));
+	const prefixed = has_default_prefixes(section.lines[0]!.bytes.toString("utf8"));
 
 	let i = 0;
 	// Header lines run until the first hunk.
 	for (; i < section.lines.length; i++) {
-		const text = section.lines[i].bytes.toString("utf8");
+		const text = section.lines[i]!.bytes.toString("utf8");
 
 		if (text.startsWith("@@")) {
 			break;
@@ -287,8 +288,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 			// "index <old>..<new>[ <mode>]"; either OID may be abbreviated.
 			const m = /^index ([0-9a-f]+)\.\.([0-9a-f]+)/.exec(text);
 			if (m !== null) {
-				old_oid = /^0+$/.test(m[1]) ? null : m[1];
-				new_oid = /^0+$/.test(m[2]) ? null : m[2];
+				const old_hex = m[1]!;
+				const new_hex = m[2]!;
+				old_oid = /^0+$/.test(old_hex) ? null : old_hex;
+				new_oid = /^0+$/.test(new_hex) ? null : new_hex;
 			}
 		} else if (text.startsWith("--- ")) {
 			saw_minus = true;
@@ -316,7 +319,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 	}
 
 	for (; i < section.lines.length; i++) {
-		const text = section.lines[i].bytes.toString("utf8");
+		const text = section.lines[i]!.bytes.toString("utf8");
 
 		if (text.startsWith("@@@")) {
 			return null;
@@ -338,8 +341,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 		let new_row = header.new_start;
 
 		for (i++; i < section.lines.length && (old_left > 0 || new_left > 0); i++) {
-			const line = section.lines[i];
-			const first = line.bytes.length > 0 ? line.bytes[0] : 0x20;
+			const line = section.lines[i]!;
+			// An entirely empty line is a context line whose single space
+			// some tools trim.
+			const first = line.bytes[0] ?? 0x20;
 
 			if (first === 0x5c) {
 				// "\ No newline at end of file" annotates the previous
@@ -354,10 +359,8 @@ export function parse_file_section(section: diff_section): file_info | null {
 				new_last_line = Math.max(new_last_line, new_row);
 				new_row++;
 				new_left--;
-			} else if (first === 0x20 || line.bytes.length === 0) {
-				// An entirely empty line is a context line whose single
-				// space some tools trim.  Context is styled from the
-				// new side.
+			} else if (first === 0x20) {
+				// Context is styled from the new side.
 				new_last_line = Math.max(new_last_line, new_row);
 				old_row++;
 				new_row++;
@@ -369,8 +372,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 			body.push(i);
 		}
 		// Account for a trailing "\ No newline at end of file".
-		while (i < section.lines.length && section.lines[i].bytes.length > 0 &&
-		       section.lines[i].bytes[0] === 0x5c) {
+		while (section.lines[i]?.bytes[0] === 0x5c) {
 			i++;
 		}
 		i--;

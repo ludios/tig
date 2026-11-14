@@ -74,7 +74,7 @@ describe("SectionSplitter", () => {
 		const splitter = new SectionSplitter();
 		const sections = splitter.feed(Buffer.from("commit 0123456789abcdef\nAuthor: x\npartial"));
 		expect(sections.map((s) => s.kind)).toEqual(["preamble"]);
-		expect(section_bytes(sections[0]).toString()).toBe("commit 0123456789abcdef\nAuthor: x\n");
+		expect(section_bytes(sections[0]!).toString()).toBe("commit 0123456789abcdef\nAuthor: x\n");
 	});
 
 	it("takes in a long line spanning many chunks in linear time", () => {
@@ -111,7 +111,7 @@ describe("SectionSplitter", () => {
 				const merged = merge_preamble(sections);
 				expect(merged.length).toBe(reference.length);
 				for (let i = 0; i < merged.length; i++) {
-					expect(merged[i].equals(reference[i])).toBe(true);
+					expect(merged[i]!.equals(reference[i]!)).toBe(true);
 				}
 			},
 		));
@@ -151,7 +151,7 @@ describe("parse_file_section", () => {
 
 	it("parses a rename with different extensions and maps hunks", () => {
 		const sections = split_all(Buffer.from(SAMPLE_DIFF));
-		const info = parse_file_section(sections[2]);
+		const info = parse_file_section(sections[2]!);
 		expect(info).not.toBe(null);
 		expect(info?.old_path).toBe("bar.py");
 		expect(info?.new_path).toBe("baz.py");
@@ -281,7 +281,7 @@ describe("parse_file_section", () => {
 			"    Next commit",
 		]));
 		expect(info?.hunks.length).toBe(1);
-		expect(info?.hunks[0].body).toEqual([5, 6]);
+		expect(info?.hunks[0]?.body).toEqual([5, 6]);
 	});
 
 	it("rejects hunks whose counts do not match the body", () => {

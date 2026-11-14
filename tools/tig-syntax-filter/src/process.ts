@@ -214,8 +214,10 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		let old_line = hunk.old_start;
 		let new_line = hunk.new_start;
 		for (const line_index of hunk.body) {
-			const line = section.lines[line_index];
-			const first = line.bytes.length > 0 ? line.bytes[0] : 0x20;
+			const line = section.lines[line_index]!;
+			// An entirely empty line is a context line whose single space
+			// some tools trim.
+			const first = line.bytes[0] ?? 0x20;
 			let doc: side_doc | null;
 			let sgr_lines: string[] | null;
 			let doc_line: number;
@@ -262,8 +264,7 @@ async function highlight_file_section(cwd: string, section: diff_section,
 
 	// All lines validated; rebuild the section.
 	const parts: Buffer[] = [];
-	for (let i = 0; i < section.lines.length; i++) {
-		const line = section.lines[i];
+	for (const [i, line] of section.lines.entries()) {
 		const sgr = sgr_by_line.get(i);
 		if (sgr !== undefined && sgr !== null && line.bytes.length > 0) {
 			parts.push(line.bytes.subarray(0, 1));
@@ -294,7 +295,7 @@ export async function process_section(cwd: string, section: diff_section,
 				}
 			} else {
 				logger.debug("unparsed file section: {first}", {
-					first: section.lines[0].bytes.toString("utf8").slice(0, 80),
+					first: section.lines[0]!.bytes.toString("utf8").slice(0, 80),
 				});
 			}
 		} catch (err) {

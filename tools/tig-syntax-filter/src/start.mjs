@@ -26,7 +26,7 @@ import { isAbsolute, join } from "node:path";
  * @returns {string | null}
  */
 function cache_dir() {
-	const xdg = process.env.XDG_CACHE_HOME;
+	const xdg = process.env["XDG_CACHE_HOME"];
 	if (xdg !== undefined && isAbsolute(xdg)) {
 		return join(xdg, "tig-syntax", "node-compile-cache");
 	}

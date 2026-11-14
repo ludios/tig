@@ -1,18 +1,30 @@
 {
+	"$schema": "https://json.schemastore.org/tsconfig",
+	"include": ["src/**/*.ts", "src/**/*.mjs", "test/**/*.ts"],
 	"compilerOptions": {
-		"target": "es2024",
 		"module": "nodenext",
-		"moduleResolution": "nodenext",
-		"lib": ["es2024"],
+		"target": "esnext",
+		"lib": ["esnext"],
 		"types": ["node"],
-		"strict": true,
+
 		"noEmit": true,
-		"allowImportingTsExtensions": true,
-		"erasableSyntaxOnly": true,
-		"verbatimModuleSyntax": true,
 		"skipLibCheck": true,
+
+		"allowImportingTsExtensions": true,
+		"noUncheckedSideEffectImports": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		// Typecheck src/start.mjs too, which is plain JavaScript on purpose (see its header)
 		"allowJs": true,
-		"checkJs": true
-	},
-	"include": ["src/**/*.ts", "src/**/*.mjs", "test/**/*.ts"]
+		"checkJs": true,
+
+		"strict": true,
+		// node runs src/ by stripping types, which needs erasable syntax
+		"erasableSyntaxOnly": true,
+		"exactOptionalPropertyTypes": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"noPropertyAccessFromIndexSignature": true,
+		"noFallthroughCasesInSwitch": true,
+	}
 }

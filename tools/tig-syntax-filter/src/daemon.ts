@@ -114,7 +114,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 					socket.destroy();
 					return;
 				}
-				const cwd_len = parseInt(m[1], 10);
+				const cwd_len = parseInt(m[1]!, 10);
 				if (header_buf.length < nl + 1 + cwd_len) {
 					return;
 				}
@@ -177,7 +177,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
  * daemons live, from its environment and the daemon's build id), or null
  * when unset. */
 export function socket_path(): string | null {
-	const path = process.env.TIG_SYNTAX_SOCKET;
+	const path = process.env["TIG_SYNTAX_SOCKET"];
 	return path === undefined || path === "" ? null : path;
 }
 
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
 	// Relative settings mean the spawning client's cwd, as in the client.
 	const socket = socket_path();
 	const path = socket === null ? null : resolve(socket);
-	const state_home = process.env.XDG_STATE_HOME || join(process.env.HOME ?? "/tmp", ".local", "state");
+	const state_home = process.env["XDG_STATE_HOME"] || join(process.env["HOME"] ?? "/tmp", ".local", "state");
 	const log_dir = resolve(state_home, "tig-syntax");
 	forget_spawning_client();
 	await mkdir(log_dir, { recursive: true });

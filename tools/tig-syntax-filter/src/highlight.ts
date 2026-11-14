@@ -403,7 +403,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		}
 	};
 	const emit = (): string[] => emit_sgr_lines(token_lines).map((line, i) =>
-		line + cr_suffix(slice[prefix.length + i]));
+		line + cr_suffix(slice[prefix.length + i]!));
 	const keep_partial = (): void => {
 		if (token_lines.length > 0) {
 			keep_if_longer(prefix.concat(emit()));

@@ -137,8 +137,8 @@ function batch_command_supported(): Promise<boolean> {
 				if (m === null) {
 					return false;
 				}
-				const major = parseInt(m[1], 10);
-				const minor = parseInt(m[2], 10);
+				const major = parseInt(m[1]!, 10);
+				const minor = parseInt(m[2]!, 10);
 				return major > 2 || (major === 2 && minor >= 36);
 			} catch {
 				return false;
@@ -217,7 +217,7 @@ class blob_batcher {
 		if (this.chunks.length !== 1) {
 			this.chunks = [Buffer.concat(this.chunks)];
 		}
-		return this.chunks[0];
+		return this.chunks[0]!;
 	}
 
 	private consume(bytes: number): void {
@@ -277,7 +277,7 @@ class blob_batcher {
 				next.request.resolve(null);
 				continue;
 			}
-			const size = parseInt(m[2], 10);
+			const size = parseInt(m[2]!, 10);
 			const acceptable = m[1] === "blob" && size <= MAX_BLOB_BYTES;
 			if (next.kind === "info") {
 				this.expected.shift();
@@ -470,7 +470,7 @@ class attr_batcher {
 				this.fields.push(data.subarray(start, nul).toString("utf8"));
 				start = nul + 1;
 				if (this.fields.length === 3) {
-					this.pending.shift()?.resolve(this.fields[2]);
+					this.pending.shift()?.resolve(this.fields[2]!);
 					this.fields = [];
 				}
 			}

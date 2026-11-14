@@ -97,7 +97,7 @@ beforeAll(async () => {
 		}
 		const input = Buffer.concat(section.lines.map((line) =>
 			Buffer.concat([line.bytes, Buffer.from(line.had_newline ? "\n" : "")])));
-		const name = /^diff --git a\/(\S+) /.exec(input.toString("utf8"))![1];
+		const name = /^diff --git a\/(\S+) /.exec(input.toString("utf8"))![1]!;
 		sections.set(name, { input, output: await process_section(repo, section) });
 	}
 }, 60000);

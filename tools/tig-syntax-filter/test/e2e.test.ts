@@ -27,21 +27,22 @@ let show_output: Buffer;
 /** Environment for a filter run: inherited, minus daemon-locating
  * variables, plus isolated state/log/cache and `overrides`. */
 function filter_env(overrides: Record<string, string>): Record<string, string> {
+	const dropped = new Set([
+		"TIG_SYNTAX_SOCKET", "XDG_RUNTIME_DIR", "TMPDIR", "NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE",
+	]);
 	const env: Record<string, string> = {};
 	for (const [key, value] of Object.entries(process.env)) {
-		if (value !== undefined) {
+		if (value !== undefined && !dropped.has(key)) {
 			env[key] = value;
 		}
 	}
-	delete env.TIG_SYNTAX_SOCKET;
-	delete env.XDG_RUNTIME_DIR;
-	delete env.TMPDIR;
-	delete env.NODE_COMPILE_CACHE;
-	delete env.NODE_DISABLE_COMPILE_CACHE;
-	env.TIG_SYNTAX_DAEMON = daemon_script;
-	env.XDG_STATE_HOME = join(work, "state");
-	env.XDG_CACHE_HOME = join(work, "cache");
-	return { ...env, ...overrides };
+	return {
+		...env,
+		TIG_SYNTAX_DAEMON: daemon_script,
+		XDG_STATE_HOME:    join(work, "state"),
+		XDG_CACHE_HOME:    join(work, "cache"),
+		...overrides,
+	};
 }
 
 /** Run the client on `input` in the scratch repo; returns stdout and
