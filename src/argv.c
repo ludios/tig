@@ -219,26 +219,40 @@ argv_containsn(const char **argv, const char *arg, size_t arglen)
 
 DEFINE_ALLOCATOR(argv_realloc, const char *, SIZEOF_ARG)
 
-bool
-argv_appendn(const char ***argv, const char *arg, size_t arglen)
+/*
+ * Append a copy of the first arglen bytes of arg to the NULL-terminated
+ * array *argv (which may be NULL), even when that copy is empty.
+ * Returns false when the array cannot grow.
+ */
+static bool
+argv_push(const char ***argv, const char *arg, size_t arglen)
 {
 	size_t argc = argv_size(*argv);
 	char *alloc;
 
-	if (!*arg && argc > 0)
-		return true;
-
-	if (!argv_realloc(argv, argc, 2))
+	if (!argv_realloc(argv, argc, 2)) {
 		return false;
+	}
 
 	alloc = strndup(arg, arglen);
-	if (!alloc)
+	if (!alloc) {
 		die("Failed to allocate arg");
+	}
 
 	(*argv)[argc++] = alloc;
 	(*argv)[argc] = NULL;
 
 	return true;
+}
+
+bool
+argv_appendn(const char ***argv, const char *arg, size_t arglen)
+{
+	if (!*arg && argv_size(*argv) > 0) {
+		return true;
+	}
+
+	return argv_push(argv, arg, arglen);
 }
 
 
@@ -343,11 +357,12 @@ format_expand_arg(struct format_context *format, const char *name, const char *e
 static bool
 format_append_arg(struct format_context *format, const char ***dst_argv, const char *arg)
 {
-	/* Only for run-request formatting (argv_flag_preserve_empty): keep
-	 * originally empty argv elements from bind ... ''. Internal command
-	 * templates still use "" as omittable placeholders via argv_appendn. */
-	bool preserve_empty = arg && !*arg &&
-		(format->argv_flags & argv_flag_preserve_empty);
+	/* argv_append() drops "", which internal command templates use as
+	 * an omittable placeholder, so keep a "" that the user wrote as an
+	 * argument (e.g. bind ... '') here. */
+	if (!*arg && (format->argv_flags & argv_flag_preserve_empty)) {
+		return argv_push(dst_argv, "", 0);
+	}
 
 	memset(format->buf, 0, sizeof(format->buf));
 	format->bufpos = 0;
@@ -370,20 +385,6 @@ format_append_arg(struct format_context *format, const char ***dst_argv, const c
 			return false;
 
 		arg = next;
-	}
-
-	if (!format->buf[0] && preserve_empty) {
-		size_t argc = argv_size(*dst_argv);
-		char *alloc;
-
-		if (!argv_realloc(dst_argv, argc, 2))
-			return false;
-		alloc = strdup("");
-		if (!alloc)
-			die("Failed to allocate arg");
-		(*dst_argv)[argc++] = alloc;
-		(*dst_argv)[argc] = NULL;
-		return true;
 	}
 
 	return argv_append(dst_argv, format->buf);
