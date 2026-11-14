@@ -95,7 +95,7 @@ stdenv.mkDerivation (finalAttrs: {
     pnpm = pnpm_11;
     fetcherVersion = 4;
     sourceRoot = "source/tools/tig-syntax-filter";
-    hash = "sha256-AlpWLhycmW0rHnkaiEO2DI4VXq1kAOy1Ij4yQ+E1Jjg=";
+    hash = "sha256-HX7o6nAxydhJitfBkZCFgl+wZq1UQwR2Wf1gQ4dFmqU=";
   };
 
   # those files are inherently impure, we'll handle the corresponding dependencies.
