@@ -70,9 +70,14 @@ apply_step(double step, int value)
  */
 
 struct time {
-	time_t sec;	/* Local wall-clock time, counted as if it were UTC. */
-	int tz;		/* Minus the UTC offset in seconds, e.g. -3600 for +0100,
-			 * so sec + tz is the Unix time. */
+	/* The wall-clock time in the zone that the time was recorded in
+	 * (e.g. the author's zone, not the viewer's), in seconds since
+	 * 1970-01-01 00:00 on that wall clock. mkdate() treats 0 as "no
+	 * date". */
+	time_t sec;
+	/* The negated UTC offset in seconds (e.g. -3600 for +0100), so
+	 * sec + tz is the Unix time. */
+	int tz;
 };
 
 struct ident {
