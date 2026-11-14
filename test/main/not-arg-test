@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# Test that --not negates the revisions and the revision flags that
+# follow it, and only those.
+
+. libtest.sh
+. libgit.sh
+
+# This test uses the trace output so do not show trace for this test.
+trace=
+export TIG_TRACE="$HOME/trace"
+
+export LINES=6
+
+tigrc <<EOF
+set vertical-split = no
+set line-graphics = ascii
+EOF
+
+commit()
+{
+	GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git commit -q --allow-empty -m "$2"
+}
+
+test_setup_work_dir()
+{
+	git init -q -b master .
+	git_config
+
+	commit "2009-02-13 23:31 +0000" "base"
+	git tag v1
+	git checkout -q -b topic
+	commit "2009-02-14 10:00 +0000" "topic 1"
+	git tag v2
+	commit "2009-02-15 10:00 +0000" "topic 2"
+	git checkout -q master
+	commit "2009-02-16 10:00 +0000" "master 1"
+}
+
+# Runs tig with the given arguments, saving the screen as $1.screen and
+# the arguments that tig gave git log as $1.log-args.
+run_case()
+{
+	case_name="$1"; shift
+
+	steps "
+		:save-display $case_name.screen
+	"
+	: > "$TIG_TRACE"
+	test_tig "$@"
+
+	sed -n 's/^git log --encoding=UTF-8 \(.*\) --date=raw .*/\1/p' < "$TIG_TRACE" > "$case_name.log-args"
+}
+
+run_case rev-not-rev topic --not master
+
+assert_equals 'rev-not-rev.log-args' <<EOF
+--topo-order --not --not topic ^master
+EOF
+
+assert_equals 'rev-not-rev.screen' <<EOF
+2009-02-15 10:00 +0000 Committer * [topic] topic 2
+2009-02-14 10:00 +0000 Committer * <v2> topic 1
+
+
+[main] 4ea2a9a30779dbee3b6071bb1ea9f67592d66faf - commit 1 of 2             100%
+EOF
+
+run_case flag-not-flag --branches --not --tags
+
+assert_equals 'flag-not-flag.log-args' <<EOF
+--topo-order --branches --not --tags --not
+EOF
+
+assert_equals 'flag-not-flag.screen' <<EOF
+2009-02-16 10:00 +0000 Committer * [master] master 1
+2009-02-15 10:00 +0000 Committer | * [topic] topic 2
+
+
+[main] a63a484572897fb905c78c8eeea693c395ff3248 - commit 1 of 2             100%
+EOF

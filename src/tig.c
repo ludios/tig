@@ -419,6 +419,7 @@ filter_options(const char *argv[], enum request request)
 {
 	const char **flags = NULL;
 	int next, flags_pos;
+	int nots = 0;	/* How many --not are in opt_rev_args. */
 
 	update_options_from_argv(argv);
 
@@ -436,9 +437,15 @@ filter_options(const char *argv[], enum request request)
 		if (!strcmp(arg, "--"))
 			while (argv[next])
 				argv[flags_pos++] = argv[next++];
-		else if (argv_parse_rev_flag(arg, NULL))
+		else if (argv_parse_rev_flag(arg, NULL)) {
 			argv_append(&opt_rev_args, arg);
-		else {
+			/* --not also negates the revisions that follow it,
+			 * which git rev-parse below handles in place. */
+			if (!strcmp(arg, "--not")) {
+				argv[flags_pos++] = arg;
+				nots++;
+			}
+		} else {
 			argv[flags_pos++] = arg;
 			string_copy_rev(argv_env.head, arg);
 		}
@@ -466,6 +473,11 @@ filter_options(const char *argv[], enum request request)
 		opt_cmdline_args = flags;
 	}
 
+	/* The revisions from git rev-parse already carry their polarity
+	 * (e.g. ^base), so cancel an odd number of --not before them. */
+	if (nots % 2) {
+		argv_append(&opt_rev_args, "--not");
+	}
 	filter_rev_parse(&opt_rev_args, "--symbolic", "--revs-only", argv);
 }
 
