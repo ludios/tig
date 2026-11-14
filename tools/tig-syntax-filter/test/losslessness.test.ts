@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { assert, property, string } from "fast-check";
+import * as fc from "fast-check";
 import { execFileSync } from "node:child_process";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
 import { init_highlighter, frame_content } from "../src/highlight.ts";
@@ -34,7 +34,7 @@ beforeAll(async () => {
 
 describe("frame_content", () => {
 	it("round-trips any string through frame + unframe", () => {
-		assert(property(string({ unit: "binary" }), (text) => {
+		fc.assert(fc.property(fc.string({ unit: "binary" }), (text) => {
 			const framed = frame_content(text);
 			const framed_bytes = Buffer.from(framed, "utf8");
 			const restored = unframe_and_strip(framed_bytes);

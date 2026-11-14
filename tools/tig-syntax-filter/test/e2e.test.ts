@@ -257,7 +257,7 @@ describe("client + daemon end to end", () => {
 		// pre-existing one): its environment carries our unique TMPDIR.
 		// procfs-only evidence, so asserted only where procfs exists.
 		if (process.platform === "linux") {
-			// oxlint-disable-next-line vitest/no-conditional-expect -- procfs exists only on Linux
+			// oxlint-disable-next-line vitest/no-conditional-expect -- daemon_pids() needs Linux's /proc/<pid>/environ
 			expect(daemon_pids(fallback_tmp).length).toBeGreaterThan(0);
 		}
 	}, 60000);
@@ -313,7 +313,7 @@ describe("client + daemon end to end", () => {
 		// Mid-startup: the launchers are still sleeping, so count them.
 		await new Promise((resolve) => setTimeout(resolve, 700));
 		if (process.platform === "linux") {
-			// oxlint-disable-next-line vitest/no-conditional-expect -- procfs exists only on Linux
+			// oxlint-disable-next-line vitest/no-conditional-expect -- daemon_pids() needs Linux's /proc/<pid>/environ
 			expect(daemon_pids(marker, "herd-daemon.sh").length).toBe(1);
 		}
 		for (const output of await Promise.all(runs)) {

@@ -86,7 +86,6 @@ function sized(): ByteLRU<string> {
 }
 
 describe("ByteLRU", () => {
-
 	it("evicts oldest entries past the byte budget", () => {
 		const lru = sized();
 		lru.set("a", "x".repeat(40));
