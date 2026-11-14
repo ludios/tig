@@ -50,7 +50,9 @@
 		// Silly rule for novices who don't know what they're doing.
 		"no-await-in-loop": "off",
 		// https://typescript-eslint.io/rules/no-unsafe-type-assertion/
-		// We cast deliberately at I/O boundaries (git's output, the client's protocol).
+		// We cast deliberately where tsc cannot see an invariant, e.g. for a caught
+		// error's errno code, the first key of a Map that we know is not empty, and
+		// language and theme names, which shiki types as unions of its bundled names.
 		"typescript/no-unsafe-type-assertion": "off",
 		"typescript/consistent-type-imports": "error",
 		"unicorn/prefer-node-protocol": "error",
@@ -63,7 +65,10 @@
 		"@logtape/prefer-lazy-evaluation": "warn",
 		"@logtape/no-unawaited-log": "error",
 		"@logtape/require-meta-sink": "warn",
-		// We know; sometimes we need to interpolate to pluralize a word.
-		"@logtape/no-message-interpolation": "off"
+		"@logtape/no-message-interpolation": "error",
+		"@logtape/no-dynamic-message": "error",
+		// The file sink's default formatter writes a record's message but not its
+		// properties, so a property that the message template does not name is never written
+		"@logtape/no-unrendered-properties": "warn"
 	}
 }
