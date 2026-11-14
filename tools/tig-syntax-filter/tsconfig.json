@@ -3,8 +3,10 @@
 	"include": ["src/**/*.ts", "src/**/*.mjs", "test/**/*.ts"],
 	"compilerOptions": {
 		"module": "nodenext",
-		"target": "esnext",
-		"lib": ["esnext"],
+		// Not esnext: node runs src/ without transpiling it, so allow only the
+		// ECMAScript built-ins that the oldest supported node (23.6, per README.md) has
+		"target": "es2024",
+		"lib": ["es2024"],
 		"types": ["node"],
 
 		"noEmit": true,
