@@ -266,6 +266,7 @@ function parse_hunk_header(text: string): { old_start: number, old_count: number
  */
 export function parse_file_section(section: diff_section): file_info | null {
 	A(section.kind === "file", "parse_file_section needs a file section");
+	A.gte(section.lines.length, 1, "a file section starts with its diff --git line");
 
 	let old_path: string | null = null;
 	let new_path: string | null = null;
