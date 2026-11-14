@@ -295,4 +295,30 @@ describe("parse_file_section", () => {
 			" only one line",
 		]))).toBe(null);
 	});
+
+	it("rejects hunks with lines on a side that starts at line 0", () => {
+		for (const header of ["@@ -0,1 +1 @@", "@@ -1 +0,1 @@"]) {
+			expect(parse_file_section(file_section([
+				"diff --git a/foo.c b/foo.c",
+				"index 1111111..2222222 100644",
+				"--- a/foo.c",
+				"+++ b/foo.c",
+				header,
+				" undefined",
+			])), header).toBe(null);
+		}
+	});
+
+	it("accepts a side that starts at line 0 when it has no lines", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/foo.c b/foo.c",
+			"new file mode 100644",
+			"index 0000000..2222222",
+			"--- /dev/null",
+			"+++ b/foo.c",
+			"@@ -0,0 +1 @@",
+			"+int x;",
+		]));
+		expect(info?.hunks).toEqual([{ old_start: 0, new_start: 1, body: [6] }]);
+	});
 });

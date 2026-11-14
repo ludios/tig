@@ -237,18 +237,26 @@ function has_default_prefixes(header: string): boolean {
 	return rest.startsWith("a/") || rest.startsWith("\"a/");
 }
 
-/** Parse "@@ -old[,cnt] +new[,cnt] @@ ..." into numbers, or null. */
+/** Parse "@@ -old[,cnt] +new[,cnt] @@ ..." into numbers, or null when it
+ * is malformed.  A side's start is the 1-based line number of its first
+ * line; a side without lines starts at the line before the hunk (0 for an
+ * added or deleted file's empty side), so a side with lines that starts at
+ * 0 is malformed. */
 function parse_hunk_header(text: string): { old_start: number, old_count: number, new_start: number, new_count: number } | null {
 	const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text);
 	if (m === null) {
 		return null;
 	}
-	return {
+	const header = {
 		old_start: parseInt(m[1]!, 10),
 		old_count: m[2] === undefined ? 1 : parseInt(m[2], 10),
 		new_start: parseInt(m[3]!, 10),
 		new_count: m[4] === undefined ? 1 : parseInt(m[4], 10),
 	};
+	if ((header.old_count > 0 && header.old_start === 0) || (header.new_count > 0 && header.new_start === 0)) {
+		return null;
+	}
+	return header;
 }
 
 /**
