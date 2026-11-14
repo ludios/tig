@@ -32,12 +32,16 @@ in the repository root.
 
 ## Build and install
 
-	pnpm install               # once, for the daemon's dependencies
+	pnpm install               # installs the daemon's dependencies
 	make -C client             # builds bin/tig-syntax-filter
 
-Re-run `make -C client` after every update: the client bakes in a hash of
-the daemon's sources and uses it to find (or start) a matching daemon, so
-a stale client keeps talking to a daemon running the old code.
+Re-run both after every update, in this order.  The client bakes in a
+hash of the daemon's sources, `package.json` and `pnpm-lock.yaml`, and
+uses it to find (or start) a matching daemon, so a stale client keeps
+talking to a daemon running the old code.  The hash does not cover
+`node_modules`, so if `make -C client` runs before `pnpm install`, the
+new client can start a daemon that keeps the old dependencies loaded
+for as long as it runs.
 
 Then put `bin/` on PATH (both `tig-syntax-filter` and
 `tig-syntax-daemon` live there; the client finds the daemon launcher
