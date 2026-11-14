@@ -91,18 +91,16 @@ let theme_name = "one-monokai";
 let theme_fg = "#bbbbbb";
 let theme_bg = "#282c34";
 
-/** A cached tokenization prefix: SGR-annotated lines (without newlines),
- * the grammar state after the last one, from which a deeper request
- * resumes, and the grammar that produced both (see current_grammar()).
- * Retries after a missed budget resume too, so a slow document can
- * highlight eventually. */
+/** A cached tokenization prefix: SGR-annotated lines (without newlines)
+ * and the grammar state after the last one, from which a deeper request
+ * resumes.  Retries after a missed budget resume too, so a slow document
+ * can highlight eventually. */
 interface cached_prefix {
 	lines: string[],
 	state: unknown,
-	grammar: unknown,
 }
 
-/** Byte-budgeted LRU: content identity -> cached prefix.  Sized by
+/** Byte-budgeted LRU: cache_key() -> cached prefix.  Sized by
  * approximate JS string memory (the grammar state, a small immutable
  * stack sharing structure with the grammar, is not counted). */
 const line_cache = new ByteLRU<cached_prefix>(config.line_cache_mb * 1048576,
@@ -112,7 +110,7 @@ const line_cache = new ByteLRU<cached_prefix>(config.line_cache_mb * 1048576,
 export const stats = {
 	/** Source lines run through the grammar (cache hits excluded). */
 	tokenized_lines: 0,
-	/** Tokenizations that started over because their grammar was rebuilt. */
+	/** Times a tokenization started over because its grammar was rebuilt. */
 	grammar_restarts: 0,
 };
 
@@ -202,23 +200,29 @@ export async function ensure_lang(lang: string): Promise<boolean> {
 	return attempt;
 }
 
-/**
- * The grammar that `hl` tokenizes `lang` with now.  Loading another
- * language can make shiki replace it with a rebuilt grammar (loading
- * python rebuilds markdown, which embeds python lazily), whose rules are
- * numbered differently and may color differently: a grammar state from
- * the old grammar must not resume under the new one, and lines from the
- * old one are stale.
- */
-function current_grammar(hl: Highlighter, lang: string): unknown {
-	return hl.getInternalContext().getLanguage(lang);
-}
+/** Numbers for the grammar objects that cache keys have named, held
+ * weakly so that a disposed grammar is not kept alive. */
+const grammar_ids = new WeakMap<object, number>();
+let grammars_numbered = 0;
 
-/** The cached prefix for `key` if `grammar` produced it; an entry from an
- * older grammar counts as absent, and the next store replaces it. */
-function cached_prefix_for(key: string, grammar: unknown): cached_prefix | undefined {
-	const entry = line_cache.get(key);
-	return entry !== undefined && entry.grammar === grammar ? entry : undefined;
+/**
+ * The line cache and budget-verdict key for `identity` as `lang`, under
+ * the grammar that `hl` tokenizes `lang` with now.  Loading another
+ * language can make shiki replace that grammar with a rebuilt one
+ * (loading python rebuilds markdown, which embeds python lazily), whose
+ * rules are numbered differently and may color differently, so the key
+ * names the grammar: entries made under the old grammar, whose states
+ * must not resume under the new one, are never looked up again and age
+ * out of the caches.
+ */
+function cache_key(hl: Highlighter, identity: string, lang: string): string {
+	const grammar = hl.getLanguage(lang);
+	let id = grammar_ids.get(grammar);
+	if (id === undefined) {
+		id = ++grammars_numbered;
+		grammar_ids.set(grammar, id);
+	}
+	return `${identity}|${lang}|g${id}`;
 }
 
 /**
@@ -328,8 +332,9 @@ function cr_suffix(line: string): string {
  * beyond when cached; later lines can't change earlier tokens, so they
  * are not tokenized.  Removing the SGR and unframing literal-ESC markers
  * yields the source lines exactly.  Lines are cached in memory under
- * `identity` + lang, with no version: other code, theme or dependencies
- * make a different daemon (the client's build id covers them).
+ * `identity`, lang and the grammar (see cache_key()), with no other
+ * version: other code, theme or dependencies make a different daemon (the
+ * client's build id covers them).
  *
  * Like an editor, the grammar never sees a CRLF line's carriage return;
  * it follows the line's final reset, unstyled.
@@ -338,9 +343,10 @@ function cr_suffix(line: string): string {
  * GrammarState (token-identical to one-shot tokenization), yielding to
  * the event loop between batches so other connections and timers get to
  * run.  If shiki rebuilds the grammar during a yield (another request
- * loaded a language), tokenization starts over from line 1 under the
- * new grammar.  Before each batch it checks `deadline` (a performance.now()
- * timestamp, or null) and `cancelled`; if either trips, the lines so far
+ * loaded a language), tokenization starts over under the new grammar,
+ * from its longest cached prefix.  Before each batch it checks
+ * `deadline` (a performance.now() timestamp, or null) and `cancelled`;
+ * if either trips, the lines so far
  * are cached with their grammar state for later requests to resume from,
  * and null is returned.  A missed deadline also records the requested
  * depth for fail-fast, but only when the call tokenized for most of the
@@ -356,8 +362,8 @@ export async function highlight_lines(identity: string, lang: string, content: s
 					cancelled?: () => boolean): Promise<string[] | null> {
 	A(highlighter !== null, "highlighter not initialized");
 	const hl = highlighter;
-	const key = `${identity}|${lang}`;
-	const cached = cached_prefix_for(key, current_grammar(hl, lang));
+	const key = cache_key(hl, identity, lang);
+	const cached = line_cache.get(key);
 	if (cached !== undefined && cached.lines.length >= last_line) {
 		return cached.lines;
 	}
@@ -376,12 +382,13 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			return theirs;
 		}
 		// They aborted or fell short; their partial or failure depth may
-		// still answer for us.
-		const after = cached_prefix_for(key, current_grammar(hl, lang));
+		// still answer for us, under the grammar that is current now.
+		const key_after = cache_key(hl, identity, lang);
+		const after = line_cache.get(key_after);
 		if (after !== undefined && after.lines.length >= last_line) {
 			return after.lines;
 		}
-		const failed_after = fail_cache_depth(key);
+		const failed_after = fail_cache_depth(key_after);
 		if (failed_after !== undefined && last_line >= failed_after) {
 			return null;
 		}
@@ -403,26 +410,38 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		}
 	}
 
-	const started = performance.now();
-	// A shorter cached prefix is a head start: its lines are reused as
-	// they are and tokenization resumes from its grammar state.
-	let grammar = current_grammar(hl, lang);
-	const resume = cached_prefix_for(key, grammar);
-	let prefix = resume === undefined ? [] : resume.lines;
-	A(prefix.length < last_line, "cached prefix already covers the request");
-	A(resume === undefined || resume.state !== undefined, "cached prefix lacks its grammar state");
-	const token_lines: ThemedToken[][] = [];
 	// The union-typed method needs a cast to its element overload.
 	const get_state = hl.getLastGrammarState as (tokens: ThemedToken[][]) => unknown;
-	let state: unknown = resume === undefined ? undefined : resume.state;
+	const token_lines: ThemedToken[][] = [];
+	let work_key = key;
+	let prefix: string[] = [];
+	let state: unknown;
+	let start = 0;
+	let started = 0;
+	/** Begin under the current grammar, or begin again after a rebuild.
+	 * A shorter cached prefix is a head start: its lines are reused as
+	 * they are and tokenization resumes from its grammar state.  The
+	 * budget verdict counts only time spent under this grammar. */
+	const begin = (): void => {
+		work_key = cache_key(hl, identity, lang);
+		const resume = line_cache.get(work_key);
+		A(resume === undefined || resume.state !== undefined, "cached prefix lacks its grammar state");
+		prefix = resume === undefined ? [] : resume.lines;
+		state = resume === undefined ? undefined : resume.state;
+		token_lines.length = 0;
+		start = prefix.length;
+		started = performance.now();
+	};
+	begin();
+	A(prefix.length < last_line, "cached prefix already covers the request");
 	// Store-time length comparisons re-read the cache: after yields, a
 	// concurrent call for the same identity may have cached a longer
 	// prefix than the snapshot taken at entry, and it must survive.
 	const keep_if_longer = (lines: string[]): void => {
-		A(grammar === current_grammar(hl, lang), "storing lines from a rebuilt grammar");
-		const current = cached_prefix_for(key, grammar);
+		A.eq(work_key, cache_key(hl, identity, lang), "the grammar was rebuilt after these lines were tokenized");
+		const current = line_cache.get(work_key);
 		if (current === undefined || lines.length > current.lines.length) {
-			line_cache.set(key, { lines, state, grammar });
+			line_cache.set(work_key, { lines, state });
 		}
 	};
 	const emit = (): string[] => emit_sgr_lines(token_lines).map((line, i) =>
@@ -432,21 +451,20 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			keep_if_longer(prefix.concat(emit()));
 		}
 	};
-	let start = prefix.length;
 	while (start < needed) {
 		if (start > prefix.length) {
 			await setImmediate();
-			const now = current_grammar(hl, lang);
-			if (now !== grammar) {
-				logger.info("{lang}'s grammar was rebuilt at line {done}/{needed}; starting over", () => ({
+			if (cache_key(hl, identity, lang) !== work_key) {
+				logger.info("{lang}'s grammar was rebuilt after {done} of {needed} lines were tokenized; starting over", () => ({
 					lang, done: start, needed,
 				}));
 				stats.grammar_restarts++;
-				grammar = now;
-				prefix = [];
-				token_lines.length = 0;
-				state = undefined;
-				start = 0;
+				begin();
+				if (prefix.length >= needed) {
+					// A concurrent request already got this far under
+					// the new grammar.
+					return prefix;
+				}
 			}
 		}
 		if (cancelled !== undefined && cancelled()) {
@@ -465,7 +483,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			// that dies early must not shrink an existing entry.
 			keep_partial();
 			if (verdict) {
-				fail_cache_put(key, last_line);
+				fail_cache_put(work_key, last_line);
 			}
 			return null;
 		}

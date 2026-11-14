@@ -74,7 +74,8 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   stay cached, and a later request for the same document — deeper, or a
   retry after the failure verdict expires (60 s) — continues from that
   cached prefix rather than starting over, so no document stays raw
-  forever.
+  forever.  (Loading another language can make shiki rebuild a grammar,
+  e.g. markdown's; work done under the old grammar then starts over.)
 - `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
   the section is not highlighted (100–1000000; default 100000).
 - `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this are not

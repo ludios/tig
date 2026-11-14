@@ -1,11 +1,12 @@
 /**
  * Loading a language can make shiki rebuild a grammar that is already
- * loaded: markdown embeds python and rust lazily, so loading either one
- * rebuilds markdown.  Neither a cached prefix nor a tokenization in
- * progress may then resume from a grammar state of the old grammar.
+ * loaded: markdown embeds python, rust and ruby lazily, so loading any of
+ * them rebuilds markdown.  Lines and grammar states cached under the old
+ * grammar must then go unused, and a tokenization in progress must start
+ * over.  Each test loads a different language, as a load happens once.
  */
 
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type * as timers_promises from "node:timers/promises";
@@ -33,11 +34,14 @@ vi.mock("node:timers/promises", async (import_original) => {
 	};
 });
 
-/** A Markdown document over three chunks long, with a fenced block of
- * `fence_lang` code in its first and in its last chunk. */
-async function markdown_doc(fence_lang: string): Promise<string> {
+/** Line 5 of markdown_doc(): the code inside its first fenced block. */
+const FIRST_CODE_LINE = 5;
+
+/** A Markdown document over three chunks long, with two fenced blocks of
+ * `code` in `fence_lang`: one at FIRST_CODE_LINE and one at the end. */
+async function markdown_doc(fence_lang: string, code: string): Promise<string> {
 	const readme = await readFile(join(HERE, "..", "README.md"), "utf8");
-	const fence = `\`\`\`${fence_lang}\nfn main() { let x = "a"; }\n\`\`\`\n`;
+	const fence = `\`\`\`${fence_lang}\n${code}\n\`\`\`\n`;
 	let body = "";
 	while (body.split("\n").length < 3 * CHUNK_LINES) {
 		body += readme + "\n";
@@ -47,25 +51,35 @@ async function markdown_doc(fence_lang: string): Promise<string> {
 
 beforeAll(async () => {
 	await init_highlighter();
-	A(await ensure_lang("markdown"), "shiki has no markdown grammar");
+	A(await ensure_lang("markdown"), "the markdown grammar failed to load");
 }, 60000);
 
+afterEach(() => {
+	between_chunks.hook = null;
+});
+
 describe("a grammar rebuilt by a language load", () => {
-	it("is not resumed from a cached prefix of the old grammar", async () => {
-		const doc = await markdown_doc("python");
+	it("leaves the lines and states cached under the old grammar unused", async () => {
+		const doc = await markdown_doc("python", "print(\"a\")");
 		const depth = doc.split("\n").length;
-		// Cache a prefix, with its grammar state, under the old grammar.
-		expect(await highlight_lines("test|rebuilt-cached", "markdown", doc, 4, null)).toHaveLength(4);
+		// Under the old grammar, cache a prefix that a deeper request
+		// would resume from, and one that covers the first code block.
+		expect(await highlight_lines("test|rebuilt-prefix", "markdown", doc, 4, null)).toHaveLength(4);
+		const before = await highlight_lines("test|rebuilt-covered", "markdown", doc, FIRST_CODE_LINE, null);
 		expect(await ensure_lang("python")).toBe(true);
-		const resumed = await highlight_lines("test|rebuilt-cached", "markdown", doc, depth, null);
 		const fresh = await highlight_lines("test|rebuilt-fresh", "markdown", doc, depth, null);
 		expect(fresh).not.toBeNull();
-		expect(resumed).toEqual(fresh);
+		// The python code got colors of its own.
+		expect(fresh![FIRST_CODE_LINE - 1]).not.toBe(before![FIRST_CODE_LINE - 1]);
+		expect(await highlight_lines("test|rebuilt-covered", "markdown", doc, FIRST_CODE_LINE, null))
+			.toEqual(fresh!.slice(0, FIRST_CODE_LINE));
+		expect(await highlight_lines("test|rebuilt-prefix", "markdown", doc, depth, null)).toEqual(fresh);
 	}, 60000);
 
-	it("restarts a tokenization in progress", async () => {
-		const doc = await markdown_doc("rust");
+	it("restarts a tokenization in progress, even one resumed from a cached prefix", async () => {
+		const doc = await markdown_doc("rust", "let x = \"a\";");
 		const depth = doc.split("\n").length;
+		expect(await highlight_lines("test|rebuilt-inflight", "markdown", doc, 4, null)).toHaveLength(4);
 		const restarts = stats.grammar_restarts;
 		between_chunks.hook = () => ensure_lang("rust");
 		const ours = await highlight_lines("test|rebuilt-inflight", "markdown", doc, depth, null);
@@ -74,5 +88,25 @@ describe("a grammar rebuilt by a language load", () => {
 		const fresh = await highlight_lines("test|rebuilt-inflight-fresh", "markdown", doc, depth, null);
 		expect(fresh).not.toBeNull();
 		expect(ours).toEqual(fresh);
+	}, 60000);
+
+	it("caches the lines that a restarted tokenization got through before a cancellation", async () => {
+		const doc = await markdown_doc("ruby", "puts \"a\"");
+		const depth = doc.split("\n").length;
+		const restarts = stats.grammar_restarts;
+		between_chunks.hook = () => ensure_lang("ruby");
+		// Cancelled before its third chunk: the first went to the old
+		// grammar, the second, after the restart, to the new one.
+		let checks = 0;
+		const cancelled = (): boolean => ++checks === 3;
+		expect(await highlight_lines("test|rebuilt-cancelled", "markdown", doc, depth, null, cancelled)).toBeNull();
+		expect(stats.grammar_restarts).toBe(restarts + 1);
+		const tokenized = stats.tokenized_lines;
+		const resumed = await highlight_lines("test|rebuilt-cancelled", "markdown", doc, depth, null);
+		// The new grammar's first chunk was cached and not tokenized again.
+		expect(stats.tokenized_lines - tokenized).toBe(depth - CHUNK_LINES);
+		const fresh = await highlight_lines("test|rebuilt-cancelled-fresh", "markdown", doc, depth, null);
+		expect(fresh).not.toBeNull();
+		expect(resumed).toEqual(fresh);
 	}, 60000);
 });
