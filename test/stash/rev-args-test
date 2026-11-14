@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Test that the stash view lists only the stashes when tig was started
+# with flags that choose where the log starts.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=4
+
+test_setup_work_dir()
+{
+	git init -q -b master .
+	git_config
+
+	echo "original line" > file
+	git add file
+	GIT_AUTHOR_DATE="1486403695" GIT_COMMITTER_DATE="1486403695" git commit -q -m "Initial commit"
+	git tag v1
+	GIT_AUTHOR_DATE="1486403697" GIT_COMMITTER_DATE="1486403697" git commit -q --allow-empty -m "Untagged commit"
+	echo "changed line" > file
+	GIT_AUTHOR_DATE="1486403700" GIT_COMMITTER_DATE="1486403700" git stash -q
+}
+
+# Runs tig with the given arguments and saves the stash view as $1.screen.
+run_case()
+{
+	case_name="$1"; shift
+
+	steps "
+		:view-stash
+		:save-display $case_name.screen
+	"
+	test_tig "$@"
+}
+
+run_case reflog --reflog
+
+assert_equals 'reflog.screen' <<EOF
+2017-02-06 17:55 +0000 Committer WIP on master: 531e109 Untagged commit
+
+[stash] stash@{0} - stash 1 of 1                                            100%
+EOF
+
+run_case not-tags --branches --not --tags
+
+assert_equals 'not-tags.screen' <<EOF
+2017-02-06 17:55 +0000 Committer WIP on master: 531e109 Untagged commit
+
+[stash] stash@{0} - stash 1 of 1                                            100%
+EOF
