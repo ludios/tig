@@ -70,8 +70,9 @@ apply_step(double step, int value)
  */
 
 struct time {
-	time_t sec;
-	int tz;
+	time_t sec;	/* Local wall-clock time, counted as if it were UTC. */
+	int tz;		/* Minus the UTC offset in seconds, e.g. -3600 for +0100,
+			 * so sec + tz is the Unix time. */
 };
 
 struct ident {

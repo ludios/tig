@@ -131,10 +131,20 @@ time_now(struct timeval *timeval, struct timezone *tz)
 	return 0;
 }
 
+/*
+ * Compare the moments t1 and t2, ignoring their time zones. Returns a
+ * negative number, 0, or a positive number when t1 is earlier than, at
+ * the same moment as, or later than t2.
+ */
 int
 timecmp(const struct time *t1, const struct time *t2)
 {
-	return (t1->sec + t1->tz) - (t2->sec + t2->tz);
+	time_t unix1 = t1->sec + t1->tz;
+	time_t unix2 = t2->sec + t2->tz;
+
+	/* Not unix1 - unix2: the int result would overflow for moments
+	 * that are more than ~68 years apart. */
+	return (unix1 > unix2) - (unix1 < unix2);
 }
 
 struct reldate {
