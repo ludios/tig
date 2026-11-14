@@ -236,6 +236,20 @@ describe("client + daemon end to end", () => {
 		expect(readdirSync(join(home, ".cache", "tig-syntax", "node-compile-cache")).length).toBe(1);
 	}, 60000);
 
+	it("keeps its log out of the viewed repository when $XDG_STATE_HOME is relative", () => {
+		// A relative state home would land inside the viewed repository,
+		// where a symlink could redirect log writes: ignored, as the XDG
+		// spec says, in favor of the home directory's.
+		const home = join(work, "home-state");
+		expect_highlighted(run_filter(show_output, filter_env({
+			TIG_SYNTAX_SOCKET: join(work, "state-relative.sock"),
+			XDG_STATE_HOME: "relative-state",
+			HOME: home,
+		})));
+		expect(readdirSync(repo)).not.toContain("relative-state");
+		expect(readdirSync(join(home, ".local", "state", "tig-syntax"))).toContain("daemon.log");
+	}, 60000);
+
 	it("falls back to the $TMPDIR socket when $XDG_RUNTIME_DIR is unusable", () => {
 		// A regular file, not a directory: unusable as a socket home
 		// no matter the privileges (a mode-0500 directory would look

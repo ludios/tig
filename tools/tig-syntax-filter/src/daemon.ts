@@ -15,7 +15,8 @@
 
 import * as net from "node:net";
 import { unlink, mkdir } from "node:fs/promises";
-import { join, resolve as resolve_path } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve as resolve_path } from "node:path";
 import { execFileSync } from "node:child_process";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
@@ -228,6 +229,22 @@ function forget_spawning_client(): void {
 	process.chdir("/");
 }
 
+/**
+ * The daemon log's directory under $XDG_STATE_HOME or ~/.local/state, or
+ * null without an absolute one.  A relative or empty setting would resolve
+ * inside the repository being viewed, where a symlink could send log
+ * writes to another file, so it is never used, and neither is a /tmp
+ * fallback shared with other users.
+ */
+function log_dir(): string | null {
+	const xdg = process.env["XDG_STATE_HOME"];
+	if (xdg !== undefined && isAbsolute(xdg)) {
+		return join(xdg, "tig-syntax");
+	}
+	const home = homedir();
+	return isAbsolute(home) ? join(home, ".local", "state", "tig-syntax") : null;
+}
+
 /** Listen on `path` with the socket owner-only from the moment it exists
  * (a chmod after listen leaves a window, and the path may be in a
  * world-writable /tmp fallback; the client also checks the peer UID).
@@ -246,17 +263,20 @@ async function main(): Promise<void> {
 	// Relative settings mean the spawning client's cwd, as in the client.
 	const socket_setting = socket_path();
 	const path = socket_setting === null ? null : resolve_path(socket_setting);
-	const state_home = process.env["XDG_STATE_HOME"] || join(process.env["HOME"] ?? "/tmp", ".local", "state");
-	const log_dir = resolve_path(state_home, "tig-syntax");
+	const logs = log_dir();
 	forget_spawning_client();
-	await mkdir(log_dir, { recursive: true });
+	if (logs !== null) {
+		await mkdir(logs, { recursive: true });
+	}
 	await configure({
 		sinks: {
-			file: getFileSink(join(log_dir, "daemon.log")),
+			// Without a log directory, stderr, which the client points
+			// at /dev/null.
+			log: logs === null ? getConsoleSink() : getFileSink(join(logs, "daemon.log")),
 			console: getConsoleSink(),
 		},
 		loggers: [
-			{ category: ["tig-syntax"], lowestLevel: "info", sinks: ["file"] },
+			{ category: ["tig-syntax"], lowestLevel: "info", sinks: ["log"] },
 			{ category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console"] },
 		],
 	});
