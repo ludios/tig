@@ -257,6 +257,7 @@ describe("client + daemon end to end", () => {
 		// pre-existing one): its environment carries our unique TMPDIR.
 		// procfs-only evidence, so asserted only where procfs exists.
 		if (process.platform === "linux") {
+			// oxlint-disable-next-line vitest/no-conditional-expect -- procfs exists only on Linux
 			expect(daemon_pids(fallback_tmp).length).toBeGreaterThan(0);
 		}
 	}, 60000);
@@ -312,6 +313,7 @@ describe("client + daemon end to end", () => {
 		// Mid-startup: the launchers are still sleeping, so count them.
 		await new Promise((resolve) => setTimeout(resolve, 700));
 		if (process.platform === "linux") {
+			// oxlint-disable-next-line vitest/no-conditional-expect -- procfs exists only on Linux
 			expect(daemon_pids(marker, "herd-daemon.sh").length).toBe(1);
 		}
 		for (const output of await Promise.all(runs)) {
@@ -419,7 +421,8 @@ async function run_against_fake(name: string, input: Buffer, reply: scripted_dae
 }
 
 describe("client fallback against a misbehaving scripted daemon", () => {
-	const input = Buffer.from(("y".repeat(99) + "\n").repeat(1000));
+	const text = ("y".repeat(99) + "\n").repeat(1000);
+	const input = Buffer.from(text);
 	const half = Math.floor(input.length / 2);
 	// Long enough that a run which only fell back at the deadline shows
 	// in its wall time: each of these must fall back at once.
@@ -429,7 +432,7 @@ describe("client fallback against a misbehaving scripted daemon", () => {
 		const run = await run_against_fake("hangup", input, (received) =>
 			({ data: marked_frame(half, received.subarray(0, half)), end: true }), deadline_ms);
 		expect(run.answered).toBe(1);
-		expect(run.output).toBe(`<<${input.subarray(0, half)}>>${input.subarray(half)}`);
+		expect(run.output).toBe(`<<${text.slice(0, half)}>>${text.slice(half)}`);
 		expect(run.ms).toBeLessThan(deadline_ms / 3);
 	}, 60000);
 
@@ -439,7 +442,7 @@ describe("client fallback against a misbehaving scripted daemon", () => {
 			end: false,
 		}), deadline_ms);
 		expect(run.answered).toBe(1);
-		expect(run.output).toBe(`<<${input.subarray(0, half)}>>${input.subarray(half)}`);
+		expect(run.output).toBe(`<<${text.slice(0, half)}>>${text.slice(half)}`);
 		expect(run.ms).toBeLessThan(deadline_ms / 3);
 	}, 60000);
 
@@ -447,7 +450,7 @@ describe("client fallback against a misbehaving scripted daemon", () => {
 		const run = await run_against_fake("garbage", input, () =>
 			({ data: Buffer.from("Q nonsense\n"), end: false }), deadline_ms);
 		expect(run.answered).toBe(1);
-		expect(run.output).toBe(input.toString());
+		expect(run.output).toBe(text);
 		expect(run.ms).toBeLessThan(deadline_ms / 3);
 	}, 60000);
 
@@ -456,7 +459,7 @@ describe("client fallback against a misbehaving scripted daemon", () => {
 		const run = await run_against_fake("no-end", input, (received) =>
 			({ data: marked_frame(received.length, received), end: false }), 500);
 		expect(run.answered).toBe(1);
-		expect(run.output).toBe(`<<${input}>>`);
+		expect(run.output).toBe(`<<${text}>>`);
 	}, 60000);
 });
 

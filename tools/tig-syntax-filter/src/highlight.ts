@@ -187,11 +187,11 @@ export async function ensure_lang(lang: string): Promise<boolean> {
 	}
 	const attempt = (async () => {
 		try {
-			await highlighter!.loadLanguage(lang as never);
+			await highlighter.loadLanguage(lang as never);
 			loaded_langs.add(lang);
 			return true;
 		} catch (err) {
-			logger.warn("no grammar for {lang}: {err}", { lang, err: String(err) });
+			logger.warn("no grammar for {lang}: {err}", () => ({ lang, err: String(err) }));
 			failed_langs.add(lang);
 			return false;
 		} finally {
@@ -420,11 +420,11 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		if (deadline !== null && performance.now() > deadline) {
 			const elapsed_ms = performance.now() - started;
 			const verdict = elapsed_ms >= VERDICT_MIN_BUDGET_SHARE * config.budget_ms;
-			logger.info("deadline hit tokenizing {lang} at line {done}/{needed} after {ms}ms; {outcome}", {
+			logger.info("deadline hit tokenizing {lang} at line {done}/{needed} after {ms}ms; {outcome}", () => ({
 				lang, done: prefix.length + token_lines.length, needed,
 				ms: Math.round(elapsed_ms),
 				outcome: verdict ? "failing fast at this depth" : "too little budget for a verdict",
-			});
+			}));
 			// Keep whichever cached prefix is longer: a deep retry
 			// that dies early must not shrink an existing entry.
 			keep_partial();
@@ -447,9 +447,9 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	}
 	const elapsed = performance.now() - started;
 	if (elapsed > 200) {
-		logger.info("tokenized lines {from}-{to} of {lang} in {ms}ms", {
+		logger.info("tokenized lines {from}-{to} of {lang} in {ms}ms", () => ({
 			from: prefix.length + 1, to: needed, lang, ms: Math.round(elapsed),
-		});
+		}));
 	}
 
 	const result = prefix.concat(emit());

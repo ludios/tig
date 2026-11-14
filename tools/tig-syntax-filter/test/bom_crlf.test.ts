@@ -110,7 +110,7 @@ function hunks_of(name: string): string {
 
 describe("byte-order marks and carriage returns", () => {
 	it("keep every section lossless", () => {
-		expect([...sections.keys()].sort()).toEqual(Object.keys(FILES).sort());
+		expect([...sections.keys()].toSorted()).toEqual(Object.keys(FILES).toSorted());
 		for (const [name, { input, output }] of sections) {
 			const stripped = output.toString("utf8").replace(/\x1b\[[0-9;]*m/g, "");
 			expect(Buffer.from(stripped, "utf8").equals(input), `lossless for ${name}`).toBe(true);

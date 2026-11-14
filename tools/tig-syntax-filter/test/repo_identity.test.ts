@@ -88,8 +88,12 @@ describe("has_textconv from a subdirectory", () => {
 	});
 });
 
+/** An LRU with a 100-byte budget that weighs a string by its length. */
+function sized(): ByteLRU<string> {
+	return new ByteLRU<string>(100, (v) => v.length);
+}
+
 describe("ByteLRU", () => {
-	const sized = () => new ByteLRU<string>(100, (v) => v.length);
 
 	it("evicts oldest entries past the byte budget", () => {
 		const lru = sized();

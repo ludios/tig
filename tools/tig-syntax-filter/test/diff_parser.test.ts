@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import fc from "fast-check";
+import { array, assert, integer, property } from "fast-check";
 import { SectionSplitter, parse_file_section, unquote_git_path, type diff_section } from "../src/diff_parser.ts";
 
 /** Split `data` into sections in one go. */
@@ -92,8 +92,8 @@ describe("SectionSplitter", () => {
 
 	it("produces identical file sections for any chunking of the input", () => {
 		const reference = merge_preamble(split_all(Buffer.from(SAMPLE_DIFF)));
-		fc.assert(fc.property(
-			fc.array(fc.integer({ min: 1, max: 40 }), { maxLength: 60 }),
+		assert(property(
+			array(integer({ min: 1, max: 40 }), { maxLength: 60 }),
 			(chunk_sizes) => {
 				const data = Buffer.from(SAMPLE_DIFF);
 				const splitter = new SectionSplitter();
@@ -140,14 +140,16 @@ describe("unquote_git_path", () => {
 	});
 });
 
+/** A file section of `lines`, each followed by a newline. */
+function file_section(lines: string[]): diff_section {
+	return {
+		kind: "file",
+		lines: lines.map((text) => ({ bytes: Buffer.from(text), had_newline: true })),
+		byte_length: lines.reduce((n, text) => n + text.length + 1, 0),
+	};
+}
+
 describe("parse_file_section", () => {
-	function file_section(lines: string[]): diff_section {
-		return {
-			kind: "file",
-			lines: lines.map((text) => ({ bytes: Buffer.from(text), had_newline: true })),
-			byte_length: lines.reduce((n, text) => n + text.length + 1, 0),
-		};
-	}
 
 	it("parses a rename with different extensions and maps hunks", () => {
 		const sections = split_all(Buffer.from(SAMPLE_DIFF));

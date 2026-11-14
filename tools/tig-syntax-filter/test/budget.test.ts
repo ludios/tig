@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { readFile } from "node:fs/promises";
-import { createHighlighter, type Highlighter, type ThemedToken } from "shiki";
+import { createHighlighter, type Highlighter } from "shiki";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,7 +57,7 @@ describe("chunked tokenization", () => {
 		const one_shot = reference.codeToTokensBase(content, {
 			lang: "typescript",
 			theme: "one-monokai" as never,
-		}) as ThemedToken[][];
+		});
 		expect(ours).toEqual(emit_sgr_lines(one_shot));
 	}, 60000);
 
@@ -75,7 +75,7 @@ describe("chunked tokenization", () => {
 		const one_shot = reference.codeToTokensBase(content, {
 			lang: "typescript",
 			theme: "one-monokai" as never,
-		}) as ThemedToken[][];
+		});
 		expect(deep).toEqual(emit_sgr_lines(one_shot));
 	}, 60000);
 });

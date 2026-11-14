@@ -294,12 +294,12 @@ export async function process_section(cwd: string, section: diff_section,
 					return highlighted;
 				}
 			} else {
-				logger.debug("unparsed file section: {first}", {
+				logger.debug("unparsed file section: {first}", () => ({
 					first: section.lines[0]!.bytes.toString("utf8").slice(0, 80),
-				});
+				}));
 			}
 		} catch (err) {
-			logger.error("section processing failed, passing through: {err}", { err: String(err) });
+			logger.error("section processing failed, passing through: {err}", () => ({ err: String(err) }));
 		}
 	}
 	return raw_section_output(section);

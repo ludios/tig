@@ -1,0 +1,80 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+
+	"options": {
+		"typeAware": true,
+		"typeCheck": true
+	},
+
+	"plugins": [
+		"eslint",
+		"typescript",
+		"unicorn",
+		"oxc",
+		"import",
+		"promise",
+		"node",
+		"vitest"
+	],
+
+	"categories": {
+		"correctness": "error",
+		"suspicious": "warn",
+		"perf": "warn"
+	},
+
+	"jsPlugins": [
+		{ "name": "@logtape", "specifier": "@logtape/lint/eslint" }
+	],
+
+	"rules": {
+		"typescript/no-floating-promises": "error",
+		"import/no-cycle": ["error", { "maxDepth": 8 }],
+		"no-console": ["warn", { "allow": ["warn", "error"] }],
+		"no-debugger": "error",
+		// https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-underscore-dangle.html
+		// This is just annoying.
+		"no-underscore-dangle": "off",
+		// https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-vars.html
+		// Should be a warning, not an error.
+		"no-unused-vars": "warn",
+		// https://oxc.rs/docs/guide/usage/linter/rules/unicorn/no-useless-spread.html
+		// A bad rule: it will stop you from doing [...something] to copy e.g. a Set
+		// to avoid issues with it being mutated as you iterate it.
+		"unicorn/no-useless-spread": "off",
+		// https://oxc.rs/docs/guide/usage/linter/rules/promise/always-return.html
+		// seems to be a silly rule for novice users of Promise who e.g. unnecessarily
+		// use more than one `then(...)`.
+		"promise/always-return": "off",
+		// https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-await-in-loop
+		// Silly rule for novices who don't know what they're doing.
+		"no-await-in-loop": "off",
+		// https://typescript-eslint.io/rules/no-unsafe-type-assertion/
+		// We cast deliberately at I/O boundaries (git's output, the client's protocol).
+		"typescript/no-unsafe-type-assertion": "off",
+		"typescript/consistent-type-imports": "error",
+		"unicorn/prefer-node-protocol": "error",
+		// https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-control-regex.html
+		// This package works on terminal escape sequences, which start with ESC.
+		"no-control-regex": "off",
+		// vitest's expect() takes a message to show on failure as its second argument.
+		"vitest/valid-expect": ["error", { "maxArgs": 2 }],
+		"vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "expect_highlighted"] }],
+		"@logtape/prefer-lazy-evaluation": "warn",
+		"@logtape/no-unawaited-log": "error",
+		"@logtape/require-meta-sink": "warn",
+		// We know; sometimes we need to interpolate to pluralize a word.
+		"@logtape/no-message-interpolation": "off"
+	},
+
+	"overrides": [
+		{
+			"files": ["test/**"],
+			"rules": {
+				// The tests silence all logging, LogTape's own included, so the
+				// meta logger is configured on purpose without any sinks.
+				"@logtape/require-meta-sink": "off"
+			}
+		}
+	]
+}

@@ -15,7 +15,7 @@
 
 import * as net from "node:net";
 import { unlink, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve as resolve_path } from "node:path";
 import { execFileSync } from "node:child_process";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { getFileSink } from "@logtape/file";
@@ -51,11 +51,11 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		const started = performance.now();
 
 		/** Resolves once the socket can take more output (or is gone). */
-		const drained = (): Promise<void> => new Promise((resolve) => {
+		const drained = (): Promise<void> => new Promise((resolve_drained) => {
 			const done = (): void => {
 				socket.off("drain", done);
 				socket.off("close", done);
-				resolve();
+				resolve_drained();
 			};
 			socket.once("drain", done);
 			socket.once("close", done);
@@ -151,10 +151,10 @@ function handle_connection(socket: net.Socket): Promise<void> {
 				stop_heartbeat();
 				if (!closed) {
 					socket.end("E 0\n");
-					logger.info("served {sections} sections for {cwd} in {ms}ms", {
+					logger.info("served {sections} sections for {cwd} in {ms}ms", () => ({
 						sections: sections_served, cwd,
 						ms: Math.round(performance.now() - started),
-					});
+					}));
 				}
 			});
 		});
@@ -166,7 +166,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		};
 		socket.on("close", finish);
 		socket.on("error", (err) => {
-			logger.info("connection error: {err}", { err: String(err) });
+			logger.info("connection error: {err}", () => ({ err: String(err) }));
 			finish();
 		});
 	});
@@ -244,10 +244,10 @@ function listen_private(server: net.Server, path: string, on_listening?: () => v
 
 async function main(): Promise<void> {
 	// Relative settings mean the spawning client's cwd, as in the client.
-	const socket = socket_path();
-	const path = socket === null ? null : resolve(socket);
+	const socket_setting = socket_path();
+	const path = socket_setting === null ? null : resolve_path(socket_setting);
 	const state_home = process.env["XDG_STATE_HOME"] || join(process.env["HOME"] ?? "/tmp", ".local", "state");
-	const log_dir = resolve(state_home, "tig-syntax");
+	const log_dir = resolve_path(state_home, "tig-syntax");
 	forget_spawning_client();
 	await mkdir(log_dir, { recursive: true });
 	await configure({
@@ -316,16 +316,16 @@ async function main(): Promise<void> {
 				await unlink(path);
 			} catch (unlink_err) {
 				if ((unlink_err as NodeJS.ErrnoException).code !== "ENOENT") {
-					logger.error("cannot replace stale {path}: {err}", {
+					logger.error("cannot replace stale {path}: {err}", () => ({
 						path, err: String(unlink_err),
-					});
+					}));
 					process.exit(1);
 				}
 			}
 			listen_private(server, path);
 			return;
 		}
-		logger.error("server error: {err}", { err: String(err) });
+		logger.error("server error: {err}", () => ({ err: String(err) }));
 		process.exit(1);
 	});
 
