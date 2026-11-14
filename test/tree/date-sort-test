@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Test that sorting the tree view by date compares Unix times: across
+# time zones, and across gaps of more than 2^31 seconds.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=8
+
+tigrc <<EOF
+set vertical-split = no
+EOF
+
+steps '
+	:view-tree
+	:toggle sort-field
+	:toggle sort-field
+	:toggle sort-field
+	:toggle sort-field
+	:toggle sort-field
+	:save-display tree-date.screen
+'
+
+commit_file()
+{
+	echo "$1" > "$1"
+	git add "$1"
+	GIT_AUTHOR_DATE="$2" GIT_COMMITTER_DATE="$2" git commit -q -m "Add $1"
+}
+
+test_setup_work_dir()
+{
+	git init -q .
+	git_config
+
+	commit_file epoch "@86400 +0000"
+	commit_file a-utc "2009-02-14 09:30 +0000"
+	# 09:00 UTC, so earlier than a-utc, though its wall clock reads later.
+	commit_file z-plus-one "2009-02-14 10:00 +0100"
+	commit_file future "2099-12-31 00:00 +0000"
+}
+
+test_tig
+
+assert_equals 'tree-date.screen' <<EOF
+Directory path /
+-rw-r--r-- Committer  6 1970-01-02 00:00 +0000 epoch
+-rw-r--r-- Committer 11 2009-02-14 10:00 +0100 z-plus-one
+-rw-r--r-- Committer  6 2009-02-14 09:30 +0000 a-utc
+-rw-r--r-- Committer  7 2099-12-31 00:00 +0000 future
+
+[tree] 3aea3d0353bcf93e1b8f067134bafa4066a2ef11 - file 2 of 4               100%
+EOF
