@@ -1,6 +1,6 @@
 {
 	"$schema": "https://json.schemastore.org/tsconfig",
-	"include": ["src/**/*.ts", "src/**/*.mjs", "test/**/*.ts"],
+	"include": ["src/**/*.ts", "src/**/*.mjs", "test/**/*.ts", "vitest.config.ts"],
 	"compilerOptions": {
 		"module": "nodenext",
 		// Not esnext: node runs src/ without transpiling it, so allow only the
