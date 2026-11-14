@@ -220,46 +220,39 @@ argv_containsn(const char **argv, const char *arg, size_t arglen)
 DEFINE_ALLOCATOR(argv_realloc, const char *, SIZEOF_ARG)
 
 /*
- * Append a copy of the first arglen bytes of arg to the NULL-terminated
- * array *argv (which may be NULL), even when that copy is empty.
- * Returns false when the array cannot grow.
+ * Append a copy of arg to the NULL-terminated array *argv (which may be
+ * NULL), even when arg is "". Dies if memory runs out.
  */
-static bool
-argv_push(const char ***argv, const char *arg, size_t arglen)
+static void
+argv_push(const char ***argv, const char *arg)
 {
 	size_t argc = argv_size(*argv);
-	char *alloc;
+	char *copy = strdup(arg);
 
-	if (!argv_realloc(argv, argc, 2)) {
-		return false;
-	}
-
-	alloc = strndup(arg, arglen);
-	if (!alloc) {
+	if (!copy) {
 		die("Failed to allocate arg");
 	}
 
-	(*argv)[argc++] = alloc;
+	/* argv_realloc() itself dies if memory runs out. */
+	argv_realloc(argv, argc, 2);
+	(*argv)[argc++] = copy;
 	(*argv)[argc] = NULL;
-
-	return true;
 }
 
-bool
-argv_appendn(const char ***argv, const char *arg, size_t arglen)
-{
-	if (!*arg && argv_size(*argv) > 0) {
-		return true;
-	}
-
-	return argv_push(argv, arg, arglen);
-}
-
-
+/*
+ * Append a copy of arg to the NULL-terminated array *argv (which may be
+ * NULL), but skip a "" if *argv already has an element: command
+ * templates use "" for arguments that are left out. Always returns
+ * true (it dies if memory runs out).
+ */
 bool
 argv_append(const char ***argv, const char *arg)
 {
-	return argv_appendn(argv, arg, strlen(arg));
+	if (*arg || argv_size(*argv) == 0) {
+		argv_push(argv, arg);
+	}
+
+	return true;
 }
 
 bool
@@ -357,11 +350,13 @@ format_expand_arg(struct format_context *format, const char *name, const char *e
 static bool
 format_append_arg(struct format_context *format, const char ***dst_argv, const char *arg)
 {
-	/* argv_append() drops "", which internal command templates use as
-	 * an omittable placeholder, so keep a "" that the user wrote as an
-	 * argument (e.g. bind ... '') here. */
+	assert(arg);
+
+	/* argv_append() skips a "" that follows other arguments, so keep
+	 * a "" that the user wrote as an argument (e.g. bind ... '') here. */
 	if (!*arg && (format->argv_flags & argv_flag_preserve_empty)) {
-		return argv_push(dst_argv, "", 0);
+		argv_push(dst_argv, "");
+		return true;
 	}
 
 	memset(format->buf, 0, sizeof(format->buf));

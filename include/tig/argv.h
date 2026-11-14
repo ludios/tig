@@ -31,7 +31,6 @@ bool argv_from_string(const char *argv[], int *argc, char *cmd);
 void argv_free(const char *argv[]);
 size_t argv_size(const char **argv);
 bool argv_append(const char ***argv, const char *arg);
-bool argv_appendn(const char ***argv, const char *arg, size_t arglen);
 bool argv_append_array(const char ***dst_argv, const char *src_argv[]);
 bool argv_copy(const char ***dst, const char *src[]);
 bool argv_contains(const char **argv, const char *arg);
