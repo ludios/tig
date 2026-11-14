@@ -65,7 +65,6 @@ const extension_to_lang: Record<string, string> = {
 	"ps1": "powershell",
 	"bat": "bat", "cmd": "bat",
 	"awk": "awk",
-	"m4": "m4",
 	"tcl": "tcl",
 };
 
@@ -93,6 +92,13 @@ const shebang_to_lang: [RegExp, string][] = [
 	[/\bawk\b/, "awk"],
 	[/\btclsh\b/, "tcl"],
 ];
+
+/** Every language that detect_lang() can return. */
+export const detectable_langs: ReadonlySet<string> = new Set([
+	...Object.values(extension_to_lang),
+	...Object.values(basename_to_lang),
+	...shebang_to_lang.map(([, lang]) => lang),
+]);
 
 /**
  * Pick a shiki language for a repository-relative `path`, consulting the
