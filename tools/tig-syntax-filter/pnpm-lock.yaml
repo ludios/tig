@@ -214,8 +214,8 @@ importers:
         specifier: 2.4.2
         version: 2.4.2
       ayy:
-        specifier: 4.1.0
-        version: 4.1.0
+        specifier: 5.0.1
+        version: 5.0.1
       shiki:
         specifier: 4.6.0
         version: 4.6.0
@@ -262,6 +262,10 @@ packages:
 
   '@logtape/logtape@2.4.2':
     resolution: {integrity: sha512-YJyC1gEMgWmTqJTRtKkjgasEbi8/0gP7Dj8n6bL46gQIAhpTY8uXJ+1QYMOgF5asotlGMvy3G7ejXUe45Yd1MQ==}
+
+  '@ludios/node-inspect-extracted@3.3.4':
+    resolution: {integrity: sha512-pRn7EVjC1UAZ0MzE0WEk6lhoQOsXtVPfwPJcZYTjaXr/QTW/9uLA0QkL5H4kCeKpujx3xwJnCHUZBiZRl38NaA==}
+    engines: {node: '>=14'}
 
   '@oxc-project/types@0.143.0':
     resolution: {integrity: sha512-u6JZdLBTLotrNC9Vd6vPssINdzcCzleKAH6EJKImQb7GtYvX5keN2dxkoK44stCc4tffE6QQRtZTXVSzsLUlWA==}
@@ -722,9 +726,9 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  ayy@4.1.0:
-    resolution: {integrity: sha512-SKSsZh415xVJGMWYSeL/x1LskHJV87+ywuTRDMr40gSGL0wi/qqeJmolwqgqyN61MMSH3CkcfwQ7UF9CVOzrjg==}
-    engines: {node: '>= 14'}
+  ayy@5.0.1:
+    resolution: {integrity: sha512-8HHuPzhcbrRgzCYTDG8qagW/dhV6dJaBqP5d/BwyvMNRAgQFB5g0vOTSXAK1b1W4sPjGG0VgEbwkMbbzPtWjjA==}
+    engines: {node: '>= 14.13.1'}
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -1128,6 +1132,8 @@ snapshots:
 
   '@logtape/logtape@2.4.2': {}
 
+  '@ludios/node-inspect-extracted@3.3.4': {}
+
   '@oxc-project/types@0.143.0': {}
 
   '@oxlint-tsgolint/darwin-arm64@7.0.2007':
@@ -1419,7 +1425,9 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  ayy@4.1.0: {}
+  ayy@5.0.1:
+    dependencies:
+      '@ludios/node-inspect-extracted': 3.3.4
 
   ccount@2.0.1: {}
 
