@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { getLogger } from "@logtape/logtape";
 import { parse_file_section, type diff_section, type file_info } from "./diff_parser.ts";
-import { ensure_lang, highlight_lines, frame_content } from "./highlight.ts";
+import { ensure_lang, highlight_sides, frame_content } from "./highlight.ts";
 import { detect_lang } from "./lang_map.ts";
 import { cat_blob, content_identity, read_worktree_file, has_textconv, repo_info } from "./git.ts";
 import { config } from "./config.ts";
@@ -195,10 +195,10 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// One tokenization budget for the whole section, shared by both sides;
 	// blob fetching and grammar loading above deliberately do not count.
 	const deadline = performance.now() + config.budget_ms;
-	const old_sgr = old_doc === null ? null :
-		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.lines, info.old_rows, deadline, cancelled);
-	const new_sgr = new_doc === null ? null :
-		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.lines, info.new_rows, deadline, cancelled);
+	const [old_sgr, new_sgr] = await highlight_sides(
+		old_doc === null ? null : { ...old_doc, wanted: info.old_rows },
+		new_doc === null ? null : { ...new_doc, wanted: info.new_rows },
+		info.aligned, deadline, cancelled);
 	if (old_sgr === null && new_sgr === null) {
 		// Nothing to style (budget exhausted or size-guarded): the raw
 		// path produces identical bytes without validation/rebuild work.

@@ -251,6 +251,45 @@ describe("parse_file_section", () => {
 		expect(info?.new_rows).toEqual([]);
 	});
 
+	it("aligns the unchanged lines around and inside hunks, through the end", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -3,3 +3,4 @@",
+			" c",
+			"-d",
+			"+D",
+			"+D2",
+			" e",
+			"@@ -10,2 +10,0 @@",
+			"-j",
+			"-k",
+			"@@ -20,0 +20,1 @@",
+			"+t",
+		]));
+		expect(info?.aligned).toEqual([
+			{ old_start: 1, new_start: 1, count: 3 },	// before the first hunk, and "c"
+			{ old_start: 5, new_start: 6, count: 5 },	// "e", then up to the deletion
+			{ old_start: 12, new_start: 11, count: 9 },	// up to the insertion after old line 20
+			{ old_start: 21, new_start: 21, count: Infinity },
+		]);
+	});
+
+	it("aligns no gap whose sides disagree on its length", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -5 +7 @@",
+			"-a",
+			"+b",
+		]));
+		expect(info?.aligned).toEqual([{ old_start: 6, new_start: 8, count: Infinity }]);
+	});
+
 	it("drops the TAB git appends to names containing a space", () => {
 		const info = parse_file_section(file_section([
 			"diff --git a/my file.js b/my file.js",

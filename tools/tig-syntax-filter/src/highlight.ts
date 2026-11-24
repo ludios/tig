@@ -13,6 +13,7 @@ import { createHighlighter, type Highlighter } from "shiki";
 import { INITIAL, EncodedTokenMetadata, type StateStack } from "shiki/textmate";
 import { config } from "./config.ts";
 import { ByteLRU } from "./lru.ts";
+import type { aligned_run } from "./diff_parser.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -92,6 +93,9 @@ export const stats = {
 	/** Lines run through the grammar again, from a cached start state,
 	 * only to render them (cached renderings excluded). */
 	retokenized_lines: 0,
+	/** Lines whose end state was copied from a peer document instead of
+	 * running them through the grammar. */
+	copied_lines: 0,
 	/** Times a pass started over because its grammar was rebuilt. */
 	grammar_restarts: 0,
 };
@@ -365,10 +369,28 @@ function render_line(text: string, tokens: Uint32Array | null, color_map: readon
 }
 
 /**
+ * A document that a pass can copy line-start states from: one whose
+ * lines largely equal the pass's own, such as the other side of a diff.
+ */
+export interface peer_doc {
+	identity: string,
+	lines: readonly string[],
+	/** Runs of lines claimed equal, ascending: the pass's line `start` + i
+	 * is the peer's line `peer_start` + i, for i < `count` (which may be
+	 * Infinity).  Claims are checked, so a wrong one costs only time. */
+	runs: readonly { start: number, peer_start: number, count: number }[],
+}
+
+/**
  * One request's walk over a source document.  It extends the document's
  * cached line-start states through the deepest wanted line, rendering the
  * wanted lines that it tokenizes on the way, then renders the other
- * wanted lines from their cached start states.  Work runs in chunks of
+ * wanted lines from their cached start states.  Given a peer document, it
+ * copies the peer's cached end state for a line instead of tokenizing the
+ * line, wherever the line equals the aligned peer line and the two start
+ * states are equal: the same text from the same state ends in the same
+ * state.  This is how VS Code retokenizes after an edit, stopping once
+ * the states converge again.  Work runs in chunks of
  * CHUNK_LINES grammar runs with event-loop yields between them; if shiki
  * rebuilds the grammar during a yield (another request loaded a
  * language), the pass begins again under the new grammar.
@@ -383,6 +405,7 @@ class HighlightPass {
 	private readonly wanted_set: ReadonlySet<number>;
 	/** The deepest wanted line. */
 	private readonly depth: number;
+	private readonly peer: peer_doc | null;
 
 	/** Set by begin(), from the grammar shiki has now. */
 	private key!: string;
@@ -390,6 +413,11 @@ class HighlightPass {
 	private color_map!: readonly string[];
 	/** The cached states when the pass (re)began; never mutated. */
 	private known!: readonly StateStack[];
+	/** The peer's cached states when the pass (re)began. */
+	private peer_states!: readonly StateStack[];
+	/** Index into the peer's runs of the first one that may hold a line
+	 * not yet run or copied. */
+	private peer_run!: number;
 	/** States this pass computed after `known`'s last. */
 	private computed: StateStack[] = [];
 	/** Wanted line -> its SGR-annotated text, plus the line's own
@@ -399,7 +427,8 @@ class HighlightPass {
 	 * checks. */
 	private runs = 0;
 
-	constructor(hl: Highlighter, identity: string, lang: string, lines: readonly string[], wanted: readonly number[]) {
+	constructor(hl: Highlighter, identity: string, lang: string, lines: readonly string[],
+		    wanted: readonly number[], peer: peer_doc | null) {
 		A.gt(wanted.length, 0, "a pass needs a wanted line");
 		this.hl = hl;
 		this.identity = identity;
@@ -408,6 +437,7 @@ class HighlightPass {
 		this.wanted = wanted;
 		this.wanted_set = new Set(wanted);
 		this.depth = wanted.at(-1)!;
+		this.peer = peer;
 		this.begin();
 	}
 
@@ -420,6 +450,9 @@ class HighlightPass {
 		this.color_map = this.hl.getInternalContext().setTheme(theme_name).colorMap;
 		const entry = doc_cache.get(this.key);
 		this.known = entry?.states ?? [INITIAL];
+		this.peer_states = this.peer === null ? [] :
+			doc_cache.get(cache_key(this.hl, this.peer.identity, this.lang))?.states ?? [];
+		this.peer_run = 0;
 		this.computed = [];
 		this.sgr = new Map();
 		for (const line of this.wanted) {
@@ -441,6 +474,45 @@ class HighlightPass {
 		A.lte(line, this.state_count(), "line-start state not known yet");
 		const i = line - 1;
 		return i < this.known.length ? this.known[i]! : this.computed[i - this.known.length]!;
+	}
+
+	/**
+	 * If the peer has `line` (1-based) with the same text, from an equal
+	 * start state, and knows its end state, record that as `line`'s.
+	 *
+	 * @returns Whether it did.  Lines must be asked about in order.
+	 */
+	private copy_from_peer(line: number): boolean {
+		if (this.peer === null) {
+			return false;
+		}
+		const runs = this.peer.runs;
+		while (this.peer_run < runs.length) {
+			const run = runs[this.peer_run]!;
+			if (line < run.start + run.count) {
+				break;
+			}
+			this.peer_run++;
+		}
+		const run = runs[this.peer_run];
+		if (run === undefined || line < run.start) {
+			return false;
+		}
+		const peer_line = run.peer_start + line - run.start;
+		// The peer's end state for peer_line is its start state for the
+		// line after.
+		if (peer_line >= this.peer_states.length) {
+			return false;
+		}
+		const start = this.start_state(line);
+		const peer_start = this.peer_states[peer_line - 1]!;
+		if ((start !== peer_start && !start.equals(peer_start)) ||
+		    this.lines[line - 1] !== this.peer.lines[peer_line - 1]) {
+			return false;
+		}
+		this.computed.push(this.peer_states[peer_line]!);
+		stats.copied_lines++;
+		return true;
 	}
 
 	/** Run `line` (1-based) through the grammar from its start state. */
@@ -530,8 +602,12 @@ class HighlightPass {
 		const started = performance.now();
 		const tokenized_before = stats.tokenized_lines;
 		const retokenized_before = stats.retokenized_lines;
+		const copied_before = stats.copied_lines;
 		pass: while (true) {
 			while (this.state_count() <= this.depth) {
+				if (this.copy_from_peer(this.state_count())) {
+					continue;
+				}
 				const next = await this.step(deadline, cancelled);
 				if (next === "stop") {
 					return null;
@@ -566,9 +642,10 @@ class HighlightPass {
 		this.store();
 		const elapsed = performance.now() - started;
 		if (elapsed > 200) {
-			logger.info("{lang} through line {depth}: tokenized {tokenized} lines, re-tokenized {retokenized} to render them, in {ms}ms", () => ({
+			logger.info("{lang} through line {depth}: tokenized {tokenized} lines, copied {copied} lines' states from the other side, re-tokenized {retokenized} lines to render them, in {ms}ms", () => ({
 				lang: this.lang, depth: this.depth,
 				tokenized: stats.tokenized_lines - tokenized_before,
+				copied: stats.copied_lines - copied_before,
 				retokenized: stats.retokenized_lines - retokenized_before,
 				ms: Math.round(elapsed),
 			}));
@@ -601,6 +678,8 @@ class HighlightPass {
  *                   null for none.  It is wall time, so under contention
  *                   sections give up a little earlier.
  * @param cancelled  Polled between chunks; true means give up.
+ * @param peer       A document, in the same language, to copy states
+ *                   from (see peer_doc), using its cached states.
  * @returns          Wanted line -> its SGR-annotated text, or null after
  *                   giving up, when a wanted line is deeper than the
  *                   configured line cap, or when a line through the
@@ -610,7 +689,7 @@ class HighlightPass {
  */
 export async function highlight_lines(identity: string, lang: string, lines: readonly string[],
 				      wanted: Iterable<number>, deadline: number | null,
-				      cancelled?: () => boolean): Promise<Map<number, string> | null> {
+				      cancelled?: () => boolean, peer?: peer_doc): Promise<Map<number, string> | null> {
 	A(highlighter !== null, "highlighter not initialized");
 	const hl = highlighter;
 	const rows = [...new Set(wanted)].filter((line) => line <= lines.length).toSorted((a, b) => a - b);
@@ -635,7 +714,8 @@ export async function highlight_lines(identity: string, lang: string, lines: rea
 		// render from what it cached.
 		await inflight.promise;
 	}
-	const entry = { depth, promise: new HighlightPass(hl, identity, lang, lines, rows).run(deadline, cancelled) };
+	const pass = new HighlightPass(hl, identity, lang, lines, rows, peer ?? null);
+	const entry = { depth, promise: pass.run(deadline, cancelled) };
 	passes_inflight.set(key, entry);
 	try {
 		return await entry.promise;
@@ -644,4 +724,62 @@ export async function highlight_lines(identity: string, lang: string, lines: rea
 			passes_inflight.delete(key);
 		}
 	}
+}
+
+/** One side of a file diff: its document and the lines to render. */
+export interface diff_side {
+	identity: string,
+	lang: string,
+	lines: readonly string[],
+	/** As for highlight_lines(). */
+	wanted: readonly number[],
+}
+
+/** How many line-start states the cache has for `side`'s document. */
+function cached_state_count(hl: Highlighter, side: diff_side): number {
+	return doc_cache.get(cache_key(hl, side.identity, side.lang))?.states.length ?? 0;
+}
+
+/**
+ * highlight_lines() for both sides of a file diff, under one deadline.
+ * When both sides are in the same language, the side with more cached
+ * states goes first, and the other copies its states wherever the two
+ * documents are equal (see peer_doc).  So once one side of a giant file
+ * has been tokenized, the other side costs about as much as the diff
+ * (unless the grammar's states after a hunk never converge again), and
+ * so does a neighboring commit's diff of the same file.
+ *
+ * @param old_side  The old side, or null when it has nothing to render.
+ * @param new_side  The new side, or null when it has nothing to render.
+ * @param aligned   Runs of lines the diff presents as unchanged.
+ * @param deadline  As for highlight_lines(), shared by both sides.
+ * @param cancelled As for highlight_lines().
+ * @returns         The old and the new side's renderings, each null when
+ *                  that side is null or highlight_lines() gave up on it.
+ */
+export async function highlight_sides(old_side: diff_side | null, new_side: diff_side | null,
+				      aligned: readonly aligned_run[], deadline: number | null,
+				      cancelled?: () => boolean): Promise<[Map<number, string> | null, Map<number, string> | null]> {
+	A(highlighter !== null, "highlighter not initialized");
+	const render = (side: diff_side | null, peer?: peer_doc): Promise<Map<number, string> | null> | null =>
+		side === null ? null : highlight_lines(side.identity, side.lang, side.lines, side.wanted, deadline, cancelled, peer);
+	if (old_side === null || new_side === null || old_side.lang !== new_side.lang) {
+		return [await render(old_side), await render(new_side)];
+	}
+	if (cached_state_count(highlighter, old_side) > cached_state_count(highlighter, new_side)) {
+		const old_sgr = await render(old_side);
+		const new_sgr = await render(new_side, {
+			identity: old_side.identity,
+			lines: old_side.lines,
+			runs: aligned.map((run) => ({ start: run.new_start, peer_start: run.old_start, count: run.count })),
+		});
+		return [old_sgr, new_sgr];
+	}
+	const new_sgr = await render(new_side);
+	const old_sgr = await render(old_side, {
+		identity: new_side.identity,
+		lines: new_side.lines,
+		runs: aligned.map((run) => ({ start: run.old_start, peer_start: run.new_start, count: run.count })),
+	});
+	return [old_sgr, new_sgr];
 }

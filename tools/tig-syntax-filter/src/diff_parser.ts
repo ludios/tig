@@ -141,6 +141,14 @@ export interface hunk {
 	body: number[];
 }
 
+/** A run of `count` lines that a diff presents as unchanged: old line
+ * `old_start` + i is new line `new_start` + i, for i < `count`. */
+export interface aligned_run {
+	old_start: number;
+	new_start: number;
+	count: number;
+}
+
 /** Parsed identity of one file section, enough to fetch and map sources. */
 export interface file_info {
 	old_path: string | null;	/* null = /dev/null (added file) */
@@ -153,6 +161,23 @@ export interface file_info {
 	 * Empty means that side need not be fetched or tokenized. */
 	old_rows: number[];
 	new_rows: number[];
+	/** Runs of lines the diff presents as unchanged, ascending: context
+	 * lines, and the lines before, between and after hunks.  The last
+	 * run's count is Infinity: it runs to the end of both files.  A diff
+	 * made while ignoring whitespace can present unequal lines so. */
+	aligned: aligned_run[];
+}
+
+/** Append the run of `count` unchanged lines at `old_start` and
+ * `new_start` to `runs`, merging it into the last run when contiguous. */
+function push_aligned(runs: aligned_run[], old_start: number, new_start: number, count: number): void {
+	const last = runs.at(-1);
+	if (last !== undefined && last.old_start + last.count === old_start &&
+	    last.new_start + last.count === new_start) {
+		last.count += count;
+		return;
+	}
+	runs.push({ old_start, new_start, count });
 }
 
 /** Unquote a git C-style quoted path ("\t", "\303\251", ...). */
@@ -277,6 +302,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 	const hunks: hunk[] = [];
 	const old_rows: number[] = [];
 	const new_rows: number[] = [];
+	const aligned: aligned_run[] = [];
 	const prefixed = has_default_prefixes(section.lines[0]!.bytes.toString("utf8"));
 
 	let i = 0;
@@ -321,12 +347,15 @@ export function parse_file_section(section: diff_section): file_info | null {
 
 	// A section with no hunks (pure rename/mode change) parses as no work.
 	if (i === section.lines.length) {
-		return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows };
+		return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows, aligned };
 	}
 	if (!saw_minus || !saw_plus) {
 		return null;
 	}
 
+	// The first line after the previous hunk, per side.
+	let old_next = 1;
+	let new_next = 1;
 	for (; i < section.lines.length; i++) {
 		const text = section.lines[i]!.bytes.toString("utf8");
 
@@ -342,6 +371,13 @@ export function parse_file_section(section: diff_section): file_info | null {
 		const header = parse_hunk_header(text);
 		if (header === null) {
 			return null;
+		}
+		// The unchanged lines since the previous hunk, unless the two
+		// sides disagree on how many there are.
+		const old_first = header.old_count > 0 ? header.old_start : header.old_start + 1;
+		const new_first = header.new_count > 0 ? header.new_start : header.new_start + 1;
+		if (old_first - old_next === new_first - new_next && old_first > old_next) {
+			push_aligned(aligned, old_next, new_next, old_first - old_next);
 		}
 		const body: number[] = [];
 		let old_left = header.old_count;
@@ -371,6 +407,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 			} else if (first === 0x20) {
 				// Context is styled from the new side.
 				new_rows.push(new_row);
+				push_aligned(aligned, old_row, new_row, 1);
 				old_row++;
 				new_row++;
 				old_left--;
@@ -390,7 +427,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 			return null;
 		}
 		hunks.push({ old_start: header.old_start, new_start: header.new_start, body });
+		old_next = old_first + header.old_count;
+		new_next = new_first + header.new_count;
 	}
+	push_aligned(aligned, old_next, new_next, Infinity);
 
-	return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows };
+	return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows, aligned };
 }
