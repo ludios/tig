@@ -15,8 +15,8 @@
  * - TIG_SYNTAX_MAX_SECTION_BYTES: larger file sections stream through raw
  *   instead of being buffered (see diff_parser.ts).
  * - TIG_SYNTAX_LINE_CACHE_MB / TIG_SYNTAX_BLOB_CACHE_MB: approximate
- *   budgets for the tokenized-line cache (highlight.ts) and the blob cache
- *   (git.ts).
+ *   budgets for the tokenization cache (line-start grammar states and
+ *   rendered lines; highlight.ts) and the blob cache (git.ts).
  */
 
 /** Parse integer environment variable `name`, enforcing [min, max]. */

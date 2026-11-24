@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SectionSplitter } from "../src/diff_parser.ts";
-import { init_highlighter, ensure_lang, highlight_lines } from "../src/highlight.ts";
+import { init_highlighter, ensure_lang } from "../src/highlight.ts";
+import { highlight_prefix } from "./highlight_prefix.ts";
 import { process_section } from "../src/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -134,8 +135,8 @@ describe("byte-order marks and carriage returns", () => {
 		// git.ts spans several 128-line tokenization chunks.
 		const lines = (await readFile(join(HERE, "..", "src", "git.ts"), "utf8")).split("\n");
 		await ensure_lang("typescript");
-		const lf = await highlight_lines("test|lf", "typescript", lines.join("\n"), lines.length, null);
-		const crlf = await highlight_lines("test|crlf", "typescript", lines.join("\r\n"), lines.length, null);
+		const lf = await highlight_prefix("test|lf", "typescript", lines.join("\n"), lines.length, null);
+		const crlf = await highlight_prefix("test|crlf", "typescript", lines.join("\r\n"), lines.length, null);
 		expect(lf).not.toBeNull();
 		const last = lines.length - 1;
 		expect(crlf).toEqual(lf!.map((line, i) => i < last ? line + "\r" : line));

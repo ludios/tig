@@ -30,7 +30,7 @@ const logger = getLogger(["tig-syntax", "daemon"]);
 
 /* After IDLE_SHED_MS without connections, drop the cheap-to-rebuild git
  * state (blob and attribute caches, git children) but keep the costly
- * tokenized-line cache; after IDLE_EXIT_MS, exit. */
+ * tokenization cache; after IDLE_EXIT_MS, exit. */
 const IDLE_SHED_MS = 30 * 60 * 1000;
 const IDLE_EXIT_MS = 24 * 60 * 60 * 1000;
 

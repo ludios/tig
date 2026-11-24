@@ -157,8 +157,8 @@ describe("parse_file_section", () => {
 		expect(info?.old_path).toBe("bar.py");
 		expect(info?.new_path).toBe("baz.py");
 		expect(info?.hunks.length).toBe(1);
-		expect(info?.old_last_line).toBe(1);
-		expect(info?.new_last_line).toBe(1);
+		expect(info?.old_rows).toEqual([1]);
+		expect(info?.new_rows).toEqual([1]);
 	});
 
 	it("treats /dev/null sides as absent", () => {
@@ -216,11 +216,11 @@ describe("parse_file_section", () => {
 			"+added two",
 			" context b",
 		]));
-		expect(info?.old_last_line).toBe(0);   // no "-" lines: skip the old blob
-		expect(info?.new_last_line).toBe(13);  // trailing context row
+		expect(info?.old_rows).toEqual([]);   // no "-" lines: skip the old blob
+		expect(info?.new_rows).toEqual([10, 11, 12, 13]);
 	});
 
-	it("bounds the old side at the last deleted row, not the hunk end", () => {
+	it("styles context from the new side only", () => {
 		const info = parse_file_section(file_section([
 			"diff --git a/doc.txt b/doc.txt",
 			"index 1111111..2222222 100644",
@@ -233,8 +233,8 @@ describe("parse_file_section", () => {
 			" ctx3",
 			" ctx4",
 		]));
-		expect(info?.old_last_line).toBe(100); // deletion at the hunk top
-		expect(info?.new_last_line).toBe(103); // last context row (new side)
+		expect(info?.old_rows).toEqual([100]); // only the deletion: context is the new side's
+		expect(info?.new_rows).toEqual([100, 101, 102, 103]);
 	});
 
 	it("never needs the new side for a context-free pure deletion", () => {
@@ -247,8 +247,8 @@ describe("parse_file_section", () => {
 			"-gone one",
 			"-gone two",
 		]));
-		expect(info?.old_last_line).toBe(8);
-		expect(info?.new_last_line).toBe(0);
+		expect(info?.old_rows).toEqual([7, 8]);
+		expect(info?.new_rows).toEqual([]);
 	});
 
 	it("drops the TAB git appends to names containing a space", () => {

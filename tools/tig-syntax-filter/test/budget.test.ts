@@ -12,7 +12,8 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
-import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
+import { init_highlighter, ensure_lang, emit_sgr_line, highlight_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
+import { highlight_prefix } from "./highlight_prefix.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -42,33 +43,61 @@ describe("chunked tokenization", () => {
 		const lines = content.split("\n");
 		// Continuation across chunks is what this test covers.
 		expect(lines.length).toBeGreaterThan(2 * CHUNK_LINES);
-		const ours = await highlight_lines("test|chunk-eq", "typescript", content,
-						   lines.length, null);
+		const ours = await highlight_prefix("test|chunk-eq", "typescript", content,
+						    lines.length, null);
 		expect(ours).not.toBeNull();
 		const one_shot = reference.codeToTokensBase(content, {
 			lang: "typescript",
 			theme: "one-monokai" as never,
 		});
-		expect(ours).toEqual(emit_sgr_lines(one_shot));
+		expect(ours).toEqual(one_shot.map(emit_sgr_line));
 	}, 60000);
 
 	it("resumes a deeper request from the cached prefix, token-identically", async () => {
 		const content = await readFile(join(HERE, "..", "src", "git.ts"), "utf8");
 		const lines = content.split("\n");
 		// 100 is not a chunk multiple: the resume starts mid-chunk.
-		const shallow = await highlight_lines("test|resume", "typescript", content, 100, null);
+		const shallow = await highlight_prefix("test|resume", "typescript", content, 100, null);
 		expect(shallow!.length).toBe(100);
 		const before = stats.tokenized_lines;
-		const deep = await highlight_lines("test|resume", "typescript", content,
-						   lines.length, null);
+		const deep = await highlight_prefix("test|resume", "typescript", content,
+						    lines.length, null);
 		expect(deep!.length).toBe(lines.length);
 		expect(stats.tokenized_lines - before).toBe(lines.length - 100);
 		const one_shot = reference.codeToTokensBase(content, {
 			lang: "typescript",
 			theme: "one-monokai" as never,
 		});
-		expect(deep).toEqual(emit_sgr_lines(one_shot));
+		expect(deep).toEqual(one_shot.map(emit_sgr_line));
 	}, 60000);
+});
+
+describe("cached line-start states", () => {
+	// Line 300 sits inside a block comment opened on line 1: its rendering
+	// depends on the state carried down from there.
+	const doc = ["/*", ...Array.from({ length: 598 }, (_, i) => `const v_${i} = ${i};`), "*/ const x = 1;"].join("\n");
+	const lines = doc.split("\n");
+
+	it("render a line from its cached start state, and a revisit from the cached rendering", async () => {
+		const deep = await highlight_lines("test|sparse", "typescript", lines, [600], null);
+		expect([...deep!.keys()]).toEqual([600]);
+		const tokenized = stats.tokenized_lines;
+		const retokenized = stats.retokenized_lines;
+		const both = await highlight_lines("test|sparse", "typescript", lines, [600, 300, 300], null);
+		expect(stats.tokenized_lines).toBe(tokenized);
+		expect(stats.retokenized_lines).toBe(retokenized + 1);
+		const full = await highlight_prefix("test|sparse-full", "typescript", doc, 600, null);
+		expect(both!.get(300)).toBe(full![299]);
+		expect(both!.get(600)).toBe(full![599]);
+		expect(await highlight_lines("test|sparse", "typescript", lines, [300], null)).toEqual(new Map([[300, full![299]]]));
+		expect(stats.retokenized_lines).toBe(retokenized + 1);
+	});
+
+	it("ignore wanted lines past the end of the document", async () => {
+		const out = await highlight_lines("test|past-end", "typescript", lines, [2, 601, 9999], null);
+		expect([...out!.keys()]).toEqual([2]);
+		expect(await highlight_lines("test|past-end", "typescript", lines, [601], null)).toEqual(new Map());
+	});
 });
 
 describe("tokenization budget", () => {
@@ -84,7 +113,7 @@ describe("tokenization budget", () => {
 		let chunks = 0;
 		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
 		try {
-			return await highlight_lines(key, "typescript", doc, depth, start + spent_ms, () => {
+			return await highlight_prefix(key, "typescript", doc, depth, start + spent_ms, () => {
 				if (++chunks === 2) {
 					now = start + spent_ms + 1;
 				}
@@ -96,11 +125,11 @@ describe("tokenization budget", () => {
 	}
 
 	it("returns null when the deadline passed before any work; a retry still runs", async () => {
-		const out = await highlight_lines("test|budget-a", "typescript", doc, 600,
-						  performance.now() - 1);
+		const out = await highlight_prefix("test|budget-a", "typescript", doc, 600,
+						   performance.now() - 1);
 		expect(out).toBeNull();
-		const retry = await highlight_lines("test|budget-a", "typescript", doc, 600,
-						    performance.now() + 60000);
+		const retry = await highlight_prefix("test|budget-a", "typescript", doc, 600,
+						     performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
 	});
@@ -108,8 +137,8 @@ describe("tokenization budget", () => {
 	it("resumes a retry after a missed deadline from the lines tokenized before it", async () => {
 		expect(await miss_deadline("test|budget-d", 600, 1000)).toBeNull();
 		const before = stats.tokenized_lines;
-		const retry = await highlight_lines("test|budget-d", "typescript", doc, 600,
-						    performance.now() + 60000);
+		const retry = await highlight_prefix("test|budget-d", "typescript", doc, 600,
+						     performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
 		// The miss came after the first chunk, which stayed cached.
@@ -117,26 +146,27 @@ describe("tokenization budget", () => {
 	});
 
 	it("stops on cancellation; a retry still runs", async () => {
-		const out = await highlight_lines("test|budget-c", "typescript", doc, 600,
-						  null, () => true);
+		const out = await highlight_prefix("test|budget-c", "typescript", doc, 600,
+						   null, () => true);
 		expect(out).toBeNull();
-		const retry = await highlight_lines("test|budget-c", "typescript", doc, 600,
-						    performance.now() + 60000);
+		const retry = await highlight_prefix("test|budget-c", "typescript", doc, 600,
+						     performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
 	});
 
-	it("never shrinks a longer cached prefix on a timed-out deeper retry", async () => {
-		const ok = await highlight_lines("test|budget-b", "typescript", doc, 300, null);
+	it("never shrinks longer cached states on a timed-out deeper retry", async () => {
+		const ok = await highlight_prefix("test|budget-b", "typescript", doc, 300, null);
 		expect(ok).not.toBeNull();
 		// Deep retry with (nearly) no budget: may tokenize 0 or a few
 		// chunks before dying — either way the 300-line entry survives.
-		const dead = await highlight_lines("test|budget-b", "typescript", doc, 600,
-						   performance.now() + 0.01);
+		const dead = await highlight_prefix("test|budget-b", "typescript", doc, 600,
+						    performance.now() + 0.01);
 		expect(dead).toBeNull();
-		const shallow = await highlight_lines("test|budget-b", "typescript", doc, 250,
-						      performance.now() - 1);
-		expect(shallow).not.toBeNull();
+		const before = stats.tokenized_lines;
+		const shallow = await highlight_prefix("test|budget-b", "typescript", doc, 250, null);
+		expect(shallow).toEqual(ok!.slice(0, 250));
+		expect(stats.tokenized_lines).toBe(before);
 	});
 });
 

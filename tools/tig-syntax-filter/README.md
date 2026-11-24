@@ -82,8 +82,9 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   buffered or highlighted at all; they stream through raw as they arrive
   (65536–67108864; default 1048576).
 - `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` — approximate
-  byte budgets for the tokenized-line cache and the blob cache (1–4096;
-  default 64 each).
+  byte budgets for the tokenization cache (each document's grammar state
+  at every line start, through the deepest line rendered, plus the lines
+  rendered so far) and the blob cache (1–4096; default 64 each).
 
 The daemon knobs are read once at daemon startup (restart the daemon after
 changing them); the client's `TIG_SYNTAX_SPAWN_WAIT_MS` and

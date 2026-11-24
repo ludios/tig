@@ -59,17 +59,16 @@ function remember_undecodable(identity: string): void {
 const BOM = "\uFEFF";
 
 /**
- * The source document for one side of a file diff: its full text and a
- * cache identity.  `lines` excludes newline characters.  `bom` is the
- * byte-order mark ("\uFEFF", or "" when absent) that starts the file and
- * so line 1 of the diff, but not `text`: editors strip it before
- * tokenizing, and a grammar would mistake it for code.
+ * The source document for one side of a file diff: its lines (without
+ * newline characters) and a cache identity.  `bom` is the byte-order mark
+ * ("\uFEFF", or "" when absent) that starts the file and so line 1 of the
+ * diff, but not `lines`: editors strip it before tokenizing, and a grammar
+ * would mistake it for code.
  */
 interface side_doc {
 	identity: string;
 	lang: string;
 	bom: string;
-	text: string;
 	lines: string[];
 }
 
@@ -142,7 +141,7 @@ async function load_side(cwd: string, path: string | null, oid: string | null,
 	if (lang === null || !(await ensure_lang(lang))) {
 		return null;
 	}
-	return { identity, lang, bom, text, lines: text.split("\n") };
+	return { identity, lang, bom, lines: text.split("\n") };
 }
 
 /**
@@ -172,8 +171,8 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// be worktree content (an all-zero OID for unstaged changes, or a
 	// computed OID with no object behind it).
 	const [old_doc, new_doc] = await Promise.all([
-		info.old_last_line === 0 ? null : load_side(cwd, info.old_path, info.old_oid, false),
-		info.new_last_line === 0 ? null : load_side(cwd, info.new_path, info.new_oid, true),
+		info.old_rows.length === 0 ? null : load_side(cwd, info.old_path, info.old_oid, false),
+		info.new_rows.length === 0 ? null : load_side(cwd, info.new_path, info.new_oid, true),
 	]);
 	if (old_doc === null && new_doc === null) {
 		logger.debug("no sources for {path}", { path: check_path });
@@ -182,12 +181,12 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// Log a side that failed to load while the other did: its lines render
 	// raw next to highlighted ones (e.g. an old blob missing from a shallow
 	// or partial clone).
-	if (old_doc === null && info.old_last_line !== 0 && info.old_path !== null) {
+	if (old_doc === null && info.old_rows.length !== 0 && info.old_path !== null) {
 		logger.info("old side of {path} unavailable ({oid}); its lines will be raw", {
 			path: check_path, oid: info.old_oid,
 		});
 	}
-	if (new_doc === null && info.new_last_line !== 0 && info.new_path !== null) {
+	if (new_doc === null && info.new_rows.length !== 0 && info.new_path !== null) {
 		logger.info("new side of {path} unavailable ({oid}); its lines will be raw", {
 			path: check_path, oid: info.new_oid,
 		});
@@ -197,9 +196,9 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// blob fetching and grammar loading above deliberately do not count.
 	const deadline = performance.now() + config.budget_ms;
 	const old_sgr = old_doc === null ? null :
-		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.text, info.old_last_line, deadline, cancelled);
+		await highlight_lines(old_doc.identity, old_doc.lang, old_doc.lines, info.old_rows, deadline, cancelled);
 	const new_sgr = new_doc === null ? null :
-		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.text, info.new_last_line, deadline, cancelled);
+		await highlight_lines(new_doc.identity, new_doc.lang, new_doc.lines, info.new_rows, deadline, cancelled);
 	if (old_sgr === null && new_sgr === null) {
 		// Nothing to style (budget exhausted or size-guarded): the raw
 		// path produces identical bytes without validation/rebuild work.
@@ -219,7 +218,7 @@ async function highlight_file_section(cwd: string, section: diff_section,
 			// some tools trim.
 			const first = line.bytes[0] ?? 0x20;
 			let doc: side_doc | null;
-			let sgr_lines: string[] | null;
+			let sgr_lines: Map<number, string> | null;
 			let doc_line: number;
 
 			if (first === 0x2d) {
@@ -240,8 +239,8 @@ async function highlight_file_section(cwd: string, section: diff_section,
 				new_line++;
 			}
 
-			if (doc === null || sgr_lines === null || doc_line > sgr_lines.length ||
-			    doc_line > doc.lines.length) {
+			const sgr = sgr_lines?.get(doc_line);
+			if (doc === null || sgr === undefined) {
 				sgr_by_line.set(line_index, null);
 				continue;
 			}
@@ -258,7 +257,7 @@ async function highlight_file_section(cwd: string, section: diff_section,
 				});
 				return null;
 			}
-			sgr_by_line.set(line_index, lead + sgr_lines[doc_line - 1]);
+			sgr_by_line.set(line_index, lead + sgr);
 		}
 	}
 

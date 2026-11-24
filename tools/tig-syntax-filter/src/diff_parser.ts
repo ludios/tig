@@ -148,11 +148,11 @@ export interface file_info {
 	old_oid: string | null;		/* null = unusable (absent or all-zero) */
 	new_oid: string | null;
 	hunks: hunk[];
-	/** Deepest source line each side needs for styling (1-based): "-"
-	 * lines use the old side, "+" and context lines the new side.  0 means
-	 * that side need not be fetched or tokenized. */
-	old_last_line: number;
-	new_last_line: number;
+	/** The source lines (1-based, ascending) each side styles: "-" lines
+	 * come from the old side, "+" and context lines from the new side.
+	 * Empty means that side need not be fetched or tokenized. */
+	old_rows: number[];
+	new_rows: number[];
 }
 
 /** Unquote a git C-style quoted path ("\t", "\303\251", ...). */
@@ -275,8 +275,8 @@ export function parse_file_section(section: diff_section): file_info | null {
 	let saw_minus = false;
 	let saw_plus = false;
 	const hunks: hunk[] = [];
-	let old_last_line = 0;
-	let new_last_line = 0;
+	const old_rows: number[] = [];
+	const new_rows: number[] = [];
 	const prefixed = has_default_prefixes(section.lines[0]!.bytes.toString("utf8"));
 
 	let i = 0;
@@ -321,7 +321,7 @@ export function parse_file_section(section: diff_section): file_info | null {
 
 	// A section with no hunks (pure rename/mode change) parses as no work.
 	if (i === section.lines.length) {
-		return { old_path, new_path, old_oid, new_oid, hunks, old_last_line, new_last_line };
+		return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows };
 	}
 	if (!saw_minus || !saw_plus) {
 		return null;
@@ -361,16 +361,16 @@ export function parse_file_section(section: diff_section): file_info | null {
 				continue;
 			}
 			if (first === 0x2d) {
-				old_last_line = Math.max(old_last_line, old_row);
+				old_rows.push(old_row);
 				old_row++;
 				old_left--;
 			} else if (first === 0x2b) {
-				new_last_line = Math.max(new_last_line, new_row);
+				new_rows.push(new_row);
 				new_row++;
 				new_left--;
 			} else if (first === 0x20) {
 				// Context is styled from the new side.
-				new_last_line = Math.max(new_last_line, new_row);
+				new_rows.push(new_row);
 				old_row++;
 				new_row++;
 				old_left--;
@@ -392,5 +392,5 @@ export function parse_file_section(section: diff_section): file_info | null {
 		hunks.push({ old_start: header.old_start, new_start: header.new_start, body });
 	}
 
-	return { old_path, new_path, old_oid, new_oid, hunks, old_last_line, new_last_line };
+	return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows };
 }
