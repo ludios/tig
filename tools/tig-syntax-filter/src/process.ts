@@ -19,25 +19,18 @@ import { config } from "./config.ts";
 
 const logger = getLogger(["tig-syntax", "process"]);
 
-/** Lines of work between looks at the clock, which costs more than a
- * line's work. */
-const LINES_PER_CLOCK_CHECK = 1024;
-
 /**
  * Splits a long loop of synchronous per-line work into slices of about
  * SLICE_MS, like a highlighting pass, so that other connections wait at
- * most about that long.
+ * most about that long, give or take one line's work.
  */
 class Slicer {
-	private lines = 0;
 	private resumed = performance.now();
 
-	/** Count one line's work.
+	/** Call before each line's work.
 	 * @returns  Whether the slice is used up: then await next_slice(). */
 	due(): boolean {
-		this.lines++;
-		return this.lines % LINES_PER_CLOCK_CHECK === 0 &&
-		       performance.now() - this.resumed >= SLICE_MS;
+		return performance.now() - this.resumed >= SLICE_MS;
 	}
 
 	/** Yield to the event loop, then start the next slice. */
