@@ -888,6 +888,19 @@ fake daemon is ready to become the CI regression test for A0.
    memoize there); on ordinary non-pathological sections the old side
    measured 42–46 % of tokenization, so think "up to ~1.7×" on sections
    where both sides actually run, not 2× overall.
+   **Revisited 2026-11-24 and implemented**, for a repository of bundled
+   JavaScript (167k- and 330k-line files, 1–14 MB diffs) that every size
+   limit refused.  The cache now keeps each document's grammar state at
+   every line start (~80 bytes per line) plus the lines rendered so far,
+   instead of SGR for every line of the prefix (C5/C5b, with a state per
+   line rather than checkpoints), and one side copies the other's states
+   wherever the lines are equal and the start states equal (C8(b), as
+   VS Code converges after an edit, rather than a per-(text, state)
+   memo).  The 330k-line file's second side: 2.0 s instead of 10.8 s;
+   the 167k-line file's states rarely reconverge after a hunk (its
+   grammar stack reaches depth ~120), so it gains less.  The budget went
+   to 45 s with no fail-fast verdicts, and the size limits went up (see
+   the README).
 8. **C1, B4, B5, C10–C12 — DONE (2026-08-10)**:
    - C1: persistent `git check-attr --stdin -z` child per worktree +
      per-repo driver config cache; **many-small first visit 1124 → 367 ms
