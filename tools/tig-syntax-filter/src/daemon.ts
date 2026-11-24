@@ -43,7 +43,11 @@ function handle_connection(socket: net.Socket): Promise<void> {
 	return new Promise((resolve) => {
 		let cwd: string | null = null;
 		let header_buf = Buffer.alloc(0);
-		const splitter = new SectionSplitter(config.max_section_bytes);
+		// A section of more than twice the line cap's lines has a side
+		// past the cap, so it is worth little to highlight, and each
+		// buffered line costs ~150 bytes: sections of very short lines
+		// could otherwise take gigabytes.
+		const splitter = new SectionSplitter(config.max_section_bytes, 2 * config.max_lines);
 		let queue: Promise<void> = Promise.resolve();
 		let closed = false;
 		let sections_served = 0;

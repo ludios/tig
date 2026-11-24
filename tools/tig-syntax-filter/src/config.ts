@@ -13,7 +13,10 @@
  * - TIG_SYNTAX_MAX_LINES: a side whose hunks reach deeper into its source
  *   is not highlighted (bounds tokenization memory).
  * - TIG_SYNTAX_MAX_SECTION_BYTES: larger file sections stream through raw
- *   instead of being buffered (see diff_parser.ts).
+ *   instead of being buffered (see diff_parser.ts), as do sections of
+ *   more than twice TIG_SYNTAX_MAX_LINES lines.  Highlighted output can
+ *   be ~20 times its input, and the client takes frames of up to 1 GiB
+ *   and spools up to 64 MiB of the diff.
  * - TIG_SYNTAX_LINE_CACHE_MB / TIG_SYNTAX_BLOB_CACHE_MB: approximate
  *   budgets for the tokenization cache (line-start grammar states and
  *   rendered lines; highlight.ts) and the blob cache (git.ts).
@@ -36,7 +39,7 @@ function int_env(name: string, fallback: number, min: number, max: number): numb
 export const config = {
 	budget_ms: int_env("TIG_SYNTAX_BUDGET_MS", 45000, 50, 600000),
 	max_lines: int_env("TIG_SYNTAX_MAX_LINES", 1000000, 100, 1000000),
-	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 26, 1 << 16, 1 << 26),
+	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 25, 1 << 16, 1 << 26),
 	line_cache_mb: int_env("TIG_SYNTAX_LINE_CACHE_MB", 128, 1, 4096),
 	blob_cache_mb: int_env("TIG_SYNTAX_BLOB_CACHE_MB", 64, 1, 4096),
 };

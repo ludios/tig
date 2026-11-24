@@ -28,9 +28,10 @@ export interface diff_section {
  * a "diff --git " line.  feed() returns the sections a chunk completes;
  * finish() flushes the rest.
  *
- * Once a file section's complete lines exceed `max_section_bytes`, it
- * stops being buffered: its lines flush as "oversized" sections as they
- * arrive, up to the next boundary, and callers pass those through raw.
+ * Once a file section's complete lines exceed `max_section_bytes` bytes
+ * or `max_section_lines` lines, it stops being buffered: its lines flush
+ * as "oversized" sections as they arrive, up to the next boundary, and
+ * callers pass those through raw.
  * So a giant generated file is neither held in memory nor highlighted.
  * The preamble, also raw, streams the same way, so input that never
  * reaches a diff (`git log | tig`) is not held until EOF.  Sections end
@@ -45,9 +46,11 @@ export class SectionSplitter {
 	private current_bytes = 0;
 	private current_kind: "preamble" | "file" | "oversized" = "preamble";
 	private max_section_bytes: number;
+	private max_section_lines: number;
 
-	constructor(max_section_bytes: number = Infinity) {
+	constructor(max_section_bytes: number = Infinity, max_section_lines: number = Infinity) {
 		this.max_section_bytes = max_section_bytes;
+		this.max_section_lines = max_section_lines;
 	}
 
 	private take_section(): diff_section | null {
@@ -74,7 +77,8 @@ export class SectionSplitter {
 		}
 		this.current.push({ bytes, had_newline });
 		this.current_bytes += bytes.length + (had_newline ? 1 : 0);
-		if (this.current_kind === "file" && this.current_bytes > this.max_section_bytes) {
+		if (this.current_kind === "file" &&
+		    (this.current_bytes > this.max_section_bytes || this.current.length > this.max_section_lines)) {
 			// From here to the next boundary this file streams through
 			// raw; flush what is buffered so it stops occupying memory.
 			this.current_kind = "oversized";

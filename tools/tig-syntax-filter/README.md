@@ -80,10 +80,11 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
 - `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
   the section is not highlighted (100–1000000; default 1000000).  Each
   line tokenized costs ~80 bytes of grammar state, which stays cached.
-- `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this are not
-  buffered or highlighted at all; they stream through raw as they arrive
-  (65536–67108864; default 67108864, the client's limit on the whole
-  diff).  Blobs over 64 MiB are never highlighted.
+- `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this, or of
+  more than twice `TIG_SYNTAX_MAX_LINES` lines, are not highlighted; once
+  a section exceeds either limit, its lines stream through raw as they
+  arrive (65536–67108864; default 33554432, which is 32 MiB).  Source
+  files (blobs or worktree files) over 32 MiB are never highlighted.
 - `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` — approximate
   byte budgets for the tokenization cache (each document's grammar state
   at every line start, through the deepest line rendered, plus the lines

@@ -286,6 +286,16 @@ describe("oversized section passthrough", () => {
 		expect(sections.reduce((n, s) => n + s.byte_length, 0)).toBe(input.length);
 	});
 
+	it("streams sections of too many lines the same way", () => {
+		const { input, big_bytes } = build_diff();
+		const splitter = new SectionSplitter(Infinity, 100);
+		const sections = [...splitter.feed(input), ...splitter.finish()];
+		expect(sections.map((s) => s.kind)).toEqual(["preamble", "file", "oversized", "oversized", "file"]);
+		// big.c was buffered until its 101st line.
+		expect(sections[2]!.lines.length).toBe(101);
+		expect(sections[2]!.byte_length + sections[3]!.byte_length).toBe(big_bytes);
+	});
+
 	it("passes oversized sections through process_section raw", async () => {
 		const { input } = build_diff();
 		const splitter = new SectionSplitter(4096);
