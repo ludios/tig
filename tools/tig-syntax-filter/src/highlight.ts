@@ -42,47 +42,6 @@ export const MAX_RUNS_PER_LINE = 4000;
  * roughly that. */
 export const CHUNK_LINES = 128;
 
-/** identity|lang -> shallowest requested depth that exceeded the budget,
- * and when.  While fresh, requests at least that deep fail fast unless
- * the cache covers them; shallower ones still get an attempt.  Verdicts
- * expire after FAIL_TTL_MS: a failure may reflect transient contention
- * (the deadline is wall time, shared with concurrent sections), and even
- * a deterministic one should not leave a document raw forever. */
-const budget_fail_cache = new Map<string, { depth: number, at: number }>();
-const FAIL_CACHE_MAX = 512;
-const FAIL_TTL_MS = 60 * 1000;
-/** A missed deadline is a verdict on a document only when the call spent
- * at least this share of the budget tokenizing it: a side that got only
- * what its sibling left says nothing about its own cost. */
-const VERDICT_MIN_BUDGET_SHARE = 0.9;
-
-function fail_cache_put(key: string, last_line: number): void {
-	const prev = budget_fail_cache.get(key);
-	budget_fail_cache.delete(key);
-	budget_fail_cache.set(key, {
-		depth: prev === undefined ? last_line : Math.min(prev.depth, last_line),
-		at: performance.now(),
-	});
-	while (budget_fail_cache.size > FAIL_CACHE_MAX) {
-		const oldest = budget_fail_cache.keys().next().value as string;
-		budget_fail_cache.delete(oldest);
-	}
-}
-
-/** The depth at which `key` is known to exceed the budget, or undefined
- * when unknown or the verdict has expired. */
-function fail_cache_depth(key: string): number | undefined {
-	const entry = budget_fail_cache.get(key);
-	if (entry === undefined) {
-		return undefined;
-	}
-	if (performance.now() - entry.at > FAIL_TTL_MS) {
-		budget_fail_cache.delete(key);
-		return undefined;
-	}
-	return entry.depth;
-}
-
 /** The private SGR parameter marking a literal ESC byte of content. */
 const LITERAL_ESC_MARKER = "\x1b[999m";
 
@@ -206,14 +165,13 @@ const grammar_ids = new WeakMap<object, number>();
 let grammars_numbered = 0;
 
 /**
- * The line cache and budget-verdict key for `identity` as `lang`, under
- * the grammar that `hl` tokenizes `lang` with now.  Loading another
- * language can make shiki replace that grammar with a rebuilt one
- * (loading python rebuilds markdown, which embeds python lazily), whose
- * rules are numbered differently and may color differently, so the key
- * names the grammar: entries made under the old grammar, whose states
- * must not resume under the new one, are never looked up again and age
- * out of the caches.
+ * The line cache key for `identity` as `lang`, under the grammar that
+ * `hl` tokenizes `lang` with now.  Loading another language can make
+ * shiki replace that grammar with a rebuilt one (loading python rebuilds
+ * markdown, which embeds python lazily), whose rules are numbered
+ * differently and may color differently, so the key names the grammar:
+ * entries made under the old grammar, whose states must not resume under
+ * the new one, are never looked up again and age out of the cache.
  */
 function cache_key(hl: Highlighter, identity: string, lang: string): string {
 	const grammar = hl.getLanguage(lang);
@@ -347,10 +305,7 @@ function cr_suffix(line: string): string {
  * from its longest cached prefix.  Before each batch it checks `deadline`
  * (a performance.now() timestamp, or null) and `cancelled`; if either
  * trips, the lines so far are cached with their grammar state for later
- * requests to resume from, and null is returned.  A missed deadline also
- * records the requested depth for fail-fast, but only when the call
- * tokenized for most of the budget; a cancellation, or a side left with
- * its sibling's leftovers, says nothing about cost.  The deadline is wall
+ * requests to resume from, and null is returned.  The deadline is wall
  * time, so under contention sections give up a little earlier.
  *
  * Also returns null when the request is deeper than the configured line
@@ -367,11 +322,6 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		return cached.lines;
 	}
 
-	const failed_at = fail_cache_depth(key);
-	if (failed_at !== undefined && last_line >= failed_at) {
-		return null;
-	}
-
 	const inflight = tokenize_inflight.get(key);
 	if (inflight !== undefined && inflight.last_line >= last_line) {
 		// Someone else is already tokenizing this document at least as
@@ -380,16 +330,11 @@ export async function highlight_lines(identity: string, lang: string, content: s
 		if (theirs !== null && theirs.length >= last_line) {
 			return theirs;
 		}
-		// They aborted or fell short; their partial or failure depth may
-		// still answer for us, under the grammar that is current now.
-		const key_after = cache_key(hl, identity, lang);
-		const after = line_cache.get(key_after);
+		// They aborted or fell short; their partial may still answer
+		// for us, under the grammar that is current now.
+		const after = line_cache.get(cache_key(hl, identity, lang));
 		if (after !== undefined && after.lines.length >= last_line) {
 			return after.lines;
-		}
-		const failed_after = fail_cache_depth(key_after);
-		if (failed_after !== undefined && last_line >= failed_after) {
-			return null;
 		}
 	}
 
@@ -419,8 +364,7 @@ export async function highlight_lines(identity: string, lang: string, content: s
 	let started = 0;
 	/** Begin under the current grammar, or begin again after a rebuild.
 	 * A shorter cached prefix is a head start: its lines are reused as
-	 * they are and tokenization resumes from its grammar state.  The
-	 * budget verdict counts only time spent under this grammar. */
+	 * they are and tokenization resumes from its grammar state. */
 	const begin = (): void => {
 		work_key = cache_key(hl, identity, lang);
 		const resume = line_cache.get(work_key);
@@ -471,19 +415,13 @@ export async function highlight_lines(identity: string, lang: string, content: s
 			return null;
 		}
 		if (deadline !== null && performance.now() > deadline) {
-			const elapsed_ms = performance.now() - started;
-			const verdict = elapsed_ms >= VERDICT_MIN_BUDGET_SHARE * config.budget_ms;
-			logger.info("deadline hit tokenizing {lang} at line {done}/{needed} after {ms}ms; {outcome}", () => ({
+			logger.info("deadline hit tokenizing {lang} at line {done}/{needed} after {ms}ms; caching the lines done so far", () => ({
 				lang, done: prefix.length + token_lines.length, needed,
-				ms: Math.round(elapsed_ms),
-				outcome: verdict ? "failing fast at this depth" : "too little budget for a verdict",
+				ms: Math.round(performance.now() - started),
 			}));
 			// Keep whichever cached prefix is longer: a deep retry
 			// that dies early must not shrink an existing entry.
 			keep_partial();
-			if (verdict) {
-				fail_cache_put(work_key, last_line);
-			}
 			return null;
 		}
 		const chunk_lines = slice.slice(start, start + CHUNK_LINES);

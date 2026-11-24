@@ -69,10 +69,10 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   reads, partial writes, or trickled bytes do not extend it — only a
   completed frame does.
 - `TIG_SYNTAX_BUDGET_MS` — daemon-side tokenization budget per file
-  section, shared by the old and new side (50–600000; default 10000).  A
-  section that exceeds it renders raw; the lines tokenized within budget
-  stay cached, and a later request for the same document — deeper, or a
-  retry after the failure verdict expires (60 s) — continues from that
+  section, shared by the old and new side (50–600000; default 45000, which
+  leaves room under the client's default 60 s frame deadline).  A section
+  that exceeds it renders raw; the lines tokenized within budget stay
+  cached, and the next request for the same document continues from that
   cached prefix rather than starting over, so no document stays raw
   forever.  (Loading another language can make shiki rebuild a grammar,
   e.g. markdown's; work done under the old grammar then starts over.)

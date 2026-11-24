@@ -1,6 +1,6 @@
 /**
  * Chunked tokenization equals one-shot tokenization, budget exhaustion
- * falls back (with prefix caching and depth-scoped fail-fast), and
+ * falls back (keeping the prefix for the next request to resume), and
  * oversized sections stream through the splitter raw, line-aligned, and
  * byte-losslessly.
  */
@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
 import { init_highlighter, ensure_lang, highlight_lines, emit_sgr_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
-import { config } from "../src/config.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -96,46 +95,31 @@ describe("tokenization budget", () => {
 		}
 	}
 
-	it("returns null, without a verdict, when the deadline passed before any work", async () => {
+	it("returns null when the deadline passed before any work; a retry still runs", async () => {
 		const out = await highlight_lines("test|budget-a", "typescript", doc, 600,
 						  performance.now() - 1);
 		expect(out).toBeNull();
-		// The budget went elsewhere; the document itself must still get
-		// its attempt.
 		const retry = await highlight_lines("test|budget-a", "typescript", doc, 600,
 						    performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
 	});
 
-	it("fails fast at the depth of a miss that had the budget, not shallower", async () => {
-		expect(await miss_deadline("test|budget-d", 600, config.budget_ms)).toBeNull();
+	it("resumes a retry after a missed deadline from the lines tokenized before it", async () => {
+		expect(await miss_deadline("test|budget-d", 600, 1000)).toBeNull();
 		const before = stats.tokenized_lines;
-		const out = await highlight_lines("test|budget-d", "typescript", doc, 600,
-						  performance.now() + 60000);
-		expect(out).toBeNull();
-		expect(stats.tokenized_lines).toBe(before);
-		// Deeper than the one chunk the miss cached.
-		const shallower = await highlight_lines("test|budget-d", "typescript", doc, 200,
-							performance.now() + 60000);
-		expect(shallower).not.toBeNull();
-		expect(shallower!.length).toBeGreaterThanOrEqual(200);
-	});
-
-	it("records no verdict after a miss on a sliver of the budget", async () => {
-		expect(await miss_deadline("test|budget-e", 600, 100)).toBeNull();
-		const retry = await highlight_lines("test|budget-e", "typescript", doc, 600,
+		const retry = await highlight_lines("test|budget-d", "typescript", doc, 600,
 						    performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
+		// The miss came after the first chunk, which stayed cached.
+		expect(stats.tokenized_lines - before).toBe(600 - CHUNK_LINES);
 	});
 
-	it("stops on cancellation without recording a failure depth", async () => {
+	it("stops on cancellation; a retry still runs", async () => {
 		const out = await highlight_lines("test|budget-c", "typescript", doc, 600,
 						  null, () => true);
 		expect(out).toBeNull();
-		// Cancellation is not a cost verdict: the same request must still
-		// run (and succeed) when tried again uncancelled.
 		const retry = await highlight_lines("test|budget-c", "typescript", doc, 600,
 						    performance.now() + 60000);
 		expect(retry).not.toBeNull();
