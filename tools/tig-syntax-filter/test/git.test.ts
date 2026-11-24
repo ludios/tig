@@ -4,9 +4,9 @@
  * fetches of one blob.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cat_blob, content_identity, has_textconv, shed_git_state, MAX_BLOB_BYTES } from "../src/git.ts";
@@ -25,6 +25,10 @@ beforeAll(async () => {
 	small_oid = execFileSync("git", ["-C", repo, "hash-object", "-w", "small.txt"],
 		{ cwd: repo, encoding: "utf8" }).trim();
 }, 60000);
+
+afterAll(async () => {
+	await rm(repo, { recursive: true, force: true });
+});
 
 describe("cat_blob batching", () => {
 	it("rejects an oversized blob without disrupting other requests", async () => {

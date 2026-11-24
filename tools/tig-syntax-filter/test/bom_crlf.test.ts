@@ -6,9 +6,9 @@
  * byte-lossless.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,10 @@ beforeAll(async () => {
 		sections.set(name, { input, output: await process_section(repo, section) });
 	}
 }, 60000);
+
+afterAll(async () => {
+	await rm(repo, { recursive: true, force: true });
+});
 
 /** Section output from its first hunk header on, as text. */
 function hunks_of(name: string): string {

@@ -109,7 +109,8 @@ function comment_line(length: number): string {
 
 describe("lines of MAX_LINE_CHARS or more", () => {
 	it("show in the theme's foreground and leave the grammar state as it was", async () => {
-		const long = comment_line(MAX_LINE_CHARS);
+		// Tokenized, this would end the comment that line 1 opens.
+		const long = `*/ ${comment_line(MAX_LINE_CHARS - 3)}`;
 		const out = await highlight_lines("test|long", "typescript", ["/* open", long, "close */ x = 1;"], [2, 3], null);
 		expect(out!.get(2)).toBe(emit_sgr_line([{ content: long }]));
 		// Still in the comment that line 1 opened.

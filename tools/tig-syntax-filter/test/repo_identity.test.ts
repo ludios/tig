@@ -4,9 +4,9 @@
  * attribute-state resets, and the byte-budgeted LRU.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repo_info, has_textconv, shed_git_state } from "../src/git.ts";
@@ -31,6 +31,11 @@ beforeAll(async () => {
 	git("add", "-A");
 	git("commit", "-qm", "init");
 }, 60000);
+
+afterAll(async () => {
+	await rm(repo, { recursive: true, force: true });
+	await rm(`${repo}-wt`, { recursive: true, force: true });
+});
 
 describe("repo_info", () => {
 	it("resolves the same object store from the root and a subdirectory", async () => {

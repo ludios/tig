@@ -124,21 +124,25 @@ describe("highlight_sides", () => {
 		}), { numRuns: 200 });
 	}, 120000);
 
-	it("copies the unchanged lines' states once they converge after a hunk", async () => {
-		const body = Array.from({ length: 3000 }, (_, i) => LINE_POOL[i % LINE_POOL.length]!);
-		const old_lines = ["/* opened", ...body];
-		// Closing the comment early changes the states until the pool's
-		// own comment closes them again, a few lines later.
-		const new_lines = ["/* opened */", ...body];
-		const old_side = { identity: "peer|converge|old", lang: "typescript", lines: old_lines, wanted: [1, 3001] };
-		const new_side = { identity: "peer|converge|new", lang: "typescript", lines: new_lines, wanted: [1, 3001] };
-		const aligned = [{ old_start: 2, new_start: 2, count: Infinity }];
-		await highlight_sides(null, new_side, aligned, null);
-		const tokenized = stats.tokenized_lines;
-		const copied = stats.copied_lines;
-		const [old_sgr] = await highlight_sides(old_side, new_side, aligned, null);
-		expect(stats.tokenized_lines - tokenized).toBeLessThan(20);
-		expect(stats.copied_lines - copied).toBeGreaterThan(2980);
-		expect(old_sgr).toEqual(await highlight_lines("peer|converge|old-ref", "typescript", old_lines, [1, 3001], null));
-	});
+	for (const first of ["new", "old"] as const) {
+		it(`copies the unchanged lines' states once they converge after a hunk, from the ${first} side`, async () => {
+			const body = Array.from({ length: 3000 }, (_, i) => LINE_POOL[i % LINE_POOL.length]!);
+			// Closing the comment early changes the states until the
+			// pool's own comment closes them again, a few lines later.
+			const old_lines = ["/* opened", ...body];
+			const new_lines = ["/* opened */", ...body];
+			const old_side = { identity: `peer|converge-${first}|old`, lang: "typescript", lines: old_lines, wanted: [1, 3001] };
+			const new_side = { identity: `peer|converge-${first}|new`, lang: "typescript", lines: new_lines, wanted: [1, 3001] };
+			const aligned = [{ old_start: 2, new_start: 2, count: Infinity }];
+			await highlight_sides(first === "old" ? old_side : null, first === "new" ? new_side : null, aligned, null);
+			const tokenized = stats.tokenized_lines;
+			const copied = stats.copied_lines;
+			const [old_sgr, new_sgr] = await highlight_sides(old_side, new_side, aligned, null);
+			expect(stats.tokenized_lines - tokenized).toBeLessThan(20);
+			expect(stats.copied_lines - copied).toBeGreaterThan(2980);
+			const [copier, copier_sgr] = first === "old" ? [new_side, new_sgr] : [old_side, old_sgr];
+			const reference = await highlight_lines(`${copier.identity}-ref`, "typescript", copier.lines, copier.wanted, null);
+			expect(copier_sgr).toEqual(reference);
+		});
+	}
 });
