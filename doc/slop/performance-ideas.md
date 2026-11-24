@@ -460,8 +460,9 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   `P` keepalive frame now exists: the daemon probes half-closed
   connections with it every 500 ms (so a killed client EPIPEs the probe
   and cancels its abandoned tokenization — implemented as part of the
-  A2/A9 follow-up; since 2026-11-24 also connections whose input it
-  paused), and the client accepts and ignores it without acking
+  A2/A9 follow-up; since 2026-11-24 also connections whose input the
+  daemon has paused, with more than 8 MiB of sections queued), and the
+  client accepts and ignores it without acking
   or re-arming its deadline.  Still open: emitting keepalives between
   line batches generally and using them client-side for a *total* budget
   (e.g. "if the whole diff isn't done in 10 s, go raw for the rest")

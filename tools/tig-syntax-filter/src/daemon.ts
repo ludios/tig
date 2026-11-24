@@ -60,10 +60,14 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		// A paused or half-closed socket is not read, so only a failed
 		// write reveals that the client was killed: send keepalives
 		// meanwhile, so that abandoned work stops before its next line.
+		// A write still pending fails as well, so none is sent then, and
+		// a client that is alive but not reading gets no pile of them.
 		let heartbeat: ReturnType<typeof setInterval> | null = null;
 		const start_heartbeat = (): void => {
 			heartbeat ??= setInterval(() => {
-				socket.write("P 0\n");
+				if (socket.writableLength === 0) {
+					socket.write("P 0\n");
+				}
 			}, 500);
 		};
 		const stop_heartbeat = (): void => {
