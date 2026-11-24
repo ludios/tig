@@ -154,6 +154,10 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	if (info.hunks.length === 0) {
 		return null;
 	}
+	// One budget for the whole section, shared by both sides and counting
+	// from now, so that it bounds the time to the section's frame, as the
+	// client's frame deadline does.
+	const deadline = performance.now() + config.budget_ms;
 	// git applies each side's own diff driver, so a rename can put textconv
 	// output on one side only.
 	const paths = [...new Set([info.old_path, info.new_path])]
@@ -192,9 +196,6 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		});
 	}
 
-	// One tokenization budget for the whole section, shared by both sides;
-	// blob fetching and grammar loading above deliberately do not count.
-	const deadline = performance.now() + config.budget_ms;
 	const [old_sgr, new_sgr] = await highlight_sides(
 		old_doc === null ? null : { ...old_doc, wanted: info.old_rows },
 		new_doc === null ? null : { ...new_doc, wanted: info.new_rows },

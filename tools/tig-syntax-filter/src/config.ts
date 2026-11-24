@@ -3,9 +3,9 @@
  * missing, malformed, or out-of-range value means the default; the ranges
  * keep a typo from disabling a bound.
  *
- * - TIG_SYNTAX_BUDGET_MS: tokenization time per file section, shared by
- *   both sides; a side not done by then renders raw (see highlight.ts).
- *   Grammar loading and blob fetching don't count.  Generous, since
+ * - TIG_SYNTAX_BUDGET_MS: time per file section, from when the daemon
+ *   starts on it, shared by both sides; a side not tokenized by then
+ *   renders raw (see process.ts and highlight.ts).  Generous, since
  *   tokenization is cached and resumes where it stopped: a big budget is
  *   usually paid once per document, while a small one keeps giant files
  *   raw across several visits.  Must fit inside the client's frame

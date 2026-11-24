@@ -68,14 +68,15 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   raw diff (100–600000; default 60000).  The deadline is absolute: partial
   reads, partial writes, or trickled bytes do not extend it — only a
   completed frame does.
-- `TIG_SYNTAX_BUDGET_MS` — daemon-side tokenization budget per file
-  section, shared by the old and new side (50–600000; default 45000, which
-  leaves room under the client's default 60 s frame deadline).  A section
-  that exceeds it renders raw; the lines tokenized within budget stay
-  cached, and the next request for the same document continues from that
-  cached prefix rather than starting over, so no document stays raw
-  forever.  (Loading another language can make shiki rebuild a grammar,
-  e.g. markdown's; work done under the old grammar then starts over.)
+- `TIG_SYNTAX_BUDGET_MS` — daemon-side time budget per file section, from
+  when the daemon starts on it, for fetching its sources, loading grammars
+  and tokenizing both sides (50–600000; default 45000, which leaves room
+  under the client's default 60 s frame deadline).  A side not tokenized
+  within it renders raw; the grammar states reached stay cached, as far as
+  the tokenization cache holds them, and the next request for the same
+  document continues from there rather than starting over.  (Loading
+  another language can make shiki rebuild a grammar, e.g. markdown's;
+  work done under the old grammar then starts over.)
 - `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
   the section is not highlighted (100–1000000; default 1000000).  Each
   line tokenized costs ~80 bytes of grammar state, which stays cached.
