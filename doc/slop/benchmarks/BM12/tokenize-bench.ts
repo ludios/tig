@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 
 const entry_ms = performance.now();
 
-type corpus_file = { lang: string, path: string, content: string };
+/** A corpus file: its lines, and all their line numbers (1-based). */
+type corpus_file = { lang: string, path: string, lines: string[], rows: number[] };
 
 /**
  * Read the corpus manifest.
@@ -35,7 +36,8 @@ function read_corpus(manifest: string): corpus_file[] {
 		}
 		const [lang, spec] = fields;
 		const path = spec.startsWith("~/") ? resolve(homedir(), spec.slice(2)) : resolve(base, spec);
-		files.push({ lang, path, content: readFileSync(path, "utf8") });
+		const lines = readFileSync(path, "utf8").split("\n");
+		files.push({ lang, path, lines, rows: lines.map((_, i) => i + 1) });
 	}
 	return files;
 }
@@ -74,11 +76,11 @@ async function main(): Promise<void> {
 			// A fresh identity per pass defeats the line cache, as a new
 			// blob would.
 			const out = await hl.highlight_lines(`bm12:${pass}:${file.path}`, file.lang,
-				file.content, Number.MAX_SAFE_INTEGER, null);
+				file.lines, file.rows, null);
 			if (out === null) {
 				throw new Error(`highlight_lines gave up on ${file.path}`);
 			}
-			pass_lines += out.length;
+			pass_lines += out.size;
 		}
 		pass_ms.push(performance.now() - started);
 		lines = pass_lines;
