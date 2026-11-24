@@ -33,7 +33,7 @@ foregrounds + attrs only).
 | Wire format | SGR, plus a **tiny reversible framing rule** so literal ESC bytes in file content survive losslessly (see "Wire protocol" below). Raw SGR alone is not lossless. |
 | Engine | **shiki** (vscode-textmate + vscode-oniguruma — the same engine VS Code uses), run as a persistent daemon behind a thin pipe client. Loads VS Code theme JSON as-is. Grammar versions **pinned**: shiki redistributes grammars rather than defining them, so parity means pinning the same grammar definitions/injections as the VS Code snapshot we compare against (`~/cloned/vscode`, `extensions/*/syntaxes/`). |
 | Node/Bun dependency | Acceptable. Target platform is Linux/NixOS; package the daemon with an explicit Node/Bun store path. Windows out of scope. |
-| Tokenization state | **Full-source tokenization** (fetch pre/post-image content, thread grammar state from line 1) — always correct, cacheable. Only tokenize **up to the last line the diff needs**, not the whole file (vscode-textmate's `tokenizeLine` takes prior state + a time budget, so state can be cached incrementally). Hunk-local state only in the throwaway PoC. |
+| Tokenization state | **Full-source tokenization** (fetch pre/post-image content, thread grammar state from line 1) — always correct (except after a line over the length cap or the per-line time limit, as in VS Code), cacheable. Only tokenize **up to the last line the diff needs**, not the whole file (vscode-textmate's `tokenizeLine` takes prior state + a time budget, so state can be cached incrementally). Hunk-local state only in the throwaway PoC. |
 | Truecolor | **Core requirement, done early** (Step 2), so all later steps render exact RGB. 256-color quantization is the automatic fallback; palette reprogramming is explicit opt-in, never part of `auto`. |
 | Diff line coloring | Token fg from theme + line bg tint from tig's own `diff-add`/`diff-del` colors, expressed through existing tigrc `color` commands once they accept RGB values. |
 | RGB spelling in tigrc | **`rgb:RRGGBB`**, not `#rrggbb`: tigrc's option reader truncates every line at the first `#` *before* argument/quote parsing (`read_option`, `src/options.c:1079-1087`), so `#`-prefixed colors cannot survive the existing grammar. `rgb:` needs only a `set_color` change, no lexer surgery. |
@@ -352,6 +352,9 @@ Upgrade the filter for production:
   document from line 1 **only through the last line the diff references**, caching
   per-line grammar states incrementally (vscode-textmate's `tokenizeLine` takes
   prior state + a per-line time budget) — a tiny diff in a huge file stays cheap.
+  (Since 2026-11-24, a pass also resumes from the line-start states that earlier
+  passes cached, and a diff's second side copies the first side's states wherever
+  aligned lines and their start states are equal.)
   Map diff rows: `-` → old doc, `+`/context → new doc. Mid-file hunks (block
   comments, template literals, heredocs) become always correct.
 - **Cache** tokenized line-run tables + line-state checkpoints keyed by
@@ -371,12 +374,16 @@ Upgrade the filter for production:
   It is *not* sufficient for textconv (below): it checks only displayed lines,
   and a transform that alters just unshown prefix lines still poisons the
   grammar state those lines carry.
-- **Limits**: per-line time budget and max line length (mirror VS Code's 20k-char
-  cap); oversized/pathological input passes through unhighlighted. If tokenization
-  of line N stops early (time budget), grammar state from that point is tainted —
-  pass through the **remainder of that side's document**, not just line N, since
-  later lexical state depends on it. Daemon absence, crash, or timeout ⇒ client
-  falls back to passthrough; tig is unaffected.
+- **Limits**: per-line time budget and max line length, as in VS Code (its
+  20000-UTF-16-code-unit `editor.maxTokenizationLineLength`): a line at or over
+  the cap shows in the theme's foreground without tokenizing, and a line that
+  hits the time budget keeps the tokens found so far; either way the next line
+  starts from the state the line started from, as in VS Code.  (This plan first
+  passed through the remainder of the side's document after such a line; since
+  2026-11-24 the daemon does as VS Code does instead.)  Oversized input
+  (sections, source files, or hunks deeper than the line cap) passes through
+  unhighlighted. Daemon absence, crash, or timeout ⇒ client falls back to
+  passthrough; tig is unaffected.
 - Skip binary files, submodules, invalid-UTF-8 files, and **files whose diff
   driver configures textconv** (detected via `git check-attr diff` + config
   lookup, cached per path): tig's stage-view diffs pass `--textconv`

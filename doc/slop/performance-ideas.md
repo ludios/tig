@@ -401,7 +401,12 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   `tokenizeLine` loop; shiki's own per-line `tokenizeTimeLimit` (500 ms)
   still bounds pathological single lines.  Budget-aborted prefixes are
   cached (they serve shallower hunks) and the failure depth is
-  remembered for fail-fast (the C10-scoped negative cache).  Original
+  remembered for fail-fast (the C10-scoped negative cache).
+  *Superseded 2026-11-24:* the daemon now runs the per-line
+  `tokenizeLine2` loop itself, checking the deadline before every line
+  and yielding every 128 lines or 50 ms; the fail-fast cache is gone,
+  since a retry resumes from the cached states (see item 7's note under
+  "Recommended order").  Original
   idea text: replace
   `codeToTokensBase()` with a direct per-line tokenization loop against the
   grammar (vscode-textmate's `grammar.tokenizeLine(line, ruleStack,
@@ -469,7 +474,8 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   variables read at daemon start (`src/config.ts`): `TIG_SYNTAX_BUDGET_MS`
   (default 500), `TIG_SYNTAX_MAX_LINES` (bounds the required hunk depth,
   default 100k), `TIG_SYNTAX_MAX_SECTION_BYTES` (A8's threshold, default
-  1 MB); documented in the filter README.  A total-ms-per-connection knob
+  1 MB); documented in the filter README.  (Defaults since 2026-11-24:
+  45000 ms, 1,000,000 lines, 32 MiB.)  A total-ms-per-connection knob
   was deliberately skipped: with per-section budgets each section streams
   its frame promptly, so the client-side deadline (A0) covers liveness.
 - **A7. (Big) Show raw immediately, restyle asynchronously.**  The deep fix
@@ -669,7 +675,9 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   One honest limit: a *cold* hunk at the end of a big file still needs the
   full prefix scanned once — checkpoints make revisits and extensions
   cheap, they don't replace the A1 budget for first encounters.
-- **C5b. Materialize styles only for diff-visible lines.**  Tokenizing the
+- **C5b. Materialize styles only for diff-visible lines.
+  [IMPLEMENTED 2026-11-24, with C5 and C8(b); see item 7's note.]**
+  Tokenizing the
   prefix is required for grammar state, but *rendering* it isn't: today the
   daemon builds an SGR string for every prefix line, though the diff shows
   only a subset.  With the per-line loop, advance state through
@@ -682,7 +690,8 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   a shared `ByteLRU` (approximate sizing, entries over half the budget
   not cached) now backs the line cache and blob cache, budgeted by
   `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` (64 MB each by
-  default).  Measured: daemon RSS after a double corpus replay is
+  default; the tokenization cache's default is 128 MiB since
+  2026-11-24).  Measured: daemon RSS after a double corpus replay is
   **~410 MB** (was 1.4 GB under the entry-count LRUs), with warm revisits
   unregressed (~8 ms).  Original rationale: SGR line arrays for big
   documents dwarf their source (every style run adds a ~20-byte escape
@@ -696,8 +705,9 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   eviction story (LRU by mtime, size cap) and the usual concurrent-writer
   care (sqlite gives this cheaply).
 - **C8. Load and tokenize only the sides a hunk actually needs.
-  [(a) IMPLEMENTED 2026-08-10; (b) still open.]**  The parser now records
-  the deepest row each side actually styles (old = last `-` row, new =
+  [(a) IMPLEMENTED 2026-08-10; (b) IMPLEMENTED 2026-11-24, see item 7's
+  note; the parser now lists each side's rows instead of the deepest.]**
+  The parser now records the deepest row each side actually styles (old = last `-` row, new =
   last `+`/context row; 0 = side unused), and `process.ts` skips fetching
   a side entirely at 0 — a pure-addition section never touches the old
   blob.  **Measured honestly: wall-clock on the corpus is neutral to
@@ -718,8 +728,8 @@ runs/line (E5's quadratic path is real, though bounded at current caps).
   the side-need accounting (b) requires now exists.
 - **C9. Memory traffic / micro-allocations.**  Only touch what BM5 shows,
   but the alt-review's inventory is worth keeping: double `split("\n")` of
-  the same text (`load_side` and `highlight_lines`) — one newline-offset
-  index instead; validation building a per-line body string and `Map` per
+  the same text (`load_side` and `highlight_lines`; only `load_side`
+  splits since 2026-11-24) — one newline-offset index instead; validation building a per-line body string and `Map` per
   hunk line; per-line `Buffer.from("\n")` allocations and one giant
   `Buffer.concat` per section in emission; quadratic carry growth in
   `diff_parser.ts` when a single *line* spans many chunks with no newline

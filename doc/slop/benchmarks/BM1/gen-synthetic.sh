@@ -4,11 +4,13 @@
 # Commits are deterministic (fixed author/committer/dates), so SHAs recorded
 # in bench-corpus.txt stay valid across regenerations.
 #
-# Sizing constraints (from tools/tig-syntax-filter/src/highlight.ts): the
-# daemon rejects documents whose content.split("\n") exceeds MAX_DOC_LINES
-# (100000) entries — a trailing newline adds one entry, so big.ts uses
-# 99000 lines — and any line over MAX_LINE_CHARS (20000) chars, so the
-# minified lines stay well under that.  The largest runs-per-line case
+# Sizing constraints (from tools/tig-syntax-filter/src/highlight.ts, as of
+# 2026-08): the daemon rejected documents whose content.split("\n") exceeded
+# MAX_DOC_LINES (100000) entries — a trailing newline adds one entry, so
+# big.ts uses 99000 lines — and any line over MAX_LINE_CHARS (20000) chars,
+# so the minified lines stay well under that.  (Since 2026-11-24 the line
+# cap is 1,000,000 and a long line is only left untokenized; the corpus
+# stays as it was, so its SHAs stay valid.)  The largest runs-per-line case
 # targets 3900 alternations, just under MAX_RUNS_PER_LINE (4000), so its
 # styles still reach tig instead of tripping the unstyled-emission guard.
 set -eu
