@@ -73,7 +73,7 @@ If you can't fetch something, use google-chrome or curl_chrome152 on this machin
 
 # English
 
-All new English must be maximally unambiguous, even if it becomes slightly longer! Think as a reader, and read the text every possible way. For example, never write "cannot change a hash once set" instead of "cannot change a hash (if already set)".
+Please avoid all Claudish; write briefly like a person who knows classic style i.e. _Clear and Simple as the Truth_; new English must be maximally unambiguous, even if it becomes longer. Think as a reader, and read the text every possible way. For example, never write "cannot change a hash once set" instead of "cannot change a hash (if already set)". And never something like "Make no piece picker when ..." instead of "Don't make a piece picker when"; never "needs no" instead of "doesn't need a".
 
 If you're Claude, you can also ask Astra to rewrite stuff, with the `codex exec` command shown earlier in this file.
 
@@ -243,7 +243,7 @@ Automatically commit your changes with this commit template:
 
 	Subject line
 
-	A longer description or explanation of why/what is changing, when it is genuinely helpful.
+	Only if needed: a longer description of the change being made, esp. why. Never _start_ a paragraph writing about the prior state of the code here, except where it is very needed; in those cases be very explicit with e.g. "Previously, "
 
 	Model-output: model name e.g. Claude Mythos 5.2
 
