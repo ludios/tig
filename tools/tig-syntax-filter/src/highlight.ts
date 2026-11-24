@@ -38,9 +38,11 @@ const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
 	Comment: "#828c9c",
 };
 
-/** Lines at least this long are not run through the grammar but shown
- * in the theme's foreground, leaving the grammar state as it was: VS
- * Code's editor.maxTokenizationLineLength default. */
+/** Lines at least this long, in UTF-16 code units (JavaScript string
+ * length) without the terminator's carriage returns, are not run through
+ * the grammar but shown in the theme's foreground, leaving the grammar
+ * state as it was: VS Code's editor.maxTokenizationLineLength default,
+ * which it compares with the same length. */
 export const MAX_LINE_CHARS = 20000;
 export const MAX_RUNS_PER_LINE = 4000;
 
@@ -76,10 +78,11 @@ let theme_bg = "#282c34";
 interface doc_entry {
 	/** Line-start states: element i is the grammar state at the start of
 	 * line i + 1 (element 0 is INITIAL), so length n means lines 1..n-1
-	 * have run through the grammar and any of lines 1..n can be rendered
-	 * by tokenizing just that line.  States are immutable and share
-	 * structure, so arrays can share elements.  Arrays are never mutated;
-	 * a longer one replaces a shorter one. */
+	 * have known end states (tokenized, skipped or copied) and any of
+	 * lines 1..n can be rendered by tokenizing just that line.  States
+	 * share structure, and tokenizing from one changes only its scratch
+	 * fields, so arrays can share elements.  Arrays are never mutated; a
+	 * longer one replaces a shorter one. */
 	states: readonly StateStack[],
 	/** Line -> its SGR-annotated text, for lines rendered so far, as
 	 * many as fit beside the states (see HighlightPass.store()). */
@@ -305,7 +308,9 @@ export interface styled_piece {
 	fontStyle?: number | undefined,
 }
 
-/** One line's pieces as an SGR-annotated string, ending in a reset. */
+/** One line's pieces as an SGR-annotated string, ending in a reset; or,
+ * for a line of more than MAX_RUNS_PER_LINE style runs, its text without
+ * styling (literal ESC bytes framed in both cases). */
 export function emit_sgr_line(pieces: readonly styled_piece[]): string {
 	let out = "";
 	let last_style = "";
@@ -397,9 +402,12 @@ function render_line(text: string, tokens: Uint32Array | null, color_map: readon
 export interface peer_doc {
 	identity: string,
 	lines: readonly string[],
-	/** Runs of lines claimed equal, ascending: the pass's line `start` + i
-	 * is the peer's line `peer_start` + i, for i < `count` (which may be
-	 * Infinity).  Claims are checked, so a wrong one costs only time. */
+	/** Runs of lines claimed equal, ascending and not overlapping: the
+	 * pass's line `start` + i is the peer's line `peer_start` + i (both
+	 * 1-based), for 0 <= i < `count` (which may be Infinity).  Claims are
+	 * checked, by the lines' text and StateStack.equals() of their start
+	 * states (which VS Code's own convergence also relies on), so a wrong
+	 * one costs only time. */
 	runs: readonly { start: number, peer_start: number, count: number }[],
 }
 
@@ -411,7 +419,8 @@ export interface peer_doc {
  * copies the peer's cached end state for a line instead of tokenizing the
  * line, wherever the line equals the aligned peer line and the two start
  * states are equal: the same text from the same state ends in the same
- * state.  This is how VS Code retokenizes after an edit, stopping once
+ * state (unless the line hit the per-line time limit in one of them).
+ * VS Code's retokenizing after an edit relies on this too, stopping once
  * the states converge again.  The pass yields to the event loop every
  * CHUNK_LINES grammar runs or SLICE_MS, whichever comes first, and only
  * then; if shiki rebuilds the grammar during a yield (another request
@@ -455,6 +464,17 @@ class HighlightPass {
 	/** This pass's share of the stats counters, for its log line. */
 	private readonly counted = { tokenized_lines: 0, retokenized_lines: 0, copied_lines: 0 };
 
+	/**
+	 * @param hl        The highlighter, with `lang` loaded.
+	 * @param identity  The document's content identity, as for
+	 *                  highlight_lines().
+	 * @param lang      The document's language.
+	 * @param lines     The document's lines, without newlines.
+	 * @param wanted    Line numbers (1-based) to render: at least one,
+	 *                  ascending, without duplicates, none past the end.
+	 * @param peer      A document in the same language to copy states
+	 *                  from, or null.
+	 */
 	constructor(hl: Highlighter, identity: string, lang: string, lines: readonly string[],
 		    wanted: readonly number[], peer: peer_doc | null) {
 		A.gt(wanted.length, 0, "a pass needs a wanted line");
@@ -806,8 +826,9 @@ async function wait_until<T>(promise: Promise<T>, deadline: number | null): Prom
  * @returns          Wanted line -> its SGR-annotated text, or null after
  *                   giving up or when a wanted line is deeper than the
  *                   configured line cap.  Giving up still caches the
- *                   states computed so far, for the next request to
- *                   resume from.
+ *                   states computed so far, as far as the cache holds
+ *                   them (see HighlightPass.store()), for the next
+ *                   request to resume from.
  */
 export async function highlight_lines(identity: string, lang: string, lines: readonly string[],
 				      wanted: Iterable<number>, deadline: number | null,
@@ -872,13 +893,16 @@ function cached_state_count(hl: Highlighter, side: diff_side): number {
  * When both sides are in the same language, the side with more cached
  * states goes first, and the other copies its states wherever the two
  * documents are equal (see peer_doc).  So once one side of a giant file
- * has been tokenized, the other side costs about as much as the diff
- * (unless the grammar's states after a hunk never converge again), and
- * so does a neighboring commit's diff of the same file.
+ * has been tokenized, and while its states stay cached, the other side
+ * costs about as much as the diff (unless the grammar's states after a
+ * hunk never converge again), and so does a neighboring commit's diff of
+ * the same file.
  *
- * @param old_side  The old side, or null when it has nothing to render.
- * @param new_side  The new side, or null when it has nothing to render.
- * @param aligned   Runs of lines the diff presents as unchanged.
+ * @param old_side  The old side, or null when it has nothing to render
+ *                  or its source is unavailable.
+ * @param new_side  As `old_side`, for the new side.
+ * @param aligned   Runs of lines the diff presents as unchanged (see
+ *                  file_info.aligned).
  * @param deadline  As for highlight_lines(), shared by both sides.
  * @param cancelled As for highlight_lines().
  * @returns         The old and the new side's renderings, each null when
@@ -891,7 +915,9 @@ export async function highlight_sides(old_side: diff_side | null, new_side: diff
 	const render = (side: diff_side | null, peer?: peer_doc): Promise<Map<number, string> | null> | null =>
 		side === null ? null : highlight_lines(side.identity, side.lang, side.lines, side.wanted, deadline, cancelled, peer);
 	if (old_side === null || new_side === null || old_side.lang !== new_side.lang) {
-		return [await render(old_side), await render(new_side)];
+		const old_sgr = await render(old_side);
+		const new_sgr = await render(new_side);
+		return [old_sgr, new_sgr];
 	}
 	if (cached_state_count(highlighter, old_side) > cached_state_count(highlighter, new_side)) {
 		const old_sgr = await render(old_side);

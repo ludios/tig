@@ -172,8 +172,9 @@ export interface file_info {
 	aligned: aligned_run[];
 }
 
-/** Append the run of `count` unchanged lines at `old_start` and
- * `new_start` to `runs`, merging it into the last run when contiguous. */
+/** Append the run of `count` lines at `old_start` and `new_start` that
+ * the diff presents as unchanged to `runs`, merging it into the last run
+ * when contiguous. */
 function push_aligned(runs: aligned_run[], old_start: number, new_start: number, count: number): void {
 	const last = runs.at(-1);
 	if (last !== undefined && last.old_start + last.count === old_start &&

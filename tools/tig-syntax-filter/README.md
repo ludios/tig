@@ -17,8 +17,8 @@ in the repository root.
 - `src/daemon.ts` — persistent unix-socket daemon (node >= 23.6 runs the
   TypeScript directly). Parses diff sections byte-exactly, fetches full
   pre/post-image sources (`git cat-file --batch` per repo + caches),
-  tokenizes with shiki, validates every hunk line against the source,
-  and injects per-token foreground SGR. Logs to
+  tokenizes with shiki, validates every hunk line it styles against the
+  source, and injects per-token foreground SGR. Logs to
   `$XDG_STATE_HOME/tig-syntax/daemon.log`.
 - `src/start.mjs` — the daemon's entry point: turns on node's compile
   cache in `$XDG_CACHE_HOME/tig-syntax/node-compile-cache` so restarts
@@ -77,20 +77,23 @@ next to its own binary, via `$TIG_SYNTAX_DAEMON`, or on PATH) and add
   document continues from there rather than starting over.  (Loading
   another language can make shiki rebuild a grammar, e.g. markdown's;
   work done under the old grammar then starts over.)
-- `TIG_SYNTAX_MAX_LINES` — deepest source line a hunk may require before
-  the section is not highlighted (100–1000000; default 1000000).  Each
-  line tokenized costs ~80 bytes of grammar state, which stays cached.
+- `TIG_SYNTAX_MAX_LINES` — deepest source line that a side's hunks may
+  need before that side is not highlighted (100–1000000; default
+  1000000).  Each line tokenized costs ~80 bytes of grammar state, which
+  stays cached as far as the tokenization cache holds it.
 - `TIG_SYNTAX_MAX_SECTION_BYTES` — file sections larger than this, or of
   more than twice `TIG_SYNTAX_MAX_LINES` lines, are not highlighted; once
   a section exceeds either limit, its lines stream through raw as they
   arrive (65536–67108864; default 33554432, which is 32 MiB).  Source
   files (blobs or worktree files) over 32 MiB are never highlighted.
 - `TIG_SYNTAX_LINE_CACHE_MB` / `TIG_SYNTAX_BLOB_CACHE_MB` — approximate
-  byte budgets for the tokenization cache (each document's grammar state
-  at every line start, through the deepest line rendered, plus the lines
-  rendered so far) and the blob cache (1–4096; defaults 128 and 64).  A
-  document whose states exceed half the tokenization cache is
-  tokenized again on every visit.
+  budgets, in MiB, for the tokenization cache (each document's grammar
+  state at every line start, through the deepest line rendered so far,
+  plus rendered lines) and the blob cache (1–4096; defaults 128 and 64).
+  One document or blob may take at most half of its cache: a document
+  keeps only the states that fit (with the defaults, those of its first
+  ~838,000 lines), then as many rendered lines as fit; a bigger blob is
+  fetched again on every visit.
 
 The daemon knobs are read once at daemon startup (restart the daemon after
 changing them); the client's `TIG_SYNTAX_SPAWN_WAIT_MS` and
@@ -102,7 +105,10 @@ Output equals input byte-for-byte after stripping injected SGR and
 restoring the `ESC[999m` literal-ESC marker; anything the daemon cannot
 highlight provably-correctly (binary, invalid UTF-8, textconv drivers,
 combined diffs, source/hunk mismatches) passes through raw.  As in VS
-Code, a line of 20000 or more characters is not tokenized: it shows in
-the theme's foreground, and the lines after it highlight as if it were
-absent.  tig itself never depends on node: no filter, no daemon, or a
+Code, a line of 20000 or more UTF-16 code units (JavaScript string
+length, not counting a CRLF's CR) is not tokenized: it shows in the
+theme's foreground, and the lines after it highlight as if it were
+absent.  Also as in VS Code, a line that takes the grammar over 500 ms
+keeps the tokens found so far, and the lines after it highlight as if
+it were absent.  tig itself never depends on node: no filter, no daemon, or a
 dead daemon all render the ordinary diff.

@@ -61,9 +61,9 @@ const BOM = "\uFEFF";
 /**
  * The source document for one side of a file diff: its lines (without
  * newline characters) and a cache identity.  `bom` is the byte-order mark
- * ("\uFEFF", or "" when absent) that starts the file and so line 1 of the
- * diff, but not `lines`: editors strip it before tokenizing, and a grammar
- * would mistake it for code.
+ * ("\uFEFF", or "" when absent) that starts the file, and so the diff's
+ * line for source line 1, but not `lines`: editors strip it before
+ * tokenizing, and a grammar would mistake it for code.
  */
 interface side_doc {
 	identity: string;
@@ -206,9 +206,9 @@ async function highlight_file_section(cwd: string, section: diff_section,
 		return null;
 	}
 
-	// Validate every hunk body line against the mapped source line before
-	// emitting anything; a single mismatch (racing worktree edit, an
-	// unanticipated transformation) makes the whole section raw.
+	// Validate every hunk body line to be styled against the mapped source
+	// line before emitting anything; a single mismatch (racing worktree
+	// edit, an unanticipated transformation) makes the whole section raw.
 	const sgr_by_line = new Map<number, string | null>();
 	for (const hunk of info.hunks) {
 		let old_line = hunk.old_start;

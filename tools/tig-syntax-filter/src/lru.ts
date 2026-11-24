@@ -34,6 +34,9 @@ export class ByteLRU<V> {
 		return entry.value;
 	}
 
+	/** Cache `value` under `key`, replacing any value there, then evict
+	 * the oldest entries past the budget; but if `value` is over
+	 * max_value_bytes, change nothing. */
 	set(key: string, value: V): void {
 		const bytes = this.size_of(value);
 		if (bytes > this.max_value_bytes) {
