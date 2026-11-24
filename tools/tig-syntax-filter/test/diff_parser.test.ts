@@ -276,6 +276,22 @@ describe("parse_file_section", () => {
 		]);
 	});
 
+	it("rejects hunks out of order", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -4 +4 @@",
+			"-d",
+			"+D",
+			"@@ -2 +2 @@",
+			"-b",
+			"+B",
+		]));
+		expect(info).toBeNull();
+	});
+
 	it("aligns no gap whose sides disagree on its length", () => {
 		const info = parse_file_section(file_section([
 			"diff --git a/doc.txt b/doc.txt",

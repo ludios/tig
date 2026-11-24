@@ -376,10 +376,15 @@ export function parse_file_section(section: diff_section): file_info | null {
 		if (header === null) {
 			return null;
 		}
-		// The unchanged lines since the previous hunk, unless the two
-		// sides disagree on how many there are.
 		const old_first = header.old_count > 0 ? header.old_start : header.old_start + 1;
 		const new_first = header.new_count > 0 ? header.new_start : header.new_start + 1;
+		if (old_first < old_next || new_first < new_next) {
+			// Overlapping or out of order, which git never makes; rows
+			// and aligned runs ascend.
+			return null;
+		}
+		// The unchanged lines since the previous hunk, unless the two
+		// sides disagree on how many there are.
 		if (old_first - old_next === new_first - new_next && old_first > old_next) {
 			push_aligned(aligned, old_next, new_next, old_first - old_next);
 		}
