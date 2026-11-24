@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type * as timers_promises from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { bundledLanguages } from "shiki/langs";
 import { A } from "ayy";
 import { init_highlighter, ensure_lang, stats, CHUNK_LINES } from "../src/highlight.ts";
 import { highlight_prefix } from "./highlight_prefix.ts";
@@ -96,18 +97,41 @@ describe("a grammar rebuilt by a language load", () => {
 		const depth = doc.split("\n").length;
 		const restarts = stats.grammar_restarts;
 		between_chunks.hook = () => ensure_lang("ruby");
-		// Cancelled before its third chunk: the first went to the old
-		// grammar, the second, after the restart, to the new one.
-		let checks = 0;
-		const cancelled = (): boolean => ++checks === 3;
+		// The first chunk goes to the old grammar; cancelled after one
+		// chunk under the new grammar.
+		let tokenized_at_restart: number | null = null;
+		const cancelled = (): boolean => {
+			if (stats.grammar_restarts === restarts) {
+				return false;
+			}
+			tokenized_at_restart ??= stats.tokenized_lines;
+			return stats.tokenized_lines - tokenized_at_restart >= CHUNK_LINES;
+		};
 		expect(await highlight_prefix("test|rebuilt-cancelled", "markdown", doc, depth, null, cancelled)).toBeNull();
 		expect(stats.grammar_restarts).toBe(restarts + 1);
 		const tokenized = stats.tokenized_lines;
 		const resumed = await highlight_prefix("test|rebuilt-cancelled", "markdown", doc, depth, null);
-		// The new grammar's first chunk was cached and not tokenized again.
+		// The new grammar's chunk was cached and not tokenized again.
 		expect(stats.tokenized_lines - tokenized).toBe(depth - CHUNK_LINES);
 		const fresh = await highlight_prefix("test|rebuilt-cancelled-fresh", "markdown", doc, depth, null);
 		expect(fresh).not.toBeNull();
 		expect(resumed).toEqual(fresh);
+	}, 60000);
+
+	it("does not rebuild the grammar between a pass's yields", async () => {
+		// Shorter than a chunk, so the pass never yields: a language load
+		// started from its first check completes only after it, though
+		// its module is already imported, leaving it no I/O to wait for.
+		await bundledLanguages["abap"]();
+		const doc = (await markdown_doc("abap", "WRITE 'a'.")).split("\n").slice(0, CHUNK_LINES - 1).join("\n");
+		const started: { load?: Promise<boolean> } = {};
+		const cancelled = (): boolean => {
+			started.load ??= ensure_lang("abap");
+			return false;
+		};
+		const ours = await highlight_prefix("test|rebuilt-unseen", "markdown", doc, CHUNK_LINES - 1, null, cancelled);
+		expect(ours).not.toBeNull();
+		const loaded = await started.load;
+		expect(loaded).toBe(true);
 	}, 60000);
 });

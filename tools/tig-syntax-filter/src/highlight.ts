@@ -44,10 +44,14 @@ const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
 export const MAX_LINE_CHARS = 20000;
 export const MAX_RUNS_PER_LINE = 4000;
 
-/** Grammar runs (lines) between deadline checks and event-loop yields;
- * ~10-60 ms of work at measured grammar rates, so a section overshoots
- * its budget by at most roughly that. */
+/** Grammar runs (lines) between a pass's event-loop yields, unless
+ * SLICE_MS passes first. */
 export const CHUNK_LINES = 128;
+
+/** The longest a pass works between event-loop yields, in ms, give or
+ * take one line's work, so other connections wait at most about this
+ * long. */
+const SLICE_MS = 50;
 
 /** Time limit for tokenizing one line, as in VS Code and shiki; a line
  * that hits it keeps the tokens found so far. */
@@ -92,13 +96,14 @@ function doc_entry_bytes(entry: doc_entry): number {
 /** Byte-budgeted LRU: cache_key() -> doc_entry. */
 const doc_cache = new ByteLRU<doc_entry>(config.line_cache_mb * 1048576, doc_entry_bytes);
 
-/** Running counters for diagnostics and tests. */
+/** Running counters for diagnostics and tests.  Lines that skip the
+ * grammar (see tokenize_line()) count as run through it. */
 export const stats = {
 	/** Lines run through the grammar to extend a document's cached
 	 * states. */
 	tokenized_lines: 0,
-	/** Lines run through the grammar again, from a cached start state,
-	 * only to render them (cached renderings excluded). */
+	/** Lines run through the grammar from a cached start state, only to
+	 * render them (cached renderings excluded). */
 	retokenized_lines: 0,
 	/** Lines whose end state was copied from a peer document instead of
 	 * running them through the grammar. */
@@ -106,6 +111,9 @@ export const stats = {
 	/** Times a pass started over because its grammar was rebuilt. */
 	grammar_restarts: 0,
 };
+
+/** The stats counters that count lines. */
+type line_counter = "tokenized_lines" | "retokenized_lines" | "copied_lines";
 
 /** In-flight passes by cache key, with the deepest line each needs.
  * Passes yield to the event loop, so a concurrent request for the same
@@ -403,10 +411,10 @@ export interface peer_doc {
  * line, wherever the line equals the aligned peer line and the two start
  * states are equal: the same text from the same state ends in the same
  * state.  This is how VS Code retokenizes after an edit, stopping once
- * the states converge again.  Work runs in chunks of
- * CHUNK_LINES grammar runs with event-loop yields between them; if shiki
- * rebuilds the grammar during a yield (another request loaded a
- * language), the pass begins again under the new grammar.
+ * the states converge again.  The pass yields to the event loop every
+ * CHUNK_LINES grammar runs or SLICE_MS, whichever comes first, and only
+ * then; if shiki rebuilds the grammar during a yield (another request
+ * loaded a language), the pass begins again under the new grammar.
  */
 class HighlightPass {
 	private readonly hl: Highlighter;
@@ -436,9 +444,15 @@ class HighlightPass {
 	/** Wanted line -> its SGR-annotated text, plus the line's own
 	 * carriage returns after the final reset. */
 	private sgr = new Map<number, string>();
-	/** Grammar runs since the pass (re)began, to space out the chunk
-	 * checks. */
+	/** Index into `wanted` before which every line is rendered. */
+	private rendered_through!: number;
+
+	/** Grammar runs since the last yield. */
 	private runs = 0;
+	/** performance.now() at the last yield, or when the pass began. */
+	private resumed = 0;
+	/** This pass's share of the stats counters, for its log line. */
+	private readonly counted = { tokenized_lines: 0, retokenized_lines: 0, copied_lines: 0 };
 
 	constructor(hl: Highlighter, identity: string, lang: string, lines: readonly string[],
 		    wanted: readonly number[], peer: peer_doc | null) {
@@ -474,7 +488,13 @@ class HighlightPass {
 				this.sgr.set(line, text);
 			}
 		}
-		this.runs = 0;
+		this.rendered_through = 0;
+	}
+
+	/** Count one line in stats `counter` and in the pass's share. */
+	private count(counter: line_counter): void {
+		stats[counter]++;
+		this.counted[counter]++;
 	}
 
 	/** How many lines have a known start state (lines 1..this many). */
@@ -524,7 +544,7 @@ class HighlightPass {
 			return false;
 		}
 		this.computed.push(this.peer_states[peer_line]!);
-		stats.copied_lines++;
+		this.count("copied_lines");
 		return true;
 	}
 
@@ -601,43 +621,86 @@ class HighlightPass {
 	}
 
 	/**
-	 * Account for the grammar run about to happen.  Every CHUNK_LINES
-	 * runs, starting with the first: unless it is the first, yield to the
-	 * event loop and begin again if the grammar was rebuilt meanwhile;
-	 * then stop on cancellation or a passed deadline, caching the states
-	 * known so far.
+	 * Before a line's work: stop on cancellation or a passed deadline,
+	 * caching what is known so far, or call for a yield to the event loop
+	 * when one is due.  Synchronous, like the work itself, so nothing else
+	 * runs between yields: an await would let other tasks' continuations
+	 * run, such as a language load that rebuilds the grammar unseen.
 	 *
-	 * @returns "go" to make the run, "restart" after beginning again,
-	 *          "stop" to give up.
+	 * @param deadline   As for run().
+	 * @param cancelled  As for run().
+	 * @returns          "go" to do the work, "yield" to call yield_now()
+	 *                   first, "stop" to give up.
 	 */
-	private async step(deadline: number | null, cancelled?: () => boolean): Promise<"go" | "restart" | "stop"> {
-		const run = this.runs++;
-		if (run % CHUNK_LINES !== 0) {
-			return "go";
-		}
-		if (run > 0) {
-			await setImmediate();
-			if (cache_key(this.hl, this.identity, this.lang) !== this.key) {
-				logger.info("{lang}'s grammar was rebuilt after {done} of {depth} lines had states; starting over", () => ({
-					lang: this.lang, done: this.state_count() - 1, depth: this.depth,
-				}));
-				stats.grammar_restarts++;
-				this.begin();
-				return "restart";
-			}
-		}
+	private check(deadline: number | null, cancelled?: () => boolean): "go" | "yield" | "stop" {
 		if (cancelled !== undefined && cancelled()) {
 			this.store();
 			return "stop";
 		}
-		if (deadline !== null && performance.now() > deadline) {
+		const now = performance.now();
+		if (deadline !== null && now > deadline) {
 			logger.info("deadline hit tokenizing {lang} with states through line {done} of {depth}; caching them", () => ({
 				lang: this.lang, done: this.state_count() - 1, depth: this.depth,
 			}));
 			this.store();
 			return "stop";
 		}
-		return "go";
+		return this.runs >= CHUNK_LINES || now - this.resumed >= SLICE_MS ? "yield" : "go";
+	}
+
+	/** Yield to the event loop, then begin again if the grammar was
+	 * rebuilt meanwhile. */
+	private async yield_now(): Promise<void> {
+		await setImmediate();
+		this.runs = 0;
+		this.resumed = performance.now();
+		if (cache_key(this.hl, this.identity, this.lang) === this.key) {
+			return;
+		}
+		logger.info("{lang}'s grammar was rebuilt after {done} of {depth} lines had states; starting over", () => ({
+			lang: this.lang, done: this.state_count() - 1, depth: this.depth,
+		}));
+		stats.grammar_restarts++;
+		this.begin();
+	}
+
+	/**
+	 * The line the pass must work on next: while the known states do not
+	 * reach the deepest wanted line, the line whose end state comes next;
+	 * then each wanted line not rendered yet.
+	 *
+	 * @returns The line (1-based), or null when the pass is done.
+	 */
+	private next_line(): number | null {
+		if (this.state_count() <= this.depth) {
+			return this.state_count();
+		}
+		while (this.rendered_through < this.wanted.length &&
+		       this.sgr.has(this.wanted[this.rendered_through]!)) {
+			this.rendered_through++;
+		}
+		return this.wanted[this.rendered_through] ?? null;
+	}
+
+	/** Do the work on `line`, from next_line(): find its end state by
+	 * copying or tokenizing, rendering it if wanted, or just render it. */
+	private work(line: number): void {
+		if (line < this.state_count()) {
+			this.runs++;
+			this.render(line, this.tokenize(line).tokens);
+			this.count("retokenized_lines");
+			return;
+		}
+		if (this.copy_from_peer(line)) {
+			return;
+		}
+		this.runs++;
+		const { tokens, end } = this.tokenize(line);
+		this.computed.push(end);
+		this.count("tokenized_lines");
+		if (this.wanted_set.has(line) && !this.sgr.has(line)) {
+			this.render(line, tokens);
+		}
 	}
 
 	/**
@@ -645,59 +708,37 @@ class HighlightPass {
 	 *
 	 * @param deadline   performance.now() time after which to give up, or
 	 *                   null for none.
-	 * @param cancelled  Polled between chunks; true means give up.
+	 * @param cancelled  Polled before each line's work; true means give
+	 *                   up.
 	 * @returns          Wanted line -> its SGR-annotated text, or null
 	 *                   after giving up.
 	 */
 	async run(deadline: number | null, cancelled?: () => boolean): Promise<Map<number, string> | null> {
 		const started = performance.now();
-		const tokenized_before = stats.tokenized_lines;
-		const retokenized_before = stats.retokenized_lines;
-		const copied_before = stats.copied_lines;
-		pass: while (true) {
-			while (this.state_count() <= this.depth) {
-				if (this.copy_from_peer(this.state_count())) {
-					continue;
-				}
-				const next = await this.step(deadline, cancelled);
-				if (next === "stop") {
-					return null;
-				}
-				if (next === "restart") {
-					continue pass;
-				}
-				const line = this.state_count();
-				const { tokens, end } = this.tokenize(line);
-				this.computed.push(end);
-				stats.tokenized_lines++;
-				if (this.wanted_set.has(line) && !this.sgr.has(line)) {
-					this.render(line, tokens);
-				}
+		this.resumed = started;
+		while (true) {
+			const line = this.next_line();
+			if (line === null) {
+				break;
 			}
-			for (const line of this.wanted) {
-				if (this.sgr.has(line)) {
-					continue;
-				}
-				const next = await this.step(deadline, cancelled);
-				if (next === "stop") {
-					return null;
-				}
-				if (next === "restart") {
-					continue pass;
-				}
-				this.render(line, this.tokenize(line).tokens);
-				stats.retokenized_lines++;
+			const next = this.check(deadline, cancelled);
+			if (next === "stop") {
+				return null;
 			}
-			break;
+			if (next === "yield") {
+				await this.yield_now();
+				continue;
+			}
+			this.work(line);
 		}
 		this.store();
 		const elapsed = performance.now() - started;
 		if (elapsed > 200) {
 			logger.info("{lang} through line {depth}: tokenized {tokenized} lines, copied {copied} lines' states from the other side, re-tokenized {retokenized} lines to render them, in {ms}ms", () => ({
 				lang: this.lang, depth: this.depth,
-				tokenized: stats.tokenized_lines - tokenized_before,
-				copied: stats.copied_lines - copied_before,
-				retokenized: stats.retokenized_lines - retokenized_before,
+				tokenized: this.counted.tokenized_lines,
+				copied: this.counted.copied_lines,
+				retokenized: this.counted.retokenized_lines,
 				ms: Math.round(elapsed),
 			}));
 		}
@@ -728,7 +769,7 @@ class HighlightPass {
  * @param deadline   performance.now() time after which to give up, or
  *                   null for none.  It is wall time, so under contention
  *                   sections give up a little earlier.
- * @param cancelled  Polled between chunks; true means give up.
+ * @param cancelled  Polled before each line's work; true means give up.
  * @param peer       A document, in the same language, to copy states
  *                   from (see peer_doc), using its cached states.
  * @returns          Wanted line -> its SGR-annotated text, or null after

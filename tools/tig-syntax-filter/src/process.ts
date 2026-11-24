@@ -281,7 +281,7 @@ async function highlight_file_section(cwd: string, section: diff_section,
 }
 
 /** Process one section into its output bytes (highlighted or raw).
- * `cancelled` lets a dead connection stop tokenization between chunks. */
+ * `cancelled` lets a dead connection stop tokenization between lines. */
 export async function process_section(cwd: string, section: diff_section,
 					cancelled?: () => boolean): Promise<Buffer> {
 	if (section.kind === "file") {

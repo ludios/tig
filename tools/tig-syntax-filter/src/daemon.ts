@@ -144,7 +144,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 			}
 			// Once the client half-closes, only a failed write
 			// reveals that it was killed, so send keepalives:
-			// abandoned tokenization then stops between chunks.
+			// abandoned tokenization then stops before its next line.
 			heartbeat = setInterval(() => {
 				socket.write("P 0\n");
 			}, 500);

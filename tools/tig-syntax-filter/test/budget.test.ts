@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { A } from "ayy";
 import { readFile } from "node:fs/promises";
 import { createHighlighter, type Highlighter } from "shiki";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
@@ -126,18 +127,24 @@ describe("lines of MAX_LINE_CHARS or more", () => {
 describe("tokenization budget", () => {
 	const doc = Array.from({ length: 600 }, (_, i) => `const v_${i} = ${i};`).join("\n");
 
+	/** Lines that miss_deadline() tokenizes before the deadline passes:
+	 * fewer than a chunk, since the deadline is checked before each line. */
+	const LINES_BEFORE_MISS = 100;
+
 	/** Tokenize `doc` as `key` to `depth` under a stopped clock that jumps
-	 * `spent_ms` ahead once the first chunk is done, past the deadline:
-	 * a deterministic mid-work miss after `spent_ms` of tokenizing.  The
-	 * jump rides on cancelled(), which is consulted before each chunk. */
+	 * `spent_ms` ahead, past the deadline, once LINES_BEFORE_MISS lines
+	 * are done: a deterministic mid-work miss after `spent_ms` of
+	 * tokenizing.  The jump rides on cancelled(), which is consulted
+	 * before each line, just before the deadline. */
 	async function miss_deadline(key: string, depth: number, spent_ms: number): Promise<string[] | null> {
+		A.lt(LINES_BEFORE_MISS, CHUNK_LINES);
 		const start = performance.now();
 		let now = start;
-		let chunks = 0;
+		let lines = 0;
 		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
 		try {
 			return await highlight_prefix(key, "typescript", doc, depth, start + spent_ms, () => {
-				if (++chunks === 2) {
+				if (++lines === LINES_BEFORE_MISS + 1) {
 					now = start + spent_ms + 1;
 				}
 				return false;
@@ -164,8 +171,8 @@ describe("tokenization budget", () => {
 						     performance.now() + 60000);
 		expect(retry).not.toBeNull();
 		expect(retry!.length).toBe(600);
-		// The miss came after the first chunk, which stayed cached.
-		expect(stats.tokenized_lines - before).toBe(600 - CHUNK_LINES);
+		// The lines tokenized before the miss stayed cached.
+		expect(stats.tokenized_lines - before).toBe(600 - LINES_BEFORE_MISS);
 	});
 
 	it("stops on cancellation; a retry still runs", async () => {
