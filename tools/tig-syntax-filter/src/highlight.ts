@@ -77,8 +77,8 @@ interface doc_entry {
 	 * structure, so arrays can share elements.  Arrays are never mutated;
 	 * a longer one replaces a shorter one. */
 	states: readonly StateStack[],
-	/** Line -> its SGR-annotated text, for every line rendered so far;
-	 * only ever grows. */
+	/** Line -> its SGR-annotated text, for lines rendered so far, as
+	 * many as fit beside the states (see HighlightPass.store()). */
 	rendered: Map<number, string>,
 	/** Approximate memory of `rendered`. */
 	rendered_bytes: number,
@@ -539,37 +539,64 @@ class HighlightPass {
 		this.sgr.set(line, render_line(grammar_text(text), tokens, this.color_map) + cr_suffix(text));
 	}
 
-	/** Cache the states known now, unless the cache already has more (a
-	 * concurrent pass may have gone deeper meanwhile), and the lines
-	 * rendered so far, unless they would make the entry too big to cache:
-	 * renderings only speed up revisits, while later passes need the
-	 * states. */
+	/**
+	 * Cache what the pass knows, as an entry that fits the cache's entry
+	 * limit.  States come first, since later passes need them while
+	 * renderings only speed up revisits: the entry gets the cached states
+	 * or the pass's, whichever are more (a concurrent pass may have gone
+	 * deeper meanwhile), cut to the longest prefix that fits; then the
+	 * cached renderings, unless the states left no room for them; then
+	 * the pass's other renderings, in line order, while they fit.
+	 */
 	private store(): void {
 		if (this.computed.length === 0 && this.sgr.size === 0) {
 			return;
 		}
 		A.eq(this.key, cache_key(this.hl, this.identity, this.lang),
 		     "the grammar was rebuilt after these states were computed");
+		const limit = doc_cache.max_value_bytes;
 		const current = doc_cache.get(this.key);
-		const entry = current ?? { states: this.known, rendered: new Map(), rendered_bytes: 0 };
-		if (this.state_count() > entry.states.length) {
-			entry.states = this.known.concat(this.computed);
-		}
-		for (const [line, text] of this.sgr) {
-			if (!entry.rendered.has(line)) {
-				entry.rendered.set(line, text);
-				entry.rendered_bytes += text.length * 2 + 48;
-			}
-		}
-		if (doc_entry_bytes(entry) > doc_cache.max_value_bytes) {
-			entry.rendered = new Map();
-			entry.rendered_bytes = 0;
-			if (doc_entry_bytes(entry) > doc_cache.max_value_bytes) {
-				logger.warn("states for {lines} lines of {lang} are too big to cache; raise TIG_SYNTAX_LINE_CACHE_MB to keep them", () => ({
-					lines: entry.states.length - 1, lang: this.lang,
+		const max_states = Math.floor(limit / STATE_BYTES_PER_LINE);
+		let states = current?.states ?? this.known;
+		if (this.state_count() > states.length && states.length < max_states) {
+			const count = Math.min(this.state_count(), max_states);
+			if (count < this.state_count()) {
+				logger.warn("caching {lang} states only through line {kept} of {lines}; raise TIG_SYNTAX_LINE_CACHE_MB to keep them all", () => ({
+					lang: this.lang, kept: count - 1, lines: this.state_count() - 1,
 				}));
 			}
+			A.gte(count, this.known.length, "states from the cache fit it");
+			states = this.known.concat(this.computed.slice(0, count - this.known.length));
 		}
+		const state_bytes = states.length * STATE_BYTES_PER_LINE;
+		let rendered = current?.rendered ?? new Map<number, string>();
+		let rendered_bytes = current?.rendered_bytes ?? 0;
+		if (state_bytes + rendered_bytes > limit) {
+			rendered = new Map();
+			rendered_bytes = 0;
+		}
+		const added: [number, string][] = [];
+		for (const [line, text] of this.sgr) {
+			if (rendered.has(line)) {
+				continue;
+			}
+			const bytes = text.length * 2 + 48;
+			if (state_bytes + rendered_bytes + bytes > limit) {
+				break;
+			}
+			added.push([line, text]);
+			rendered_bytes += bytes;
+		}
+		if (states === current?.states && rendered === current.rendered && added.length === 0) {
+			return;
+		}
+		// The cached entry may share `rendered`; adding to it is safe
+		// because the new entry, which fits, replaces that one at once.
+		for (const [line, text] of added) {
+			rendered.set(line, text);
+		}
+		const entry = { states, rendered, rendered_bytes };
+		A.lte(doc_entry_bytes(entry), limit, "the entry was built to fit");
 		doc_cache.set(this.key, entry);
 	}
 
