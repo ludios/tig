@@ -200,6 +200,38 @@ describe("tokenization budget", () => {
 	});
 });
 
+describe("concurrent requests for one document", () => {
+	const lines = Array.from({ length: 6000 }, (_, i) => `const w_${i} = ${i};`);
+
+	/** Start a pass rendering the last of `lines` as `key`, without
+	 * waiting for it; `done` turns true once it finishes. */
+	function start_deep_pass(key: string): { done: boolean, promise: Promise<unknown> } {
+		const deep = { done: false, promise: Promise.resolve() as Promise<unknown> };
+		deep.promise = highlight_lines(key, "typescript", lines, [lines.length], null).then(() => {
+			deep.done = true;
+		});
+		return deep;
+	}
+
+	it("returns cached renderings without waiting for a deeper pass", async () => {
+		const first = await highlight_lines("test|concurrent-cached", "typescript", lines, [1], null);
+		const deep = start_deep_pass("test|concurrent-cached");
+		const again = await highlight_lines("test|concurrent-cached", "typescript", lines, [1], null);
+		expect(deep.done).toBe(false);
+		expect(again).toEqual(first);
+		await deep.promise;
+	});
+
+	it("stops waiting for a deeper pass at its own deadline", async () => {
+		const deep = start_deep_pass("test|concurrent-late");
+		const late = await highlight_lines("test|concurrent-late", "typescript", lines, [lines.length],
+						   performance.now() + 5);
+		expect(late).toBeNull();
+		expect(deep.done).toBe(false);
+		await deep.promise;
+	});
+});
+
 /** Reassemble a section's exact input bytes. */
 function section_bytes(section: diff_section): Buffer {
 	return Buffer.concat(section.lines.flatMap((line) =>

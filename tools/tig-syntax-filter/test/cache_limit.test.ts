@@ -50,6 +50,19 @@ describe("a 1 MiB tokenization cache", () => {
 		expect(rerendered).toBeLessThan(lines.length);
 	});
 
+	it("gives a waiting request the renderings of the pass it waited for", async () => {
+		// As in the previous test, most renderings do not fit the cache.
+		const lines = Array.from({ length: 3000 }, (_, i) => `const w_${i} = "${"y".repeat(150)}"; // ${i}`);
+		const rows = lines.map((_, i) => i + 1);
+		const retokenized = stats.retokenized_lines;
+		const [first, second] = await Promise.all([
+			highlight_lines("limit|shared", "typescript", lines, rows, null),
+			highlight_lines("limit|shared", "typescript", lines, rows, null),
+		]);
+		expect(second).toEqual(first);
+		expect(stats.retokenized_lines).toBe(retokenized);
+	});
+
 	it("keeps the longest prefix of states that fits", async () => {
 		// 8000 states take ~640 KB, so only ~6500 lines' fit.
 		const lines = statements(8000);

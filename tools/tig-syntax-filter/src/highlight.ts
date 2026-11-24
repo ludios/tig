@@ -118,10 +118,11 @@ type line_counter = "tokenized_lines" | "retokenized_lines" | "copied_lines";
 /** In-flight passes by cache key, with the deepest line each needs.
  * Passes yield to the event loop, so a concurrent request for the same
  * document (e.g. a prefetch racing the foreground view) can wait for a
- * pass going at least as deep and then render from its cached states. */
+ * pass going at least as deep, then use its renderings or render from
+ * its cached states. */
 const passes_inflight = new Map<string, {
 	depth: number,
-	promise: Promise<unknown>,
+	promise: Promise<Map<number, string> | null>,
 }>();
 
 /**
@@ -746,6 +747,33 @@ class HighlightPass {
 	}
 }
 
+/** `rows` -> their renderings in `rendered`, which has them all. */
+function pick(rendered: ReadonlyMap<number, string>, rows: readonly number[]): Map<number, string> {
+	return new Map(rows.map((line) => [line, rendered.get(line)!]));
+}
+
+/**
+ * Wait for `promise`, but not past `deadline`, a performance.now() time
+ * (null for none).
+ *
+ * @returns What `promise` resolved to, or "late" if the deadline came
+ *          first.
+ */
+async function wait_until<T>(promise: Promise<T>, deadline: number | null): Promise<T | "late"> {
+	if (deadline === null) {
+		return await promise;
+	}
+	let timer: NodeJS.Timeout | undefined;
+	const late = new Promise<"late">((resolve) => {
+		timer = setTimeout(() => resolve("late"), Math.max(0, deadline - performance.now()));
+	});
+	try {
+		return await Promise.race([promise, late]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 /**
  * Render lines of a source document as SGR-annotated text: removing the
  * SGR and unframing literal-ESC markers yields each line exactly.  The
@@ -758,7 +786,10 @@ class HighlightPass {
  * make a different daemon (the client's build id covers them).  So lines
  * past the deepest wanted one are never tokenized, a deeper request
  * resumes from the cached states, and rendering a line whose start state
- * is cached runs only that line through the grammar.
+ * is cached runs only that line through the grammar.  A request whose
+ * lines are not all rendered yet, while another request's pass goes at
+ * least as deep into the same document, waits for that pass (but not
+ * past its own deadline), then uses its renderings or its states.
  *
  * @param identity   The document's content identity.
  * @param lang       A loaded language (see ensure_lang()).
@@ -794,11 +825,21 @@ export async function highlight_lines(identity: string, lang: string, lines: rea
 	}
 
 	const key = cache_key(hl, identity, lang);
+	const cached = doc_cache.get(key)?.rendered;
+	if (cached !== undefined && rows.every((line) => cached.has(line))) {
+		return pick(cached, rows);
+	}
 	const inflight = passes_inflight.get(key);
 	if (inflight !== undefined && inflight.depth >= depth) {
 		// Another pass is already computing these states: let it, then
-		// render from what it cached.
-		await inflight.promise;
+		// use its renderings or render from what it cached.
+		const theirs = await wait_until(inflight.promise, deadline);
+		if (theirs === "late") {
+			return null;
+		}
+		if (theirs !== null && rows.every((line) => theirs.has(line))) {
+			return pick(theirs, rows);
+		}
 	}
 	const pass = new HighlightPass(hl, identity, lang, lines, rows, peer ?? null);
 	const entry = { depth, promise: pass.run(deadline, cancelled) };
