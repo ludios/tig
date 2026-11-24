@@ -7,7 +7,8 @@
  *	"TIGSYN1 <cwd_byte_length>\n" <cwd bytes> <raw diff bytes ... EOF>
  * Daemon -> client, a sequence of frames:
  *	"O <consumed_input_bytes> <output_bytes>\n" <output bytes>
- *	"P 0\n", a keepalive probe once the client has half-closed.
+ *	"P 0\n", a keepalive probe while the daemon is not reading input:
+ *	once the client has half-closed, or while its input is paused.
  *	"E 0\n" on clean end of stream.
  * The client keeps its input spooled, so a daemon crash at any point lets
  * it fall back to emitting the unacknowledged rest raw.
@@ -53,7 +54,24 @@ function handle_connection(socket: net.Socket): Promise<void> {
 		let sections_served = 0;
 		let queued_bytes = 0;
 		let paused = false;
+		let ended = false;
 		const started = performance.now();
+
+		// A paused or half-closed socket is not read, so only a failed
+		// write reveals that the client was killed: send keepalives
+		// meanwhile, so that abandoned work stops before its next line.
+		let heartbeat: ReturnType<typeof setInterval> | null = null;
+		const start_heartbeat = (): void => {
+			heartbeat ??= setInterval(() => {
+				socket.write("P 0\n");
+			}, 500);
+		};
+		const stop_heartbeat = (): void => {
+			if (heartbeat !== null) {
+				clearInterval(heartbeat);
+				heartbeat = null;
+			}
+		};
 
 		/** Resolves once the socket can take more output (or is gone). */
 		const drained = (): Promise<void> => new Promise((resolve_drained) => {
@@ -80,6 +98,9 @@ function handle_connection(socket: net.Socket): Promise<void> {
 					if (paused && queued_bytes <= INPUT_QUEUE_BYTES / 2) {
 						paused = false;
 						socket.resume();
+						if (!ended) {
+							stop_heartbeat();
+						}
 					}
 					if (closed) {
 						return;
@@ -99,6 +120,7 @@ function handle_connection(socket: net.Socket): Promise<void> {
 				// shrinks; the client's spool absorbs the difference.
 				paused = true;
 				socket.pause();
+				start_heartbeat();
 			}
 		};
 
@@ -134,24 +156,12 @@ function handle_connection(socket: net.Socket): Promise<void> {
 			enqueue_sections(splitter.feed(chunk));
 		});
 
-		let heartbeat: ReturnType<typeof setInterval> | null = null;
-		const stop_heartbeat = (): void => {
-			if (heartbeat !== null) {
-				clearInterval(heartbeat);
-				heartbeat = null;
-			}
-		};
-
 		socket.on("end", () => {
 			if (cwd !== null) {
 				enqueue_sections(splitter.finish());
 			}
-			// Once the client half-closes, only a failed write
-			// reveals that it was killed, so send keepalives:
-			// abandoned tokenization then stops before its next line.
-			heartbeat = setInterval(() => {
-				socket.write("P 0\n");
-			}, 500);
+			ended = true;
+			start_heartbeat();
 			queue = queue.then(() => {
 				stop_heartbeat();
 				if (!closed) {
