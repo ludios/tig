@@ -1,6 +1,7 @@
 /**
  * After highlighting, a section is validated and rebuilt in slices that
- * yield to the event loop: yielding leaves the output byte-identical.
+ * yield to the event loop: yielding leaves the output byte-identical, and
+ * a connection that is gone stops the work, with no output.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -82,5 +83,12 @@ describe("validating and rebuilding a section", () => {
 		// A yield, and so a poll, before each line of validation (the
 		// hunk's LINES + 1 lines) and of rebuilding (the section's lines).
 		expect(polls).toBe(LINES + 1 + section.lines.length);
+	});
+
+	it("stops with no output once the connection is gone", async () => {
+		const { output, polls } = await process_with_fast_clock(() => true);
+		expect(output.length).toBe(0);
+		// Polled after the first line's yield, then by process_section().
+		expect(polls).toBe(2);
 	});
 });

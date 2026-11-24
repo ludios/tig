@@ -318,8 +318,16 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	return Buffer.concat(parts);
 }
 
-/** Process one section into its output bytes (highlighted or raw).
- * `cancelled` lets a dead connection stop the work between lines. */
+/**
+ * Process one section into its output bytes (highlighted or raw).
+ *
+ * @param cwd        The repository directory the diff came from.
+ * @param section    The section to process.
+ * @param cancelled  Polled between lines of work; true means the
+ *                   connection is gone, so the work stops.
+ * @returns          The section's output bytes, or no bytes when
+ *                   cancelled() turned true, as nobody will read them.
+ */
 export async function process_section(cwd: string, section: diff_section,
 					cancelled?: () => boolean): Promise<Buffer> {
 	if (section.kind === "file") {
@@ -338,6 +346,9 @@ export async function process_section(cwd: string, section: diff_section,
 		} catch (err) {
 			logger.error("section processing failed, passing through: {err}", () => ({ err: String(err) }));
 		}
+	}
+	if (cancelled?.() === true) {
+		return Buffer.alloc(0);
 	}
 	return raw_section_output(section);
 }
