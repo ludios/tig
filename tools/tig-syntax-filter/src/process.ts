@@ -9,14 +9,43 @@
  */
 
 import { createHash } from "node:crypto";
+import { setImmediate } from "node:timers/promises";
 import { getLogger } from "@logtape/logtape";
 import { parse_file_section, type diff_section, type file_info } from "./diff_parser.ts";
-import { ensure_lang, highlight_sides, frame_content } from "./highlight.ts";
+import { ensure_lang, highlight_sides, frame_content, SLICE_MS } from "./highlight.ts";
 import { detect_lang } from "./lang_map.ts";
 import { cat_blob, content_identity, read_worktree_file, has_textconv, repo_info } from "./git.ts";
 import { config } from "./config.ts";
 
 const logger = getLogger(["tig-syntax", "process"]);
+
+/** Lines of work between looks at the clock, which costs more than a
+ * line's work. */
+const LINES_PER_CLOCK_CHECK = 1024;
+
+/**
+ * Splits a long loop of synchronous per-line work into slices of about
+ * SLICE_MS, like a highlighting pass, so that other connections wait at
+ * most about that long.
+ */
+class Slicer {
+	private lines = 0;
+	private resumed = performance.now();
+
+	/** Count one line's work.
+	 * @returns  Whether the slice is used up: then await next_slice(). */
+	due(): boolean {
+		this.lines++;
+		return this.lines % LINES_PER_CLOCK_CHECK === 0 &&
+		       performance.now() - this.resumed >= SLICE_MS;
+	}
+
+	/** Yield to the event loop, then start the next slice. */
+	async next_slice(): Promise<void> {
+		await setImmediate();
+		this.resumed = performance.now();
+	}
+}
 
 /** Rebuild a section's original bytes, with literal ESC bytes framed. */
 export function raw_section_output(section: diff_section): Buffer {
@@ -209,11 +238,20 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// Validate every hunk body line to be styled against the mapped source
 	// line before emitting anything; a single mismatch (racing worktree
 	// edit, an unanticipated transformation) makes the whole section raw.
+	// This and the rebuild below take ~1 s for a 14 MB section, so they
+	// yield to the event loop now and then.
+	const slicer = new Slicer();
 	const sgr_by_line = new Map<number, string | null>();
 	for (const hunk of info.hunks) {
 		let old_line = hunk.old_start;
 		let new_line = hunk.new_start;
 		for (const line_index of hunk.body) {
+			if (slicer.due()) {
+				await slicer.next_slice();
+				if (cancelled?.() === true) {
+					return null;
+				}
+			}
 			const line = section.lines[line_index]!;
 			// An entirely empty line is a context line whose single space
 			// some tools trim.
@@ -265,6 +303,12 @@ async function highlight_file_section(cwd: string, section: diff_section,
 	// All lines validated; rebuild the section.
 	const parts: Buffer[] = [];
 	for (const [i, line] of section.lines.entries()) {
+		if (slicer.due()) {
+			await slicer.next_slice();
+			if (cancelled?.() === true) {
+				return null;
+			}
+		}
 		const sgr = sgr_by_line.get(i);
 		if (sgr !== undefined && sgr !== null && line.bytes.length > 0) {
 			parts.push(line.bytes.subarray(0, 1));
@@ -282,7 +326,7 @@ async function highlight_file_section(cwd: string, section: diff_section,
 }
 
 /** Process one section into its output bytes (highlighted or raw).
- * `cancelled` lets a dead connection stop tokenization between lines. */
+ * `cancelled` lets a dead connection stop the work between lines. */
 export async function process_section(cwd: string, section: diff_section,
 					cancelled?: () => boolean): Promise<Buffer> {
 	if (section.kind === "file") {

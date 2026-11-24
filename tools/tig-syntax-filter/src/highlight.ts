@@ -53,7 +53,7 @@ export const CHUNK_LINES = 128;
 /** The longest a pass works between event-loop yields, in ms, give or
  * take one line's work, so other connections wait at most about this
  * long. */
-const SLICE_MS = 50;
+export const SLICE_MS = 50;
 
 /** Time limit for tokenizing one line, as in VS Code and shiki; a line
  * that hits it keeps the tokens found so far. */
