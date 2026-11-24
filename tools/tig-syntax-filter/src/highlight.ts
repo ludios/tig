@@ -84,9 +84,13 @@ interface doc_entry {
 	rendered_bytes: number,
 }
 
+/** Approximate memory of a doc_entry. */
+function doc_entry_bytes(entry: doc_entry): number {
+	return entry.states.length * STATE_BYTES_PER_LINE + entry.rendered_bytes;
+}
+
 /** Byte-budgeted LRU: cache_key() -> doc_entry. */
-const doc_cache = new ByteLRU<doc_entry>(config.line_cache_mb * 1048576,
-	(entry) => entry.states.length * STATE_BYTES_PER_LINE + entry.rendered_bytes);
+const doc_cache = new ByteLRU<doc_entry>(config.line_cache_mb * 1048576, doc_entry_bytes);
 
 /** Running counters for diagnostics and tests. */
 export const stats = {
@@ -537,7 +541,9 @@ class HighlightPass {
 
 	/** Cache the states known now, unless the cache already has more (a
 	 * concurrent pass may have gone deeper meanwhile), and the lines
-	 * rendered so far. */
+	 * rendered so far, unless they would make the entry too big to cache:
+	 * renderings only speed up revisits, while later passes need the
+	 * states. */
 	private store(): void {
 		if (this.computed.length === 0 && this.sgr.size === 0) {
 			return;
@@ -553,6 +559,15 @@ class HighlightPass {
 			if (!entry.rendered.has(line)) {
 				entry.rendered.set(line, text);
 				entry.rendered_bytes += text.length * 2 + 48;
+			}
+		}
+		if (doc_entry_bytes(entry) > doc_cache.max_value_bytes) {
+			entry.rendered = new Map();
+			entry.rendered_bytes = 0;
+			if (doc_entry_bytes(entry) > doc_cache.max_value_bytes) {
+				logger.warn("states for {lines} lines of {lang} are too big to cache; raise TIG_SYNTAX_LINE_CACHE_MB to keep them", () => ({
+					lines: entry.states.length - 1, lang: this.lang,
+				}));
 			}
 		}
 		doc_cache.set(this.key, entry);

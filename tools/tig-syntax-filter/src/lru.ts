@@ -36,7 +36,7 @@ export class ByteLRU<V> {
 
 	set(key: string, value: V): void {
 		const bytes = this.size_of(value);
-		if (bytes > this.budget / 2) {
+		if (bytes > this.max_value_bytes) {
 			return;
 		}
 		const existing = this.map.get(key);
@@ -57,6 +57,11 @@ export class ByteLRU<V> {
 	clear(): void {
 		this.map.clear();
 		this.total = 0;
+	}
+
+	/** The largest value size set() caches. */
+	get max_value_bytes(): number {
+		return this.budget / 2;
 	}
 
 	/** Current approximate resident bytes (for tests and logging). */
