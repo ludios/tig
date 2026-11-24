@@ -146,7 +146,8 @@ export interface hunk {
 }
 
 /** A run of `count` lines that a diff presents as unchanged: old line
- * `old_start` + i is new line `new_start` + i, for i < `count`. */
+ * `old_start` + i is new line `new_start` + i (both 1-based), for
+ * 0 <= i < `count`. */
 export interface aligned_run {
 	old_start: number;
 	new_start: number;
@@ -166,9 +167,8 @@ export interface file_info {
 	old_rows: number[];
 	new_rows: number[];
 	/** Runs of lines the diff presents as unchanged, ascending: context
-	 * lines, and the lines before, between and after hunks.  The last
-	 * run's count is Infinity: it runs to the end of both files.  A diff
-	 * made while ignoring whitespace can present unequal lines so. */
+	 * lines, and the lines before and between hunks.  A diff made while
+	 * ignoring whitespace can present unequal lines so. */
 	aligned: aligned_run[];
 }
 
@@ -434,7 +434,6 @@ export function parse_file_section(section: diff_section): file_info | null {
 		old_next = old_first + header.old_count;
 		new_next = new_first + header.new_count;
 	}
-	push_aligned(aligned, old_next, new_next, Infinity);
 
 	return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows, aligned };
 }

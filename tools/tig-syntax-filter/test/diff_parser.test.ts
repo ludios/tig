@@ -273,7 +273,6 @@ describe("parse_file_section", () => {
 			{ old_start: 1, new_start: 1, count: 3 },	// before the first hunk, and "c"
 			{ old_start: 5, new_start: 6, count: 5 },	// "e", then up to the deletion
 			{ old_start: 12, new_start: 11, count: 9 },	// up to the insertion after old line 20
-			{ old_start: 21, new_start: 21, count: Infinity },
 		]);
 	});
 
@@ -287,7 +286,7 @@ describe("parse_file_section", () => {
 			"-a",
 			"+b",
 		]));
-		expect(info?.aligned).toEqual([{ old_start: 6, new_start: 8, count: Infinity }]);
+		expect(info?.aligned).toEqual([]);
 	});
 
 	it("drops the TAB git appends to names containing a space", () => {
