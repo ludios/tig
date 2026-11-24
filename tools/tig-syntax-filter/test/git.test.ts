@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cat_blob, content_identity, has_textconv, shed_git_state } from "../src/git.ts";
+import { cat_blob, content_identity, has_textconv, shed_git_state, MAX_BLOB_BYTES } from "../src/git.ts";
 
 let repo: string;
 let big_oid: string;
@@ -18,8 +18,7 @@ let small_oid: string;
 beforeAll(async () => {
 	repo = await mkdtemp(join(tmpdir(), "tig-syntax-git-test-"));
 	execFileSync("git", ["-C", repo, "init", "-q"]);
-	// 9 MiB: above the daemon's 8 MiB blob limit.
-	await writeFile(join(repo, "big.bin"), Buffer.alloc(9 * 1024 * 1024, 0x61));
+	await writeFile(join(repo, "big.bin"), Buffer.alloc(MAX_BLOB_BYTES + 1, 0x61));
 	await writeFile(join(repo, "small.txt"), "hello blob\n");
 	big_oid = execFileSync("git", ["-C", repo, "hash-object", "-w", "big.bin"],
 		{ cwd: repo, encoding: "utf8" }).trim();

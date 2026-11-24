@@ -34,7 +34,11 @@ import { config } from "./config.ts";
 const execfile_p = promisify(execFile);
 const logger = getLogger(["tig-syntax", "git"]);
 
-const MAX_BLOB_BYTES = 8 * 1024 * 1024;
+/** Larger blobs and worktree files are not highlighted.  As large as the
+ * client's spool of the diff itself: a file over a few MB is mostly
+ * bundled or generated code, but the time budget and cached states take
+ * such files in stride. */
+export const MAX_BLOB_BYTES = 64 * 1024 * 1024;
 const MAX_BATCHERS = 8;
 
 /** A blob response: its content and a hash of it as cache `identity`.

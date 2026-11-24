@@ -35,8 +35,8 @@ function int_env(name: string, fallback: number, min: number, max: number): numb
 
 export const config = {
 	budget_ms: int_env("TIG_SYNTAX_BUDGET_MS", 45000, 50, 600000),
-	max_lines: int_env("TIG_SYNTAX_MAX_LINES", 100000, 100, 1000000),
-	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 20, 1 << 16, 1 << 26),
-	line_cache_mb: int_env("TIG_SYNTAX_LINE_CACHE_MB", 64, 1, 4096),
+	max_lines: int_env("TIG_SYNTAX_MAX_LINES", 1000000, 100, 1000000),
+	max_section_bytes: int_env("TIG_SYNTAX_MAX_SECTION_BYTES", 1 << 26, 1 << 16, 1 << 26),
+	line_cache_mb: int_env("TIG_SYNTAX_LINE_CACHE_MB", 128, 1, 4096),
 	blob_cache_mb: int_env("TIG_SYNTAX_BLOB_CACHE_MB", 64, 1, 4096),
 };
