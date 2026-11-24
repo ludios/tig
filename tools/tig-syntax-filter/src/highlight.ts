@@ -38,6 +38,9 @@ const TOKEN_COLOR_OVERRIDES: Record<string, string> = {
 	Comment: "#828c9c",
 };
 
+/** Lines at least this long are not run through the grammar but shown
+ * in the theme's foreground, leaving the grammar state as it was: VS
+ * Code's editor.maxTokenizationLineLength default. */
 export const MAX_LINE_CHARS = 20000;
 export const MAX_RUNS_PER_LINE = 4000;
 
@@ -326,15 +329,17 @@ function grammar_text(line: string): string {
 
 /**
  * Run `text` (one line, without terminator) through `grammar` from the
- * line-start state `start`.  Returns the binary tokens (null for an empty
- * line, which shiki never runs through the grammar) and the state at the
- * start of the next line.  As in VS Code, a line that hits the time limit
- * leaves the state as it was, and an end state equal to `start` is
- * returned as `start` itself, so unchanged states share one object.
+ * line-start state `start`.  Returns the binary tokens and the state at
+ * the start of the next line.  The tokens are null for a line that does
+ * not run through the grammar, which then leaves the state as it was: an
+ * empty line (as in shiki) or one of MAX_LINE_CHARS or more (as in VS
+ * Code).  As in VS Code, a line that hits the time limit also leaves the
+ * state as it was, and an end state equal to `start` is returned as
+ * `start` itself, so unchanged states share one object.
  */
 function tokenize_line(grammar: Grammar, text: string,
 		       start: StateStack): { tokens: Uint32Array | null, end: StateStack } {
-	if (text === "") {
+	if (text === "" || text.length >= MAX_LINE_CHARS) {
 		return { tokens: null, end: start };
 	}
 	const result = grammar.tokenizeLine2(text, start, LINE_TIME_LIMIT_MS);
@@ -347,18 +352,22 @@ function tokenize_line(grammar: Grammar, text: string,
 /**
  * Render one line from tokenize_line()'s `tokens` for `text`, decoding
  * each token's colors as shiki does: `color_map` is the theme's, indexed
- * by the token's foreground id.
+ * by the token's foreground id.  Without tokens, the line is in the
+ * theme's foreground.
  */
 function render_line(text: string, tokens: Uint32Array | null, color_map: readonly string[]): string {
+	if (tokens === null) {
+		return emit_sgr_line(text === "" ? [] : [{ content: text }]);
+	}
 	const pieces: styled_piece[] = [];
-	const count = tokens === null ? 0 : tokens.length / 2;
+	const count = tokens.length / 2;
 	for (let i = 0; i < count; i++) {
-		const start = tokens![2 * i]!;
-		const next = i + 1 < count ? tokens![2 * i + 2]! : text.length;
+		const start = tokens[2 * i]!;
+		const next = i + 1 < count ? tokens[2 * i + 2]! : text.length;
 		if (start === next) {
 			continue;
 		}
-		const metadata = tokens![2 * i + 1]!;
+		const metadata = tokens[2 * i + 1]!;
 		pieces.push({
 			content: text.substring(start, next),
 			color: color_map[EncodedTokenMetadata.getForeground(metadata)],
@@ -681,11 +690,10 @@ class HighlightPass {
  * @param peer       A document, in the same language, to copy states
  *                   from (see peer_doc), using its cached states.
  * @returns          Wanted line -> its SGR-annotated text, or null after
- *                   giving up, when a wanted line is deeper than the
- *                   configured line cap, or when a line through the
- *                   deepest wanted one exceeds MAX_LINE_CHARS.  Giving up
- *                   still caches the states computed so far, for the
- *                   next request to resume from.
+ *                   giving up or when a wanted line is deeper than the
+ *                   configured line cap.  Giving up still caches the
+ *                   states computed so far, for the next request to
+ *                   resume from.
  */
 export async function highlight_lines(identity: string, lang: string, lines: readonly string[],
 				      wanted: Iterable<number>, deadline: number | null,
@@ -700,11 +708,6 @@ export async function highlight_lines(identity: string, lang: string, lines: rea
 	const depth = rows.at(-1)!;
 	if (depth > config.max_lines) {
 		return null;
-	}
-	for (let i = 0; i < depth; i++) {
-		if (lines[i]!.length > MAX_LINE_CHARS) {
-			return null;
-		}
 	}
 
 	const key = cache_key(hl, identity, lang);

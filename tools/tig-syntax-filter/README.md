@@ -95,6 +95,8 @@ changing them); the client's `TIG_SYNTAX_SPAWN_WAIT_MS` and
 Output equals input byte-for-byte after stripping injected SGR and
 restoring the `ESC[999m` literal-ESC marker; anything the daemon cannot
 highlight provably-correctly (binary, invalid UTF-8, textconv drivers,
-combined diffs, overlong lines, source/hunk mismatches) passes through
-raw. tig itself never depends on node: no filter, no daemon, or a dead
-daemon all render the ordinary diff.
+combined diffs, source/hunk mismatches) passes through raw.  As in VS
+Code, a line of 20000 or more characters is not tokenized: it shows in
+the theme's foreground, and the lines after it highlight as if it were
+absent.  tig itself never depends on node: no filter, no daemon, or a
+dead daemon all render the ordinary diff.

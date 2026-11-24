@@ -12,7 +12,7 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SectionSplitter, type diff_section } from "../src/diff_parser.ts";
-import { init_highlighter, ensure_lang, emit_sgr_line, highlight_lines, stats, CHUNK_LINES } from "../src/highlight.ts";
+import { init_highlighter, ensure_lang, emit_sgr_line, highlight_lines, stats, CHUNK_LINES, MAX_LINE_CHARS } from "../src/highlight.ts";
 import { highlight_prefix } from "./highlight_prefix.ts";
 import { process_section, raw_section_output } from "../src/process.ts";
 
@@ -97,6 +97,29 @@ describe("cached line-start states", () => {
 		const out = await highlight_lines("test|past-end", "typescript", lines, [2, 601, 9999], null);
 		expect([...out!.keys()]).toEqual([2]);
 		expect(await highlight_lines("test|past-end", "typescript", lines, [601], null)).toEqual(new Map());
+	});
+});
+
+/** A line comment of exactly `length` characters, which tokenizes fast
+ * however long it is. */
+function comment_line(length: number): string {
+	return `// ${"a".repeat(length - 3)}`;
+}
+
+describe("lines of MAX_LINE_CHARS or more", () => {
+	it("show in the theme's foreground and leave the grammar state as it was", async () => {
+		const long = comment_line(MAX_LINE_CHARS);
+		const out = await highlight_lines("test|long", "typescript", ["/* open", long, "close */ x = 1;"], [2, 3], null);
+		expect(out!.get(2)).toBe(emit_sgr_line([{ content: long }]));
+		// Still in the comment that line 1 opened.
+		const without = await highlight_lines("test|long-absent", "typescript", ["/* open", "close */ x = 1;"], [2], null);
+		expect(out!.get(3)).toBe(without!.get(2));
+	});
+
+	it("start at MAX_LINE_CHARS, not before", async () => {
+		const out = await highlight_lines("test|long-edge", "typescript", [comment_line(MAX_LINE_CHARS - 1)], [1], null);
+		// The comment got a color of its own.
+		expect(out!.get(1)).not.toBe(emit_sgr_line([{ content: comment_line(MAX_LINE_CHARS - 1) }]));
 	});
 });
 
