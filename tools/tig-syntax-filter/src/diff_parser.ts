@@ -174,22 +174,19 @@ export interface file_info {
 
 /** Append the run of `count` lines at `old_start` and `new_start` that
  * the diff presents as unchanged to `runs`, merging it into the last run
- * when contiguous.  The part of the run that starts before the end of the
- * last run on either side (the overlap of two hunks) is dropped, so the
- * runs stay ascending. */
+ * when contiguous.  A run that starts before the end of the last run on
+ * either side is dropped, so the runs stay ascending: it is a context
+ * line that overlapping hunks share, since the gaps between hunks start
+ * after the end of all hunks so far. */
 function push_aligned(runs: aligned_run[], old_start: number, new_start: number, count: number): void {
 	const last = runs.at(-1);
 	if (last !== undefined) {
 		const old_end = last.old_start + last.count;
 		const new_end = last.new_start + last.count;
-		const covered = Math.max(old_end - old_start, new_end - new_start, 0);
-		if (covered >= count) {
+		if (old_start < old_end || new_start < new_end) {
 			return;
 		}
-		old_start += covered;
-		new_start += covered;
-		count -= covered;
-		if (old_end === old_start && new_end === new_start) {
+		if (old_start === old_end && new_start === new_end) {
 			last.count += count;
 			return;
 		}
@@ -197,8 +194,10 @@ function push_aligned(runs: aligned_run[], old_start: number, new_start: number,
 	runs.push({ old_start, new_start, count });
 }
 
-/** Append source line `row` to `rows` (ascending), unless an earlier
- * hunk that overlaps this one already did. */
+/** Append source line `row` to `rows` (ascending), unless it is not past
+ * the last row there: a line that an earlier, overlapping hunk already
+ * took, or a line out of place in a malformed diff, which then shows
+ * raw. */
 function push_row(rows: number[], row: number): void {
 	if (row > (rows.at(-1) ?? 0)) {
 		rows.push(row);
@@ -378,8 +377,9 @@ export function parse_file_section(section: diff_section): file_info | null {
 		return null;
 	}
 
-	// The first line of the previous hunk, and the first line after all
-	// hunks so far, per side.
+	// Where the previous hunk starts (for an empty side, the line after
+	// the position it gives), and the first line after all hunks so far,
+	// per side.
 	let old_previous = 1;
 	let new_previous = 1;
 	let old_next = 1;
@@ -408,8 +408,8 @@ export function parse_file_section(section: diff_section): file_info | null {
 			// once, so rows and aligned runs still ascend.
 			return null;
 		}
-		// The unchanged lines since the previous hunk, unless the two
-		// sides disagree on how many there are.
+		// The unchanged lines between the end of all hunks so far and
+		// this hunk, unless the two sides disagree on how many there are.
 		if (old_first - old_next === new_first - new_next && old_first > old_next) {
 			push_aligned(aligned, old_next, new_next, old_first - old_next);
 		}

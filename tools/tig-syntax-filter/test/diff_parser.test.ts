@@ -312,16 +312,16 @@ describe("parse_file_section", () => {
 			" f",
 			"@@ -4 +5 @@",	// inside the previous hunk
 			" d",
-			"@@ -7 +8 @@",
-			"-g",
-			"+G",
+			"@@ -10 +11 @@",
+			"-j",
+			"+J",
 		]));
-		expect(info?.old_rows).toEqual([5, 7]);
-		expect(info?.new_rows).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+		expect(info?.old_rows).toEqual([5, 10]);
+		expect(info?.new_rows).toEqual([1, 2, 3, 4, 5, 6, 7, 11]);
 		expect(info?.aligned).toEqual([
 			{ old_start: 1, new_start: 1, count: 1 },	// "a"
 			{ old_start: 2, new_start: 3, count: 3 },	// "b", then "c" and "d" once
-			{ old_start: 6, new_start: 7, count: 1 },	// "f"
+			{ old_start: 6, new_start: 7, count: 4 },	// "f", then up to the last hunk
 		]);
 		expect(info?.hunks.length).toBe(4);
 	});
