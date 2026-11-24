@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import fc from "fast-check";
+import * as fc from "fast-check";
 import { A } from "ayy";
 import { init_highlighter, ensure_lang, highlight_lines, highlight_sides, stats } from "../src/highlight.ts";
 import type { aligned_run } from "../src/diff_parser.ts";
