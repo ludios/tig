@@ -292,6 +292,40 @@ describe("parse_file_section", () => {
 		expect(info).toBeNull();
 	});
 
+	it("takes the lines that overlapping hunks share once, as `git diff -W` makes them", () => {
+		const info = parse_file_section(file_section([
+			"diff --git a/doc.txt b/doc.txt",
+			"index 1111111..2222222 100644",
+			"--- a/doc.txt",
+			"+++ b/doc.txt",
+			"@@ -1,4 +1,5 @@",
+			" a",
+			"+A",
+			" b",
+			" c",
+			" d",
+			"@@ -3,4 +4,4 @@ b",
+			" c",
+			" d",
+			"-e",
+			"+E",
+			" f",
+			"@@ -4 +5 @@",	// inside the previous hunk
+			" d",
+			"@@ -7 +8 @@",
+			"-g",
+			"+G",
+		]));
+		expect(info?.old_rows).toEqual([5, 7]);
+		expect(info?.new_rows).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+		expect(info?.aligned).toEqual([
+			{ old_start: 1, new_start: 1, count: 1 },	// "a"
+			{ old_start: 2, new_start: 3, count: 3 },	// "b", then "c" and "d" once
+			{ old_start: 6, new_start: 7, count: 1 },	// "f"
+		]);
+		expect(info?.hunks.length).toBe(4);
+	});
+
 	it("aligns no gap whose sides disagree on its length", () => {
 		const info = parse_file_section(file_section([
 			"diff --git a/doc.txt b/doc.txt",

@@ -174,15 +174,35 @@ export interface file_info {
 
 /** Append the run of `count` lines at `old_start` and `new_start` that
  * the diff presents as unchanged to `runs`, merging it into the last run
- * when contiguous. */
+ * when contiguous.  The part of the run that starts before the end of the
+ * last run on either side (the overlap of two hunks) is dropped, so the
+ * runs stay ascending. */
 function push_aligned(runs: aligned_run[], old_start: number, new_start: number, count: number): void {
 	const last = runs.at(-1);
-	if (last !== undefined && last.old_start + last.count === old_start &&
-	    last.new_start + last.count === new_start) {
-		last.count += count;
-		return;
+	if (last !== undefined) {
+		const old_end = last.old_start + last.count;
+		const new_end = last.new_start + last.count;
+		const covered = Math.max(old_end - old_start, new_end - new_start, 0);
+		if (covered >= count) {
+			return;
+		}
+		old_start += covered;
+		new_start += covered;
+		count -= covered;
+		if (old_end === old_start && new_end === new_start) {
+			last.count += count;
+			return;
+		}
 	}
 	runs.push({ old_start, new_start, count });
+}
+
+/** Append source line `row` to `rows` (ascending), unless an earlier
+ * hunk that overlaps this one already did. */
+function push_row(rows: number[], row: number): void {
+	if (row > (rows.at(-1) ?? 0)) {
+		rows.push(row);
+	}
 }
 
 /** Unquote a git C-style quoted path ("\t", "\303\251", ...). */
@@ -358,7 +378,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 		return null;
 	}
 
-	// The first line after the previous hunk, per side.
+	// The first line of the previous hunk, and the first line after all
+	// hunks so far, per side.
+	let old_previous = 1;
+	let new_previous = 1;
 	let old_next = 1;
 	let new_next = 1;
 	for (; i < section.lines.length; i++) {
@@ -379,9 +402,10 @@ export function parse_file_section(section: diff_section): file_info | null {
 		}
 		const old_first = header.old_count > 0 ? header.old_start : header.old_start + 1;
 		const new_first = header.new_count > 0 ? header.new_start : header.new_start + 1;
-		if (old_first < old_next || new_first < new_next) {
-			// Overlapping or out of order, which git never makes; rows
-			// and aligned runs ascend.
+		if (old_first < old_previous || new_first < new_previous) {
+			// Out of order, which git never makes.  Hunks that overlap
+			// (from `git diff -W`) are fine: their shared lines are pushed
+			// once, so rows and aligned runs still ascend.
 			return null;
 		}
 		// The unchanged lines since the previous hunk, unless the two
@@ -407,16 +431,16 @@ export function parse_file_section(section: diff_section): file_info | null {
 				continue;
 			}
 			if (first === 0x2d) {
-				old_rows.push(old_row);
+				push_row(old_rows, old_row);
 				old_row++;
 				old_left--;
 			} else if (first === 0x2b) {
-				new_rows.push(new_row);
+				push_row(new_rows, new_row);
 				new_row++;
 				new_left--;
 			} else if (first === 0x20) {
 				// Context is styled from the new side.
-				new_rows.push(new_row);
+				push_row(new_rows, new_row);
 				push_aligned(aligned, old_row, new_row, 1);
 				old_row++;
 				new_row++;
@@ -437,8 +461,11 @@ export function parse_file_section(section: diff_section): file_info | null {
 			return null;
 		}
 		hunks.push({ old_start: header.old_start, new_start: header.new_start, body });
-		old_next = old_first + header.old_count;
-		new_next = new_first + header.new_count;
+		old_previous = old_first;
+		new_previous = new_first;
+		// A hunk can end inside the previous one.
+		old_next = Math.max(old_next, old_first + header.old_count);
+		new_next = Math.max(new_next, new_first + header.new_count);
 	}
 
 	return { old_path, new_path, old_oid, new_oid, hunks, old_rows, new_rows, aligned };
