@@ -28,7 +28,8 @@ in the repository root.
 - `src/lang_map.ts` — decides a file's language from its path and first
   line, as VS Code decides it for a user without settings of their own.
   `src/vscode_langs.ts` holds the associations of the languages that
-  come with VS Code, and is generated.  After updating shiki, or to
+  come with VS Code (MIT, with VS Code's license in its header), and is
+  generated.  After updating shiki, or to
   follow a newer VS Code, run this in `tools/tig-syntax-filter`, then
   the tests:
 
