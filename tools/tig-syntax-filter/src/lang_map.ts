@@ -9,6 +9,9 @@
  * - extra_langs, below: those that VS Code users get by installing
  *   extensions, and a few deliberate differences from VS Code.
  *
+ * One more difference: every alternative of a first-line pattern must
+ * match at the line's start (see first_line_regex()).
+ *
  * A null language means "do not highlight".
  */
 
@@ -28,6 +31,10 @@ const extra_langs: readonly lang_association[] = [
 	// VS Code takes .mod for XML.  A go.mod is not XML, and shiki lacks
 	// a grammar for it.
 	{ lang: null, filenames: ["go.mod"] },
+	// VS Code's first-line pattern for Raku finds `#!/usr/bin/env raku`
+	// through an alternative "raku", which first_line_regex() anchors at
+	// the line's start.
+	{ lang: "raku", first_line: "^#!.*\\b(?:raku|rakudo)\\b" },
 
 	// More names for languages that come with VS Code.
 	// VS Code registers .txt itself, not from an extension's manifest.
@@ -121,8 +128,8 @@ export const detectable_langs: ReadonlySet<string> = new Set([
 /**
  * Pick a shiki language for a file.  In order of precedence: its whole
  * name, the longest pattern that matches its path, the longest extension
- * that its name ends with, a pattern found in its first line, and a name
- * that starts with "makefile.".
+ * that its name ends with, a pattern that matches the start of its first
+ * line, and a name that starts with "makefile.".
  *
  * @param path        The file's path, relative to its repository's top.
  * @param first_line  The file's first line without a byte order mark, or

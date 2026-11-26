@@ -29,16 +29,18 @@ in the repository root.
   line, as VS Code decides it for a user without settings of their own.
   `src/vscode_langs.ts` holds the associations of the languages that
   come with VS Code (MIT, with VS Code's license in its header), and is
-  generated.  After updating shiki, or to
-  follow a newer VS Code, run this in `tools/tig-syntax-filter`, then
-  the tests:
+  generated.  After updating shiki, or to follow a newer VS Code, run
+  this in `tools/tig-syntax-filter`, then the tests:
 
 	node scripts/gen-vscode-langs.ts VSCODE_CHECKOUT
 
   A VS Code language whose grammar shiki lacks gets a stand-in grammar
   named in that script, or is left out.  Languages that VS Code gets
   from installed extensions, and the deliberate differences from VS
-  Code, are listed by hand in `src/lang_map.ts`.
+  Code, are listed by hand in `src/lang_map.ts`.  One more difference:
+  `first_line_regex()` in `src/lang_association.ts` anchors every
+  alternative of a first-line pattern at the line's start, and VS Code
+  anchors only the first.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at

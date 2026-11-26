@@ -68,8 +68,8 @@ describe("lang_map", () => {
 	it("searches a first line from its start, in its first 1000 characters", () => {
 		expect(detect_lang("page", "<?xml version=\"1.0\"?>")).toBe("xml");
 		expect(detect_lang("page", "see <?xml version=\"1.0\"?>")).toBe(null);
-		expect(detect_lang("bin/run", `#!${" ".repeat(990)}perl`)).toBe("perl");
-		expect(detect_lang("bin/run", `#!${" ".repeat(1000)}perl`)).toBe(null);
+		expect(detect_lang("bin/run", `#!${" ".repeat(994)}perl`)).toBe("perl");
+		expect(detect_lang("bin/run", `#!${" ".repeat(995)}perl`)).toBe(null);
 	});
 
 	it("anchors every alternative of a first-line pattern, unlike VS Code", () => {
@@ -78,6 +78,7 @@ describe("lang_map", () => {
 		expect(detect_lang("README", "Notes from my class on compilers")).toBe(null);
 		expect(detect_lang("bin/run", "my class Point { }")).toBe("raku");
 		expect(detect_lang("bin/run", "#!/usr/bin/env raku")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/env rakudo")).toBe("raku");
 		expect(detect_lang("bin/run", "#!/usr/bin/env perl6")).toBe("raku");
 	});
 
