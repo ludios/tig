@@ -167,14 +167,32 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
-  # A daemon whose modules fail to load (say, a language table that
-  # glob_regex() refuses) never starts, and tig then shows plain diffs
-  # without an error.  process.ts imports every module of the daemon but
-  # daemon.ts, which listens on a socket.
+  # A syntax daemon that cannot start (say, because of a language table
+  # that glob_regex() refuses, or a theme or grammar engine that fails to
+  # load) leaves tig showing plain diffs, without an error.  The daemon
+  # makes its socket only when it has loaded all of these.
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    ${lib.getExe nodejs-slim_26} $out/lib/tig-syntax-filter/src/process.ts
+
+    export TIG_SYNTAX_SOCKET=$TMPDIR/tig-syntax.sock
+    export XDG_STATE_HOME=$TMPDIR/state XDG_CACHE_HOME=$TMPDIR/cache
+    $out/bin/tig-syntax-daemon &
+    daemon=$!
+    for _ in $(seq 600); do
+      if [ -S "$TIG_SYNTAX_SOCKET" ] || ! kill -0 $daemon 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if [ ! -S "$TIG_SYNTAX_SOCKET" ]; then
+      echo "tig-syntax-daemon did not start listening; its log:" >&2
+      cat $XDG_STATE_HOME/tig-syntax/daemon.log >&2 || true
+      exit 1
+    fi
+    kill $daemon
+    wait $daemon || true
+
     runHook postInstallCheck
   '';
 
