@@ -348,16 +348,17 @@ function grammar_text(line: string): string {
 /**
  * Run `text` (one line, without terminator) through `grammar` from the
  * line-start state `start`.  Returns the binary tokens and the state at
- * the start of the next line.  The tokens are null for a line that does
- * not run through the grammar, which then leaves the state as it was: an
- * empty line (as in shiki) or one of MAX_LINE_CHARS or more (as in VS
- * Code).  As in VS Code, a line that hits the time limit also leaves the
- * state as it was, and an end state equal to `start` is returned as
- * `start` itself, so unchanged states share one object.
+ * the start of the next line.  As in VS Code: a line of MAX_LINE_CHARS or
+ * more does not run through the grammar, so its tokens are null and the
+ * state stays as it was; a line that hits the time limit also leaves the
+ * state as it was; and an empty line does run through the grammar (shiki
+ * skips it), because it can change the state, e.g. by ending a Markdown
+ * paragraph.  An end state equal to `start` is returned as `start`
+ * itself, so unchanged states share one object.
  */
 function tokenize_line(grammar: Grammar, text: string,
 		       start: StateStack): { tokens: Uint32Array | null, end: StateStack } {
-	if (text === "" || text.length >= MAX_LINE_CHARS) {
+	if (text.length >= MAX_LINE_CHARS) {
 		return { tokens: null, end: start };
 	}
 	const result = grammar.tokenizeLine2(text, start, LINE_TIME_LIMIT_MS);
@@ -375,7 +376,7 @@ function tokenize_line(grammar: Grammar, text: string,
  */
 function render_line(text: string, tokens: Uint32Array | null, color_map: readonly string[]): string {
 	if (tokens === null) {
-		return emit_sgr_line(text === "" ? [] : [{ content: text }]);
+		return emit_sgr_line([{ content: text }]);
 	}
 	const pieces: styled_piece[] = [];
 	const count = tokens.length / 2;
