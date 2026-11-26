@@ -12,13 +12,13 @@
  * lacks the scope, the language becomes its stand-in from STAND_INS, or is
  * left out and listed on stderr.
  *
- * The table is written only after every pattern in it has compiled, so a
- * failed run leaves the old table in place.
+ * The table is written only after every pattern in it has compiled, and
+ * through a temporary file, so a failed run leaves the old table in place.
  */
 
 import { A } from "ayy";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bundledLanguagesInfo } from "shiki";
 import { first_line_regex, glob_regex, type lang_association } from "../src/lang_association.ts";
@@ -201,7 +201,10 @@ async function main(): Promise<void> {
 	A.gt(associations.length, 0, `no language associations under ${checkout}/extensions`);
 
 	const commit = execFileSync("git", ["-C", checkout, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-	writeFileSync(fileURLToPath(new URL("../src/vscode_langs.ts", import.meta.url)), table_source(associations, commit));
+	const table_path = fileURLToPath(new URL("../src/vscode_langs.ts", import.meta.url));
+	const temp_path = `${table_path}.tmp`;
+	writeFileSync(temp_path, table_source(associations, commit));
+	renameSync(temp_path, table_path);
 	console.error(`VS Code languages left out, whose grammar scope does not belong to a shiki language:\n\t${[...left_out].toSorted().join("\n\t")}`);
 }
 
