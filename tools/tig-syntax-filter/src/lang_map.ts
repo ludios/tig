@@ -12,31 +12,8 @@
  * A null language means "do not highlight".
  */
 
-import { A } from "ayy";
+import { first_line_regex, glob_regex, type lang_association } from "./lang_association.ts";
 import { vscode_langs } from "./vscode_langs.ts";
-
-/**
- * How to recognize the files of one language.  The fields other than
- * `lang` are those of a `contributes.languages` entry in a VS Code
- * extension's package.json, lowercased except for `first_line`: VS Code
- * compares them with a lowercased path.
- */
-export interface lang_association {
-	/** shiki language id, or null for plain text: such a file is not
-	 * highlighted, whatever its first line is. */
-	lang: string | null,
-	/** Endings of the file name.  Most are ".ext", but any ending is
-	 * allowed, e.g. "color-theme.json". */
-	extensions?: readonly string[],
-	/** Whole file names. */
-	filenames?: readonly string[],
-	/** Globs, as glob_regex() takes them.  A glob with a "/" in it is
-	 * matched against the whole path, any other against the file name. */
-	patterns?: readonly string[],
-	/** Source of a regular expression, as first_line_regex() takes it;
-	 * consulted only when the path does not match any association. */
-	first_line?: string,
-}
 
 /**
  * Associations that do not come with VS Code.  These are registered after
@@ -103,40 +80,6 @@ const extra_langs: readonly lang_association[] = [
 
 /** As many characters of a file's first line as VS Code looks at. */
 const FIRST_LINE_LIMIT = 1000;
-
-/** Characters that a regular expression takes specially. */
-const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/g;
-
-/**
- * @param glob  A glob in the subset of VS Code's syntax that the
- *              associations use: `*` and `?` match within one path
- *              component, and a `**` component matches any number of
- *              directories; the rest is literal, in lowercase.
- * @returns A regular expression that matches the lowercased paths (or
- *          file names) that `glob` matches.
- */
-export function glob_regex(glob: string): RegExp {
-	A.eq(glob.search(/[{}[\]\\!]|(?<!^|\/)\*\*|\*\*(?!\/)/), -1, `glob syntax that glob_regex() lacks, in ${glob}`);
-	const source = glob.split("**/")
-		.map((part) => part.split("*")
-			.map((piece) => piece.split("?")
-				.map((literal) => literal.replace(REGEX_SPECIAL, "\\$&"))
-				.join("[^/]"))
-			.join("[^/]*"))
-		.join("(?:.*/)?");
-	return new RegExp(`^${source}$`, "s");
-}
-
-/**
- * @param source  A first-line pattern from a language contribution.
- * @returns The regular expression that VS Code searches a first line for:
- *          `source`, anchored at the line's start.  (Where `source` is
- *          alternatives without a group around them, that anchors only
- *          the first one, in VS Code too.)
- */
-export function first_line_regex(source: string): RegExp {
-	return new RegExp(source.startsWith("^") ? source : `^${source}`);
-}
 
 /** File name -> language. */
 const by_filename = new Map<string, string | null>();

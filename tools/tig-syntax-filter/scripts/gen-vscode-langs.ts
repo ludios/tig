@@ -21,7 +21,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bundledLanguagesInfo } from "shiki";
-import { first_line_regex, glob_regex, type lang_association } from "../src/lang_map.ts";
+import { first_line_regex, glob_regex, type lang_association } from "../src/lang_association.ts";
 
 /** A `contributes.languages` entry of a VS Code extension's package.json. */
 interface vscode_language {
@@ -167,7 +167,7 @@ function table_source(associations: readonly lang_association[], commit: string)
  * Copyright (c) Microsoft Corporation and under the MIT License.
  */
 
-import type { lang_association } from "./lang_map.ts";
+import type { lang_association } from "./lang_association.ts";
 
 export const vscode_langs: readonly lang_association[] = [
 ${blocks.join("")}];

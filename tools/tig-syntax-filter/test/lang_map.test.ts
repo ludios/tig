@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { bundledLanguagesInfo } from "shiki";
-import { detect_lang, detectable_langs, glob_regex } from "../src/lang_map.ts";
+import { glob_regex } from "../src/lang_association.ts";
+import { detect_lang, detectable_langs } from "../src/lang_map.ts";
 
 describe("lang_map", () => {
 	it("returns only languages that shiki bundles, under shiki's own ids", () => {

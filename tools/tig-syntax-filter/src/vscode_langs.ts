@@ -9,7 +9,7 @@
  * Copyright (c) Microsoft Corporation and under the MIT License.
  */
 
-import type { lang_association } from "./lang_map.ts";
+import type { lang_association } from "./lang_association.ts";
 
 export const vscode_langs: readonly lang_association[] = [
 	{
