@@ -19,6 +19,18 @@ import { first_line_regex, glob_regex, type lang_association } from "./lang_asso
 import { vscode_langs } from "./vscode_langs.ts";
 
 /**
+ * @param names  Source of a regular expression that matches the file
+ *               names of a language's interpreters.
+ * @returns A first-line pattern for a shebang that runs one of them,
+ *          directly or through env.  Unlike the `^#!.*\bname\b` of
+ *          VS Code's patterns, it does not take a directory or an
+ *          argument of that name for the interpreter.
+ */
+function shebang(names: string): string {
+	return `^#!\\s*(?:\\S*/)?(?:env\\s+(?:-\\S+\\s+)*)?(?:${names})(?:\\s|$)`;
+}
+
+/**
  * Associations that do not come with VS Code.  These are registered after
  * VS Code's, so where both have the same extension, file name or pattern,
  * these win.
@@ -34,7 +46,7 @@ const extra_langs: readonly lang_association[] = [
 	// VS Code's first-line pattern for Raku finds `#!/usr/bin/env raku`
 	// through an alternative "raku", which first_line_regex() anchors at
 	// the line's start.
-	{ lang: "raku", first_line: "^#!.*\\b(?:raku|rakudo)\\b" },
+	{ lang: "raku", first_line: shebang("raku|rakudo") },
 	// Docker reads Dockerfile.dockerignore as the ignore file of the
 	// Dockerfile, and Dockerfile.dev.dockerignore as that of
 	// Dockerfile.dev.  VS Code's pattern `dockerfile.*` takes them for
@@ -55,27 +67,25 @@ const extra_langs: readonly lang_association[] = [
 	// Languages that VS Code gets from installed extensions.
 	{ lang: "asciidoc", extensions: [".adoc", ".asciidoc"] },
 	{ lang: "asm", extensions: [".asm", ".s"] },
-	{ lang: "awk", extensions: [".awk"], first_line: "^#!.*\\bawk\\b" },
+	{ lang: "awk", extensions: [".awk"], first_line: shebang("[gmn]?awk") },
 	{ lang: "cmake", extensions: [".cmake"], filenames: ["cmakelists.txt"] },
 	{ lang: "codeowners", filenames: ["codeowners"] },
 	{ lang: "csv", extensions: [".csv"] },
 	{ lang: "d", extensions: [".d"] },
 	{ lang: "desktop", extensions: [".desktop"] },
-	{ lang: "elixir", extensions: [".ex", ".exs"], first_line: "^#!.*\\belixir\\b" },
+	{ lang: "elixir", extensions: [".ex", ".exs"], first_line: shebang("elixir") },
 	// VS Code takes .erb for Ruby.
 	{ lang: "erb", extensions: [".erb"] },
 	{ lang: "erlang", extensions: [".erl"] },
 	// VS Code takes fish scripts for shell scripts.
-	{ lang: "fish", extensions: [".fish"], first_line: "^#!.*\\bfish\\b" },
+	{ lang: "fish", extensions: [".fish"], first_line: shebang("fish") },
 	{ lang: "graphql", extensions: [".graphql", ".gql"] },
 	{ lang: "haskell", extensions: [".hs"] },
 	{ lang: "haxe", extensions: [".hx"] },
 	{ lang: "kotlin", extensions: [".kt", ".kts"] },
 	{ lang: "lean", extensions: [".lean"] },
 	{ lang: "nix", extensions: [".nix"] },
-	// No first-line pattern: these are tried before VS Code's, so one such
-	// as `^#!.*\bnu\b` would take `#!/home/nu/venv/bin/python` for nushell.
-	{ lang: "nushell", extensions: [".nu"] },
+	{ lang: "nushell", extensions: [".nu"], first_line: shebang("nu") },
 	{ lang: "ocaml", extensions: [".ml", ".mli"] },
 	{ lang: "po", extensions: [".po", ".pot"] },
 	{ lang: "proto", extensions: [".proto"] },
@@ -84,7 +94,7 @@ const extra_langs: readonly lang_association[] = [
 	{ lang: "scala", extensions: [".scala"] },
 	{ lang: "svelte", extensions: [".svelte"] },
 	{ lang: "systemd", extensions: [".service", ".socket", ".timer"] },
-	{ lang: "tcl", extensions: [".tcl"], first_line: "^#!.*\\btclsh\\b" },
+	{ lang: "tcl", extensions: [".tcl"], first_line: shebang("tclsh[0-9.]*") },
 	{ lang: "terraform", extensions: [".tf"] },
 	{ lang: "toml", extensions: [".toml"], filenames: ["cargo.lock", "poetry.lock", "uv.lock"] },
 	{ lang: "tsv", extensions: [".tsv"] },

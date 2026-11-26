@@ -67,8 +67,20 @@ describe("lang_map", () => {
 		expect(detect_lang("bin/run", "#!/usr/bin/env python3")).toBe("python");
 		expect(detect_lang("bin/run", "#!/bin/sh")).toBe("shellscript");
 		expect(detect_lang("bin/run.py", "#!/bin/sh")).toBe("python");
+		// Not a shell script, as VS Code's first-line pattern would have it.
+		expect(detect_lang("pkgs/x/update.nu", "#!/usr/bin/env nix-shell")).toBe("nushell");
 		expect(detect_lang("bin/run", "run")).toBe(null);
 		expect(detect_lang("bin/run", null)).toBe(null);
+	});
+
+	it("takes only the interpreter's own name in a shebang for a language that does not come with VS Code", () => {
+		expect(detect_lang("bin/run", "#!/usr/bin/env nu")).toBe("nushell");
+		expect(detect_lang("bin/run", "#! /usr/bin/env -S raku --ll-exception")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/tclsh8.6")).toBe("tcl");
+		expect(detect_lang("bin/run", "#!/usr/bin/gawk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/home/nu/venv/bin/python")).toBe("python");
+		expect(detect_lang("bin/run", "#!/home/elixir/venv/bin/python3")).toBe("python");
+		expect(detect_lang("bin/run", "#!/bin/sh -c 'exec awk'")).toBe("shellscript");
 	});
 
 	it("searches a first line from its start, in its first 1000 characters", () => {
@@ -98,8 +110,6 @@ describe("lang_map", () => {
 		expect(detect_lang("config.h.in", null)).toBe("c");
 		expect(detect_lang("src/view.hpp", null)).toBe("cpp");
 		expect(detect_lang("bin/run", "#!/usr/bin/env fish")).toBe("fish");
-		// Not a shell script, as VS Code's first-line pattern would have it.
-		expect(detect_lang("pkgs/x/update.nu", "#!/usr/bin/env nix-shell")).toBe("nushell");
 	});
 
 	it("takes a makefile.* name for a makefile only when nothing else decides", () => {
