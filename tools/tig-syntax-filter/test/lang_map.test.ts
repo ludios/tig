@@ -48,6 +48,13 @@ describe("lang_map", () => {
 		expect(detect_lang("tsconfig.base.json", null)).toBe("jsonc");
 	});
 
+	it("takes the ignore file of a Dockerfile for an ignore file", () => {
+		expect(detect_lang("Dockerfile.dockerignore", null)).toBe("ini");
+		expect(detect_lang("app/Dockerfile.dev.dockerignore", null)).toBe("ini");
+		expect(detect_lang("Containerfile.dockerignore", null)).toBe("ini");
+		expect(detect_lang("Dockerfile.dev", null)).toBe("docker");
+	});
+
 	it("matches a pattern with a slash against the path, in any directory", () => {
 		expect(detect_lang(".github/hooks/pre.json", null)).toBe("jsonc");
 		expect(detect_lang("sub/.github/hooks/pre.json", null)).toBe("jsonc");

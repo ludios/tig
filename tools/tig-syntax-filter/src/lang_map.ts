@@ -35,6 +35,11 @@ const extra_langs: readonly lang_association[] = [
 	// through an alternative "raku", which first_line_regex() anchors at
 	// the line's start.
 	{ lang: "raku", first_line: "^#!.*\\b(?:raku|rakudo)\\b" },
+	// Docker reads Dockerfile.dockerignore as the ignore file of the
+	// Dockerfile, and Dockerfile.dev.dockerignore as that of
+	// Dockerfile.dev.  VS Code's pattern `dockerfile.*` takes them for
+	// Dockerfiles; these are longer, and so win.
+	{ lang: "ini", patterns: ["dockerfile*.dockerignore", "containerfile*.dockerignore"] },
 
 	// More names for languages that come with VS Code.
 	// VS Code registers .txt itself, not from an extension's manifest.
