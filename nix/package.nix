@@ -167,6 +167,17 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postInstall
   '';
 
+  # A daemon whose modules fail to load (say, a language table that
+  # glob_regex() refuses) never starts, and tig then shows plain diffs
+  # without an error.  process.ts imports every module of the daemon but
+  # daemon.ts, which listens on a socket.
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    ${lib.getExe nodejs-slim_26} $out/lib/tig-syntax-filter/src/process.ts
+    runHook postInstallCheck
+  '';
+
   outputs = [
     "out"
     "doc"
