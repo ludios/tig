@@ -26,13 +26,18 @@ in the repository root.
   delete; installs at a new path (e.g. each Nix upgrade) leave their old
   entries behind.
 - `src/lang_map.ts` — decides a file's language from its path and first
-  line, by VS Code's rules.  `src/vscode_langs.ts` holds the associations
-  of VS Code's built-in languages and is generated: after updating shiki
-  or to follow a newer VS Code, run
-  `node scripts/gen-vscode-langs.ts VSCODE_CHECKOUT > src/vscode_langs.ts`.
-  Languages that VS Code gets from installed extensions, and the
-  deliberate differences from VS Code, are listed by hand in
-  `src/lang_map.ts`.
+  line, as VS Code decides it for a user without settings of their own.
+  `src/vscode_langs.ts` holds the associations of the languages that
+  come with VS Code, and is generated.  After updating shiki, or to
+  follow a newer VS Code, run this in `tools/tig-syntax-filter`, then
+  the tests:
+
+	node scripts/gen-vscode-langs.ts VSCODE_CHECKOUT
+
+  A VS Code language whose grammar shiki lacks gets a stand-in grammar
+  named in that script, or is left out.  Languages that VS Code gets
+  from installed extensions, and the deliberate differences from VS
+  Code, are listed by hand in `src/lang_map.ts`.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at

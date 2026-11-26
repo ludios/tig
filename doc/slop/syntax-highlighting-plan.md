@@ -157,7 +157,7 @@ Build `tools/tig-syntax-filter/` (TypeScript, single package):
   the JS engine would break the "VS Code engine lineage" fidelity contract).
 - **Per-side language detection**: old path + old content → old grammar; new path
   + new content → new grammar (a rename can change extension). Deleted files have
-  no new side, new files no old side; shebang sniffing uses the corresponding
+  no new side, new files no old side; first-line matching uses the corresponding
   side's content. Removed lines use the old grammar, added lines the new grammar,
   context lines advance both.
 - **Diff parsing must handle real Git output**, not just `+++ b/<path>`: quoted
