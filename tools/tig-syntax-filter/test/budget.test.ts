@@ -19,7 +19,10 @@ import { process_section, raw_section_output } from "../src/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** An independent one-shot highlighter as the chunking-correctness oracle. */
+/** An independent one-shot highlighter as the chunking-correctness oracle.
+ * Its codeToTokensBase() skips empty lines, which the daemon runs through
+ * the grammar; the two agree on the TypeScript fixture, where the only
+ * empty line that could change the state is a first line. */
 let reference: Highlighter;
 
 beforeAll(async () => {

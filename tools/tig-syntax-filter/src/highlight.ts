@@ -348,13 +348,20 @@ function grammar_text(line: string): string {
 /**
  * Run `text` (one line, without terminator) through `grammar` from the
  * line-start state `start`.  Returns the binary tokens and the state at
- * the start of the next line.  As in VS Code: a line of MAX_LINE_CHARS or
- * more does not run through the grammar, so its tokens are null and the
- * state stays as it was; a line that hits the time limit also leaves the
- * state as it was; and an empty line does run through the grammar (shiki
- * skips it), because it can change the state, e.g. by ending a Markdown
- * paragraph.  An end state equal to `start` is returned as `start`
- * itself, so unchanged states share one object.
+ * the start of the next line.  Which lines run through the grammar, and
+ * which leave the state as it was, is as in VS Code:
+ *
+ * - A line of MAX_LINE_CHARS or more does not run through the grammar.
+ *   Its tokens are null (and only its), and the state stays as it was.
+ * - A line that hits the time limit has the tokens that the grammar got
+ *   to, and leaves the state as it was.
+ * - An empty line does run through the grammar (shiki's
+ *   codeToTokensBase() skips it), because it can change the state: it
+ *   ends a Markdown paragraph, and after an empty first line, the second
+ *   line is not the first for the grammar's `\A` rules (a shebang).
+ *
+ * An end state equal to `start` is returned as `start` itself, so
+ * unchanged states share one object.
  */
 function tokenize_line(grammar: Grammar, text: string,
 		       start: StateStack): { tokens: Uint32Array | null, end: StateStack } {
@@ -371,11 +378,13 @@ function tokenize_line(grammar: Grammar, text: string,
 /**
  * Render one line from tokenize_line()'s `tokens` for `text`, decoding
  * each token's colors as shiki does: `color_map` is the theme's, indexed
- * by the token's foreground id.  Without tokens, the line is in the
- * theme's foreground.
+ * by the token's foreground id.  With null tokens (an over-long line),
+ * the line is in the theme's foreground.  Returns what emit_sgr_line()
+ * returns for the line's pieces; for an empty line, that is a lone reset.
  */
 function render_line(text: string, tokens: Uint32Array | null, color_map: readonly string[]): string {
 	if (tokens === null) {
+		A.gte(text.length, MAX_LINE_CHARS, "null tokens for a line that should have run through the grammar");
 		return emit_sgr_line([{ content: text }]);
 	}
 	const pieces: styled_piece[] = [];
