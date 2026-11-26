@@ -91,6 +91,8 @@ describe("lang_map", () => {
 		expect(detect_lang("config.h.in", null)).toBe("c");
 		expect(detect_lang("src/view.hpp", null)).toBe("cpp");
 		expect(detect_lang("bin/run", "#!/usr/bin/env fish")).toBe("fish");
+		// Not a shell script, as VS Code's first-line pattern would have it.
+		expect(detect_lang("pkgs/x/update.nu", "#!/usr/bin/env nix-shell")).toBe("nushell");
 	});
 
 	it("takes a makefile.* name for a makefile only when nothing else decides", () => {

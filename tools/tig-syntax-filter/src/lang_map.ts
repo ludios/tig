@@ -68,6 +68,9 @@ const extra_langs: readonly lang_association[] = [
 	{ lang: "kotlin", extensions: [".kt", ".kts"] },
 	{ lang: "lean", extensions: [".lean"] },
 	{ lang: "nix", extensions: [".nix"] },
+	// No first-line pattern: these are tried before VS Code's, so one such
+	// as `^#!.*\bnu\b` would take `#!/home/nu/venv/bin/python` for nushell.
+	{ lang: "nushell", extensions: [".nu"] },
 	{ lang: "ocaml", extensions: [".ml", ".mli"] },
 	{ lang: "po", extensions: [".po", ".pot"] },
 	{ lang: "proto", extensions: [".proto"] },
