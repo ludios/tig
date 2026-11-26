@@ -65,11 +65,20 @@ describe("lang_map", () => {
 		expect(detect_lang("bin/run", null)).toBe(null);
 	});
 
-	it("searches a first line as VS Code does: from its start, in its first 1000 characters", () => {
+	it("searches a first line from its start, in its first 1000 characters", () => {
 		expect(detect_lang("page", "<?xml version=\"1.0\"?>")).toBe("xml");
 		expect(detect_lang("page", "see <?xml version=\"1.0\"?>")).toBe(null);
-		expect(detect_lang("page", `${" ".repeat(990)}<svg>`)).toBe("xml");
-		expect(detect_lang("page", `${" ".repeat(1000)}<svg>`)).toBe(null);
+		expect(detect_lang("bin/run", `#!${" ".repeat(990)}perl`)).toBe("perl");
+		expect(detect_lang("bin/run", `#!${" ".repeat(1000)}perl`)).toBe(null);
+	});
+
+	it("anchors every alternative of a first-line pattern, unlike VS Code", () => {
+		expect(detect_lang("icon", "<svg xmlns=\"http://www.w3.org/2000/svg\">")).toBe("xml");
+		expect(detect_lang("page", "<p>An <svg> element</p>")).toBe(null);
+		expect(detect_lang("README", "Notes from my class on compilers")).toBe(null);
+		expect(detect_lang("bin/run", "my class Point { }")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/env raku")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/env perl6")).toBe("raku");
 	});
 
 	it("does not highlight a plain-text file, whatever its first line is", () => {

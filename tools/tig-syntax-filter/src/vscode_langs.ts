@@ -256,7 +256,7 @@ export const vscode_langs: readonly lang_association[] = [
 	{
 		lang: "raku",
 		extensions: [".nqp", ".p6", ".pl6", ".pm6", ".raku", ".rakudoc", ".rakumod", ".rakutest"],
-		first_line: "(^#!.*\\bperl6\\b)|use\\s+v6|raku|=begin\\spod|my\\sclass",
+		first_line: "#!.*\\b(?:perl6|raku|rakudo)\\b|use\\s+v6|=begin\\spod|my\\sclass",
 	},
 	{
 		lang: "php",

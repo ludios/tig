@@ -59,6 +59,20 @@ const STAND_INS: Readonly<Record<string, string>> = {
 	"snippets": "jsonc",
 };
 
+/**
+ * VS Code language id -> its first-line pattern (`vscode`) and the one to
+ * use in its place (`ours`), for patterns that do not work once
+ * first_line_regex() has anchored every alternative.
+ */
+const FIRST_LINES: Readonly<Record<string, { vscode: string, ours: string }>> = {
+	// VS Code's finds "raku" anywhere in the line: in a shebang, but in
+	// prose too.
+	"raku": {
+		vscode: "(^#!.*\\bperl6\\b)|use\\s+v6|raku|=begin\\spod|my\\sclass",
+		ours: "#!.*\\b(?:perl6|raku|rakudo)\\b|use\\s+v6|=begin\\spod|my\\sclass",
+	},
+};
+
 /** @returns Grammar scope name -> the shiki language that it is the main
  *           grammar of. */
 async function shiki_langs_by_scope(): Promise<Map<string, string>> {
@@ -131,11 +145,16 @@ function association(language: vscode_language, lang: string): lang_association 
 		}
 	}
 	lists.patterns.forEach(glob_regex);
+	let first_line = language.firstLine;
+	const replacement = FIRST_LINES[language.id];
+	if (replacement !== undefined && first_line !== undefined) {
+		A.eq(first_line, replacement.vscode, `VS Code changed the first-line pattern of ${language.id}; review FIRST_LINES`);
+		first_line = replacement.ours;
+	}
 	// VS Code skips an empty first-line pattern, and one that matches the
 	// empty string.
-	if (language.firstLine !== undefined && language.firstLine !== "" &&
-	    !first_line_regex(language.firstLine).test("")) {
-		result.first_line = language.firstLine;
+	if (first_line !== undefined && first_line !== "" && !first_line_regex(first_line).test("")) {
+		result.first_line = first_line;
 	}
 	return Object.keys(result).length > 1 ? result : null;
 }

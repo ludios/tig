@@ -55,11 +55,12 @@ export function glob_regex(glob: string): RegExp {
 
 /**
  * @param source  A first-line pattern from a language contribution.
- * @returns The regular expression that VS Code searches a first line for:
- *          `source`, anchored at the line's start.  (Where `source` is
- *          alternatives without a group around them, that anchors only
- *          the first one, in VS Code too.)
+ * @returns The regular expression to search a first line for: `source`,
+ *          with each of its alternatives anchored at the line's start.
+ *          (VS Code prepends `^` to a pattern that lacks it, which
+ *          anchors only the first alternative of `a|b`, so that VS Code
+ *          takes a first line with "<svg" anywhere in it for XML.)
  */
 export function first_line_regex(source: string): RegExp {
-	return new RegExp(source.startsWith("^") ? source : `^${source}`);
+	return new RegExp(`^(?:${source})`);
 }
