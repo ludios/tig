@@ -49,16 +49,18 @@ const extra_langs: readonly lang_association[] = [
 	{ lang: "raku", first_line: shebang("raku|rakudo") },
 	// Docker reads Dockerfile.dockerignore as the ignore file of the
 	// Dockerfile, and Dockerfile.dev.dockerignore as that of
-	// Dockerfile.dev.  VS Code's pattern `dockerfile.*` takes them for
-	// Dockerfiles; these are longer, and so win.
-	{ lang: "ini", patterns: ["dockerfile*.dockerignore", "containerfile*.dockerignore"] },
+	// Dockerfile.dev; Podman reads Containerfile.containerignore, and so
+	// on.  VS Code's patterns `dockerfile.*` and `containerfile.*` take
+	// such ignore files for Dockerfiles; the patterns below are longer
+	// than those, and so win.
+	{ lang: "ini", patterns: ["containerfile*.containerignore", "containerfile*.dockerignore", "dockerfile*.containerignore", "dockerfile*.dockerignore"] },
 
 	// More names for languages that come with VS Code.
 	// VS Code registers .txt itself, not from an extension's manifest.
 	{ lang: null, extensions: [".txt"] },
 	// As VS Code's own ignore files: see STAND_INS in
 	// scripts/gen-vscode-langs.ts.
-	{ lang: "ini", extensions: [".dockerignore", ".prettierignore", ".eslintignore"] },
+	{ lang: "ini", extensions: [".containerignore", ".dockerignore", ".prettierignore", ".eslintignore"] },
 	{ lang: "ini", filenames: [".flake8", ".coveragerc"] },
 	{ lang: "json", filenames: ["flake.lock"] },
 	// A .prettierrc is JSON or YAML; the YAML grammar colors both.

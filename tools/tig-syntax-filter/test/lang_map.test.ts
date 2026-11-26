@@ -52,6 +52,8 @@ describe("lang_map", () => {
 		expect(detect_lang("Dockerfile.dockerignore", null)).toBe("ini");
 		expect(detect_lang("app/Dockerfile.dev.dockerignore", null)).toBe("ini");
 		expect(detect_lang("Containerfile.dockerignore", null)).toBe("ini");
+		expect(detect_lang("Containerfile.containerignore", null)).toBe("ini");
+		expect(detect_lang(".containerignore", null)).toBe("ini");
 		expect(detect_lang("Dockerfile.dev", null)).toBe("docker");
 	});
 
