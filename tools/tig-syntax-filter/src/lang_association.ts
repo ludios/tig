@@ -63,5 +63,8 @@ export function glob_regex(glob: string): RegExp {
  *          when the path does not decide.)
  */
 export function first_line_regex(source: string): RegExp {
-	return new RegExp(`^(?:${source})`);
+	// Compiled alone first, so that a stray ")" in `source` cannot close
+	// the group around it and leave an alternative unanchored.
+	const alone = new RegExp(source);
+	return new RegExp(`^(?:${alone.source})`);
 }

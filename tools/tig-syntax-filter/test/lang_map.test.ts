@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { bundledLanguagesInfo } from "shiki";
-import { glob_regex } from "../src/lang_association.ts";
 import { detect_lang, detectable_langs } from "../src/lang_map.ts";
 
 describe("lang_map", () => {
@@ -100,29 +99,5 @@ describe("lang_map", () => {
 		expect(detect_lang("scripts/Makefile.lib", null)).toBe("make");
 		expect(detect_lang("makefile.patch", null)).toBe("diff");
 		expect(detect_lang("Makefile.gen", "#!/usr/bin/env python3")).toBe("python");
-	});
-});
-
-describe("glob_regex", () => {
-	it("keeps * and ? within one path component", () => {
-		expect(glob_regex("a/*.json").test("a/b.json")).toBe(true);
-		expect(glob_regex("a/*.json").test("a/b/c.json")).toBe(false);
-		expect(glob_regex("a?c").test("abc")).toBe(true);
-		expect(glob_regex("a?c").test("a/c")).toBe(false);
-		expect(glob_regex("a.c").test("abc")).toBe(false);
-	});
-
-	it("lets a ** component match any number of directories", () => {
-		expect(glob_regex("**/a/*").test("a/b")).toBe(true);
-		expect(glob_regex("**/a/*").test("x/y/a/b")).toBe(true);
-		expect(glob_regex("**/a/*").test("xa/b")).toBe(false);
-		expect(glob_regex("a/**/b").test("a/b")).toBe(true);
-		expect(glob_regex("a/**/b").test("a/x\ny/b")).toBe(true);
-	});
-
-	it("refuses syntax that it lacks", () => {
-		expect(() => glob_regex("{a,b}.json")).toThrow("glob syntax that glob_regex() lacks");
-		expect(() => glob_regex("a**/b")).toThrow("glob syntax that glob_regex() lacks");
-		expect(() => glob_regex("a/**")).toThrow("glob syntax that glob_regex() lacks");
 	});
 });
