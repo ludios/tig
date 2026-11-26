@@ -18,7 +18,7 @@
 
 import { A } from "ayy";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bundledLanguagesInfo } from "shiki";
 import { first_line_regex, glob_regex, type lang_association } from "../src/lang_association.ts";
@@ -141,16 +141,25 @@ function association(language: vscode_language, lang: string): lang_association 
 }
 
 /**
+ * Describe the version of a VS Code checkout, and warn on stderr when the
+ * files that the table comes from are not that version's.
+ *
  * @param checkout  Path of a VS Code checkout's top directory.
  * @returns The checkout's HEAD commit, followed by "with uncommitted
- *          changes" when its extensions/ directory or LICENSE.txt differs
- *          from that commit's.
+ *          changes" when the package.json of an extension, or
+ *          LICENSE.txt, differs from that commit's, or is untracked or
+ *          ignored.
  */
 function checkout_version(checkout: string): string {
 	const git = (...args: string[]) => execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8" });
 	const commit = git("rev-parse", "HEAD").trim();
-	const changed = git("status", "--porcelain", "--", "extensions", "LICENSE.txt") !== "";
-	return changed ? `${commit} with uncommitted changes` : commit;
+	const changes = git("status", "--porcelain", "--untracked-files=all", "--ignored", "--",
+	                    ":(glob)extensions/*/package.json", "LICENSE.txt");
+	if (changes === "") {
+		return commit;
+	}
+	console.error(`Files that the table comes from differ from VS Code commit ${commit}:\n${changes}`);
+	return `${commit} with uncommitted changes`;
 }
 
 /**
@@ -160,8 +169,8 @@ function checkout_version(checkout: string): string {
 function read_license(checkout: string): string {
 	const license = readFileSync(`${checkout}/LICENSE.txt`, "utf8").replaceAll("\r\n", "\n").trimEnd();
 	// The table's header says what the license is.
-	A(license.startsWith("MIT License\n"), `VS Code's license is no longer MIT: ${license.slice(0, 80)}`);
-	A(!license.includes("*/"), "VS Code's license would end the comment that holds it");
+	A.eq(license.split("\n")[0], "MIT License", "the first line of VS Code's LICENSE.txt");
+	A.eq(license.indexOf("*/"), -1, "VS Code's license would end the comment that holds it");
 	return license;
 }
 
@@ -234,8 +243,14 @@ async function main(): Promise<void> {
 
 	const table_path = fileURLToPath(new URL("../src/vscode_langs.ts", import.meta.url));
 	const temp_path = `${table_path}.tmp`;
-	writeFileSync(temp_path, table_source(associations, checkout_version(checkout), read_license(checkout)));
-	renameSync(temp_path, table_path);
+	const source = table_source(associations, checkout_version(checkout), read_license(checkout));
+	try {
+		writeFileSync(temp_path, source);
+		renameSync(temp_path, table_path);
+	} catch (error) {
+		rmSync(temp_path, { force: true });
+		throw error;
+	}
 	console.error(`VS Code languages left out, whose grammar scope does not belong to a shiki language:\n\t${[...left_out].toSorted().join("\n\t")}`);
 }
 
