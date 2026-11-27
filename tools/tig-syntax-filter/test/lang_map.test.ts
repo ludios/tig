@@ -80,9 +80,32 @@ describe("lang_map", () => {
 		expect(detect_lang("bin/run", "#! /usr/bin/env -S raku --ll-exception")).toBe("raku");
 		expect(detect_lang("bin/run", "#!/usr/bin/tclsh8.6")).toBe("tcl");
 		expect(detect_lang("bin/run", "#!/usr/bin/gawk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/usr/bin/original-awk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/bin/busybox awk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/usr/bin/env -S LC_ALL=C awk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/usr/bin/env -S /usr/bin/awk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/usr/bin/env rakudo-m")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/env -S -u nu python3")).toBe("python");
 		expect(detect_lang("bin/run", "#!/home/nu/venv/bin/python")).toBe("python");
 		expect(detect_lang("bin/run", "#!/home/elixir/venv/bin/python3")).toBe("python");
 		expect(detect_lang("bin/run", "#!/bin/sh -c 'exec awk'")).toBe("shellscript");
+	});
+
+	it("takes none of the words that env takes for itself for the interpreter", () => {
+		const name = fc.constantFrom("nu", "awk", "elixir", "raku", "tclsh");
+		const env_word = fc.oneof(
+			fc.constantFrom("-", "-i", "-v", "-S", "-iS"),
+			name.map((n) => `-u ${n}`),
+			name.map((n) => `-u${n}`),
+			name.map((n) => `-C /srv/${n}`),
+			name.map((n) => `-C/srv/${n}`),
+			name.map((n) => `--unset=${n}`),
+			name.map((n) => `${n}=/srv/${n}`),
+		);
+		const program = fc.constantFrom(["python3", "python"], ["/usr/bin/awk", "awk"], ["nu", "nushell"], ["tclsh8.6", "tcl"]);
+		fc.assert(fc.property(fc.array(env_word, { maxLength: 4 }), program, (words, [interpreter, lang]) => {
+			expect(detect_lang("bin/run", `#!/usr/bin/env ${[...words, interpreter].join(" ")}`)).toBe(lang);
+		}));
 	});
 
 	it("searches a first line from its start, in its first 1000 characters", () => {

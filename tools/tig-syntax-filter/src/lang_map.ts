@@ -18,16 +18,37 @@
 import { first_line_regex, glob_regex, type lang_association } from "./lang_association.ts";
 import { vscode_langs } from "./vscode_langs.ts";
 
+/** Source of a regular expression for a program's directory, if any. */
+const DIRECTORY = String.raw`(?:\S*/)?`;
+
+/**
+ * Source of a regular expression for a word that env takes for itself,
+ * before the program that it runs, with the white space after the word:
+ * a variable assignment, a long option (with an operand only after a
+ * `=`), or short options, with the operand of -a, -C or -u (of GNU env)
+ * or -L, -P or -U (of BSD env).  The words in the operand of -S are
+ * env's words, too.
+ */
+const ENV_WORD = String.raw`(?:\S*=\S*|--\S+|-[0iv]*(?:S|[aCLPUu]\s*\S+)?)\s+`;
+
+/**
+ * Source of a regular expression for `env`, the words that env takes
+ * for itself, and the directory of the program that env runs.  The
+ * lookahead keeps a backtracking match from taking a word such as
+ * `-C/srv/` or `PATH=/bin/` for the program's directory.
+ */
+const ENV_THEN_DIRECTORY = String.raw`env\s+(?:${ENV_WORD})*(?!-|\S*=)${DIRECTORY}`;
+
 /**
  * @param names  Source of a regular expression that matches the file
  *               names of a language's interpreters.
- * @returns A first-line pattern for a shebang that runs one of them,
- *          directly or through env.  Unlike the `^#!.*\bname\b` of
- *          VS Code's patterns, it does not take a directory or an
- *          argument of that name for the interpreter.
+ * @returns A first-line pattern for a shebang that runs one of them:
+ *          directly, through env, or as an applet of busybox.  Unlike
+ *          the `^#!.*\bname\b` of VS Code's patterns, it does not take a
+ *          directory or an argument of that name for the interpreter.
  */
 function shebang(names: string): string {
-	return `^#!\\s*(?:\\S*/)?(?:env\\s+(?:-\\S+\\s+)*)?(?:${names})(?:\\s|$)`;
+	return `^#!\\s*${DIRECTORY}(?:${ENV_THEN_DIRECTORY})?(?:busybox\\s+)?(?:${names})(?:\\s|$)`;
 }
 
 /**
@@ -46,7 +67,8 @@ const extra_langs: readonly lang_association[] = [
 	// VS Code's first-line pattern for Raku finds `#!/usr/bin/env raku`
 	// through an alternative "raku", which first_line_regex() anchors at
 	// the line's start.
-	{ lang: "raku", first_line: shebang("raku|rakudo") },
+	// Rakudo also installs rakudo-m, rakudo-debug and so on.
+	{ lang: "raku", first_line: shebang("(?:raku|rakudo)(?:-[a-z]+)*") },
 	// Docker reads Dockerfile.dockerignore as the ignore file of the
 	// Dockerfile, and Dockerfile.dev.dockerignore as that of
 	// Dockerfile.dev; Podman reads Containerfile.containerignore, and so
@@ -69,7 +91,8 @@ const extra_langs: readonly lang_association[] = [
 	// Languages that VS Code gets from installed extensions.
 	{ lang: "asciidoc", extensions: [".adoc", ".asciidoc"] },
 	{ lang: "asm", extensions: [".asm", ".s"] },
-	{ lang: "awk", extensions: [".awk"], first_line: shebang("[gmn]?awk") },
+	// Debian installs the one true awk as original-awk.
+	{ lang: "awk", extensions: [".awk"], first_line: shebang("(?:[gmn]|original-)?awk") },
 	{ lang: "cmake", extensions: [".cmake"], filenames: ["cmakelists.txt"] },
 	{ lang: "codeowners", filenames: ["codeowners"] },
 	{ lang: "csv", extensions: [".csv"] },
