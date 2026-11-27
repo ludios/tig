@@ -77,6 +77,11 @@ describe("lang_map", () => {
 
 	it("decides a language of extra_langs by the name of the program that a shebang line runs", () => {
 		expect(detect_lang("bin/run", "#!/usr/bin/env nu")).toBe("nushell");
+		// Not a shell script, as VS Code's first-line pattern would have it.
+		expect(detect_lang("bin/run", "#!/usr/bin/env fish")).toBe("fish");
+		// VS Code's pattern for Raku would find these, without anchoring.
+		expect(detect_lang("bin/run", "#!/usr/bin/env raku")).toBe("raku");
+		expect(detect_lang("bin/run", "#!/usr/bin/env rakudo")).toBe("raku");
 		expect(detect_lang("bin/run", "#! /usr/bin/env -S raku --ll-exception")).toBe("raku");
 		expect(detect_lang("bin/run", "#!/usr/bin/tclsh8.6")).toBe("tcl");
 		expect(detect_lang("bin/run", "#!/usr/bin/gawk -f")).toBe("awk");
@@ -88,7 +93,7 @@ describe("lang_map", () => {
 		expect(detect_lang("bin/run", "#!/usr/bin/env -S -u nu python3")).toBe("python");
 		expect(detect_lang("bin/run", "#!/usr/bin/env -S --chdir /srv/nu python3")).toBe("python");
 		expect(detect_lang("bin/run", "#!/usr/bin/env -S FOO=\"a nu b\" python3")).toBe("python");
-		expect(detect_lang("bin/run", "#!/usr/bin/env -- awk -f")).toBe("awk");
+		expect(detect_lang("bin/run", "#!/usr/bin/env -S -- awk -f")).toBe("awk");
 		expect(detect_lang("bin/run", "#!/usr/bin/env -S raku-language-server")).toBe(null);
 		expect(detect_lang("bin/run", "#!/home/nu/venv/bin/python")).toBe("python");
 		expect(detect_lang("bin/run", "#!/home/elixir/venv/bin/python3")).toBe("python");
@@ -107,8 +112,6 @@ describe("lang_map", () => {
 		expect(detect_lang("page", "<p>An <svg> element</p>")).toBe(null);
 		expect(detect_lang("README", "Notes from my class on compilers")).toBe(null);
 		expect(detect_lang("bin/run", "my class Point { }")).toBe("raku");
-		expect(detect_lang("bin/run", "#!/usr/bin/env raku")).toBe("raku");
-		expect(detect_lang("bin/run", "#!/usr/bin/env rakudo")).toBe("raku");
 		expect(detect_lang("bin/run", "#!/usr/bin/env perl6")).toBe("raku");
 	});
 
@@ -121,7 +124,6 @@ describe("lang_map", () => {
 		expect(detect_lang("include/tig/view.h", null)).toBe("c");
 		expect(detect_lang("config.h.in", null)).toBe("c");
 		expect(detect_lang("src/view.hpp", null)).toBe("cpp");
-		expect(detect_lang("bin/run", "#!/usr/bin/env fish")).toBe("fish");
 	});
 
 	it("takes a makefile.* name for a makefile only when nothing else decides", () => {

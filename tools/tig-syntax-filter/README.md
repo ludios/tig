@@ -40,10 +40,11 @@ in the repository root.
   Code, are listed by hand in `src/lang_map.ts`.  Two more differences:
   `first_line_regex()` in `src/lang_association.ts` anchors every
   alternative of a first-line pattern at the line's start, and VS Code
-  anchors only the first; and for the interpreters that
-  `src/lang_map.ts` lists, `src/shebang.ts` finds the program that a
-  shebang line runs (through env or busybox), so that only that
-  program's name decides the language.
+  anchors only the first; and when the path does not decide,
+  `src/shebang.ts` finds the program that a shebang line runs (through
+  env or busybox).  If `src/lang_map.ts` lists that program's name as
+  an interpreter, the name decides the language, and a directory or
+  argument with a language's name does not.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at
