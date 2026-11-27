@@ -37,10 +37,13 @@ in the repository root.
   A VS Code language whose grammar shiki lacks gets a stand-in grammar
   named in that script, or is left out.  Languages that VS Code gets
   from installed extensions, and the deliberate differences from VS
-  Code, are listed by hand in `src/lang_map.ts`.  One more difference:
+  Code, are listed by hand in `src/lang_map.ts`.  Two more differences:
   `first_line_regex()` in `src/lang_association.ts` anchors every
   alternative of a first-line pattern at the line's start, and VS Code
-  anchors only the first.
+  anchors only the first; and for the interpreters that
+  `src/lang_map.ts` lists, `src/shebang.ts` finds the program that a
+  shebang line runs (through env or busybox), so that only that
+  program's name decides the language.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at
