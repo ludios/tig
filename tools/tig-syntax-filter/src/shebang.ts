@@ -3,36 +3,43 @@
  * it, so that a script's language can be decided from that program's own
  * name: neither a directory nor an argument that has a language's name
  * decides it.
+ *
+ * The words after the interpreter are taken as separate arguments, as
+ * macOS passes them to it.  (Linux passes them as one argument, which
+ * env -S splits.)  Nothing checks that env would accept the words: the
+ * program is found to pick a grammar, not to run it.
  */
 
 /**
- * A word of a shebang line: a run of characters other than white space,
- * where a quoted string can hold white space.  Each alternative starts
- * with a different character, so a word matches in only one way.
+ * A word of a shebang line: a run of characters other than white space
+ * and an unquoted `\_`.  A quoted string in it can hold white space, and
+ * runs to the end of the line when it is not closed.  Each alternative
+ * starts with a different character, so a word matches in only one way.
  */
-const WORD = /(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\])+/g;
+const WORD = /(?:'(?:[^'\\]|\\.)*(?:'|$)|"(?:[^"\\]|\\.)*(?:"|$)|\\[^_]|[^\s'"\\])+/g;
 
-/** A quoted string or an escaped character in a word. */
-const QUOTED = /'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)/g;
+/** A closed quoted string, or an escaped character, in a word. */
+const QUOTED = /'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|\\(.)/g;
 
-/** Short options of env that take an operand: -a, -C, -S and -u of GNU
- * env, and -L, -P and -U of FreeBSD's env. */
+/** Short options of env that take an operand: -C, -S and -u of GNU and
+ * FreeBSD env, -a of GNU env, and -L, -P and -U of FreeBSD env. */
 const SHORT_WITH_OPERAND = "aCLPSUu";
 
-/** Long options of GNU env that take an operand, other than
+/** Long options of GNU env that require an operand, other than
  * --split-string. */
 const LONG_WITH_OPERAND = ["argv0", "chdir", "env0-from", "unset"];
 
 /**
- * @param text  The part of a shebang line after the `#!`.
- * @returns The words of `text`, without their quotes and backslashes,
- *          as env -S splits them (except for env's `\_`, `\c` and
- *          `${NAME}`, which are kept as they are).
+ * @param text  Text from a shebang line.
+ * @returns The words of `text`, as env -S splits them, without their
+ *          quotes and backslashes; but a quote that is not closed stays
+ *          in its word.  env's `\c`, `#` comments and `${NAME}` are not
+ *          understood.
  */
 function split_words(text: string): string[] {
 	return Array.from(text.matchAll(WORD), ([word]) => word.replace(
 		QUOTED,
-		(_, single?: string, double?: string, escaped?: string) => single ?? double?.replace(/\\(.)/g, "$1") ?? escaped ?? "",
+		(_, single?: string, double?: string, escaped?: string) => single?.replace(/\\(['\\])/g, "$1") ?? double?.replace(/\\(.)/g, "$1") ?? escaped ?? "",
 	));
 }
 
@@ -41,8 +48,8 @@ function split_words(text: string): string[] {
  * options with their operands, then variable assignments.  As in GNU
  * env, options end at `--` or at the first word that is not an option,
  * and the words of the operand of -S are taken as more of env's words:
- * the operand's first word, when it is in the option's own word (as in
- * `-Sawk`), is put back at the start of `words`.
+ * the part of the operand that is in the option's own word (as in
+ * `-Sawk`) is split and put back at the start of `words`.
  *
  * @param words  The words that follow env on a shebang line.
  */
@@ -59,13 +66,13 @@ function drop_env_words(words: string[]): void {
 
 		if (option.startsWith("--")) {
 			const equals = option.indexOf("=");
-			// getopt takes any start of a long option's name.
+			// getopt takes a long option's name cut short, when the
+			// start is not that of another option's name; this does not
+			// check that.
 			const name = option.slice(2, equals === -1 ? undefined : equals);
 			const operand = equals === -1 ? "" : option.slice(equals + 1);
 			if ("split-string".startsWith(name)) {
-				if (operand !== "") {
-					words.unshift(operand);
-				}
+				words.unshift(...split_words(operand));
 			} else if (equals === -1 && LONG_WITH_OPERAND.some((long) => long.startsWith(name))) {
 				words.shift();
 			}
@@ -77,9 +84,7 @@ function drop_env_words(words: string[]): void {
 			if (SHORT_WITH_OPERAND.includes(letter)) {
 				const attached = option.slice(i + 1);
 				if (letter === "S") {
-					if (attached !== "") {
-						words.unshift(attached);
-					}
+					words.unshift(...split_words(attached));
 				} else if (attached === "") {
 					words.shift();
 				}
@@ -102,7 +107,8 @@ function drop_env_words(words: string[]): void {
  * @returns The file name of the program that `line` runs as a shebang
  *          line: of the program after `#!`, or of the program that env
  *          or busybox runs when that is env or busybox.  null when
- *          `line` does not start with `#!`, or names no such program.
+ *          `line` does not start with `#!`, or names no such program,
+ *          or the program's path ends in `/`.
  */
 export function shebang_program(line: string): string | null {
 	if (!line.startsWith("#!")) {
@@ -116,7 +122,7 @@ export function shebang_program(line: string): string | null {
 		if (name === "env") {
 			drop_env_words(words);
 		} else if (!name.startsWith("busybox")) {
-			return name;
+			return name === "" ? null : name;
 		}
 	}
 	return null;

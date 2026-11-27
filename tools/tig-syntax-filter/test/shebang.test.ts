@@ -8,6 +8,7 @@ describe("shebang_program", () => {
 		expect(shebang_program("#! /home/nu/venv/bin/python")).toBe("python");
 		expect(shebang_program("#!awk")).toBe("awk");
 		expect(shebang_program("#!")).toBe(null);
+		expect(shebang_program("#!/usr/bin/")).toBe(null);
 		expect(shebang_program("awk")).toBe(null);
 		expect(shebang_program(" #!/usr/bin/awk")).toBe(null);
 	});
@@ -19,9 +20,22 @@ describe("shebang_program", () => {
 		expect(shebang_program("#!/usr/bin/env -S --chdir /srv/nu python3")).toBe("python3");
 		expect(shebang_program("#!/usr/bin/env -S LC_ALL=C awk -f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env -S FOO=\"a nu b\" python3")).toBe("python3");
-		expect(shebang_program("#!/usr/bin/env -- awk -f")).toBe("awk");
+		expect(shebang_program("#!/usr/bin/env -S X='it\\'s nu' python3")).toBe("python3");
+		expect(shebang_program("#!/usr/bin/env -S -- awk -f")).toBe("awk");
+		expect(shebang_program("#!/usr/bin/env -S awk\\_-f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env")).toBe(null);
 		expect(shebang_program("#!/usr/bin/env -S -u")).toBe(null);
+		expect(shebang_program("#!/usr/bin/env -S '' awk")).toBe(null);
+	});
+
+	it("takes the words after the interpreter as separate arguments, as macOS passes them", () => {
+		expect(shebang_program("#!/usr/bin/env -u nu awk -f")).toBe("awk");
+		expect(shebang_program("#!/bin/busybox env -u nu awk")).toBe("awk");
+	});
+
+	it("takes a quote that is not closed to run to the end of the line", () => {
+		expect(shebang_program("#!/usr/bin/env -S 'awk")).toBe("'awk");
+		expect(shebang_program("#!/usr/bin/env -S MSG=\"/usr/bin/awk")).toBe(null);
 	});
 
 	it("stops taking env's options at the first word that is not one", () => {
@@ -33,21 +47,22 @@ describe("shebang_program", () => {
 		expect(shebang_program("#!/usr/bin/env -Sawk -f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env -iS-unu awk -f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env --split-string=awk -f")).toBe("awk");
-		expect(shebang_program("#!/usr/bin/env --split-string awk -f")).toBe("awk");
+		expect(shebang_program("#!/usr/bin/env -S --split-string awk -f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env -S 'awk' -f")).toBe("awk");
+		expect(shebang_program("#!/usr/bin/env -S --split-string=\"nu --stdin\"")).toBe("nu");
 	});
 
 	it("gives the program that busybox runs", () => {
 		expect(shebang_program("#!/usr/bin/env -S busybox awk -f")).toBe("awk");
 		expect(shebang_program("#!/usr/bin/env -S busybox.static /usr/bin/awk -f")).toBe("awk");
-		expect(shebang_program("#!/bin/busybox env -u nu awk")).toBe("awk");
+		expect(shebang_program("#!/usr/bin/env -S busybox env -u nu awk")).toBe("awk");
 		expect(shebang_program("#!/bin/busybox")).toBe(null);
 	});
 
-	it("finds the program after any options and assignments that env takes", () => {
+	it("skips words that have the form of env's options, their operands, and assignments", () => {
 		const name = fc.constantFrom("nu", "awk", "raku", "fish", "sh", "python3");
 		const option = fc.oneof(
-			fc.constantFrom("-i", "-0", "-v", "-iv", "-S", "--debug", "--ignore-environment", "--block-signal=PIPE"),
+			fc.constantFrom("-i", "-v", "-iv", "-S", "--debug", "--ignore-environment", "--block-signal=PIPE"),
 			name.map((n) => `-u ${n}`),
 			name.map((n) => `-u${n}`),
 			name.map((n) => `-iu ${n}`),
