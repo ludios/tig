@@ -1,0 +1,156 @@
+{
+	"fileTypes": [
+		"tt",
+		"tt2",
+		"html"
+	],
+	"firstLineMatch": "\\[\\%",
+	"name": "TT2",
+	"patterns": [
+		{
+			"begin": "\\[\\%[-+=~]?#",
+			"end": "[-+=~]?\\%\\]",
+			"name": "comment.block.tt"
+		},
+		{
+			"begin": "\\[\\%[-+=~]?(?!\\#)\\s*",
+			"contentName": "source.tt.tag.content",
+			"end": "\\s*[-+=~]?\\%\\]",
+			"name": "source.tt.tag",
+			"patterns": [
+				{
+					"match": "#.*?(?=[-+=~]?\\%\\]|$)",
+					"name": "comment.number-sign.tt"
+				},
+				{
+					"match": "-?\\d+(\\.\\d+)?",
+					"name": "constant.numeric.tt"
+				},
+				{
+					"match": "\\b(template|component|error|loop|content)\\b",
+					"name": "variable.language.tt"
+				},
+				{
+					"match": "=DISABLED=\\w+(\\(.*?\\))?(\\.\\w+(\\(.*?\\))?)+",
+					"name": "variable.other.tt.dotop"
+				},
+				{
+					"match": "=DISABLED=\\w+(\\(.*?\\))",
+					"name": "variable.other.tt.args"
+				},
+				{
+					"begin": "'",
+					"end": "'",
+					"name": "string.quoted.single.tt",
+					"swallow": "\\\\."
+				},
+				{
+					"begin": "\"",
+					"end": "\"",
+					"name": "string.quoted.double.tt",
+					"patterns": [
+						{
+							"match": "\\$\\w+",
+							"name": "variable.other.tt.interpolated"
+						},
+						{
+							"match": "\\$\\{.*?\\}",
+							"name": "variable.other.tt.embedded"
+						}
+					],
+					"swallow": "\\\\."
+				},
+				{
+					"match": "\\bGET|SET|CALL|DEFAULT\\b",
+					"name": "keyword.other.tt.variable"
+				},
+				{
+					"captures": {
+						"1": {
+							"name": "entity.name.template"
+						}
+					},
+					"match": "\\b(INCLUDE|PROCESS|INSERT|WRAPPER)\\s+(\\S+)",
+					"name": "keyword.other.tt.template"
+				},
+				{
+					"captures": {
+						"1": {
+							"name": "entity.name.plugin"
+						}
+					},
+					"match": "\\bUSE\\s+(\\S+?)(?=\\(|\\s)",
+					"name": "keyword.other.tt.plugin"
+				},
+				{
+					"match": "\\bMETA\\b",
+					"name": "keyword.other.tt.metadata"
+				},
+				{
+					"match": "\\bTAGS\\b",
+					"name": "keyword.other.tt.input"
+				},
+				{
+					"match": "\\bDEBUG\\b",
+					"name": "keyword.other.tt.debug"
+				},
+				{
+					"match": "\\bCLEAR\\b",
+					"name": "keyword.other.tt.output"
+				},
+				{
+					"match": "\\bEND|STOP|RETURN\\b",
+					"name": "keyword.control.tt.flow"
+				},
+				{
+					"captures": {
+						"1": {
+							"name": "entity.name.template"
+						}
+					},
+					"match": "\\bBLOCK\\s+(\\S+)",
+					"name": "keyword.control.tt.block"
+				},
+				{
+					"match": "\\bFOR(EACH)?|WHILE|LAST|NEXT\\b",
+					"name": "keyword.control.tt.loop"
+				},
+				{
+					"match": "\\bIF|ELSIF|ELSE|UNLESS|SWITCH|CASE\\b",
+					"name": "keyword.control.tt.condition"
+				},
+				{
+					"match": "\\bTRY|CATCH|THROW|FINAL\\b",
+					"name": "keyword.control.tt.error"
+				},
+				{
+					"captures": {
+						"1": {
+							"name": "entity.name.filter"
+						}
+					},
+					"match": "\\bFILTER\\s+(\\S+)",
+					"name": "keyword.control.tt.filter"
+				},
+				{
+					"match": "\\bMACRO\\s+(\\w+)\\b",
+					"name": "keyword.control.tt.macro"
+				},
+				{
+					"match": "\\b(RAW_)?PERL\\b",
+					"name": "keyword.control.tt.perl"
+				},
+				{
+					"match": "\\b(?i:AND|OR|NOT)\\b",
+					"name": "keyword.operator.tt.logical"
+				},
+				{
+					"match": "\\b(?i:IN)\\b",
+					"name": "keyword.operator.tt.misc"
+				}
+			]
+		}
+	],
+	"scopeName": "source.tt2",
+	"uuid": "E3556F15-3D09-4A14-AF77-7DBED0AEEA8E"
+}

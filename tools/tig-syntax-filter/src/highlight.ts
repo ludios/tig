@@ -13,6 +13,7 @@ import { createHighlighter, type Highlighter } from "shiki";
 import { INITIAL, EncodedTokenMetadata, type StateStack } from "shiki/textmate";
 import { config } from "./config.ts";
 import { ByteLRU } from "./lru.ts";
+import { vendored_langs } from "./vendored_langs.ts";
 import type { aligned_run } from "./diff_parser.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
@@ -175,7 +176,8 @@ const loaded_langs = new Set<string>();
 const failed_langs = new Set<string>();
 const loading_langs = new Map<string, Promise<boolean>>();
 
-/** Whether `lang` has a grammar in shiki's bundle, loading it on demand.
+/** Whether `lang` has a grammar, in shiki's bundle or in vendored_langs,
+ * loading it on demand.
  * Load failures are remembered (a grammarless language stays grammarless)
  * and concurrent loads of one language coalesce into a single attempt. */
 export async function ensure_lang(lang: string): Promise<boolean> {
@@ -192,7 +194,7 @@ export async function ensure_lang(lang: string): Promise<boolean> {
 	}
 	const attempt = (async () => {
 		try {
-			await highlighter.loadLanguage(lang as never);
+			await highlighter.loadLanguage(...(vendored_langs.get(lang) ?? [lang]) as never[]);
 			loaded_langs.add(lang);
 			return true;
 		} catch (err) {

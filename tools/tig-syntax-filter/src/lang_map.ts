@@ -100,6 +100,8 @@ const extra_langs: readonly extra_association[] = [
 	{ lang: "svelte", extensions: [".svelte"] },
 	{ lang: "systemd", extensions: [".service", ".socket", ".timer"] },
 	{ lang: "tcl", extensions: [".tcl"], interpreter: /tclsh[0-9.]*/ },
+	// Template Toolkit (Perl); its grammar is vendored (see vendored_langs.ts).
+	{ lang: "template-toolkit", extensions: [".tt", ".tt3"] },
 	{ lang: "terraform", extensions: [".tf"] },
 	{ lang: "toml", extensions: [".toml"], filenames: ["cargo.lock", "poetry.lock", "uv.lock"] },
 	{ lang: "tsv", extensions: [".tsv"] },

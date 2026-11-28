@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { bundledLanguagesInfo } from "shiki";
 import { detect_lang, detectable_langs } from "../src/lang_map.ts";
+import { vendored_langs } from "../src/vendored_langs.ts";
 
 describe("lang_map", () => {
-	it("returns only languages that shiki bundles, under shiki's own ids", () => {
-		const ids = new Set(bundledLanguagesInfo.map((info) => info.id));
+	it("returns only languages that shiki bundles, under shiki's own ids, or that vendored_langs has", () => {
+		const ids = new Set([...bundledLanguagesInfo.map((info) => info.id), ...vendored_langs.keys()]);
 		const unbundled = [...detectable_langs].filter((lang) => !ids.has(lang));
 		expect(unbundled).toEqual([]);
 	});
@@ -118,6 +119,11 @@ describe("lang_map", () => {
 	it("does not highlight a plain-text file, whatever its first line is", () => {
 		expect(detect_lang("notes.txt", "#!/bin/sh")).toBe(null);
 		expect(detect_lang("go.mod", "<?xml version=\"1.0\"?>")).toBe(null);
+	});
+
+	it("takes .tt files for Template Toolkit, as VS Code's Template Toolkit extension does", () => {
+		expect(detect_lang("root/build.tt", null)).toBe("template-toolkit");
+		expect(detect_lang("page.html.tt", null)).toBe("template-toolkit");
 	});
 
 	it("lets an association that does not come with VS Code replace VS Code's for the same ending", () => {

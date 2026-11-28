@@ -143,6 +143,7 @@ stdenv.mkDerivation (finalAttrs: {
     mkdir -p $filter_root
     cp -r tools/tig-syntax-filter/src \
           tools/tig-syntax-filter/themes \
+          tools/tig-syntax-filter/grammars \
           tools/tig-syntax-filter/package.json \
           tools/tig-syntax-filter/node_modules \
           $filter_root/
