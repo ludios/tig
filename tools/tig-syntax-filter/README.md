@@ -48,7 +48,7 @@ in the repository root.
 - `src/vendored_langs.ts` — the languages whose grammars shiki does not
   bundle, and the grammars of theirs that `grammars/` holds: those of
   VS Code extensions, converted to JSON (licenses beside them).  So far
-  only Template Toolkit, for `.tt` files.
+  only Template Toolkit, for `.tt` and `.tt3` files.
 - `themes/one-monokai.json` — the theme (MIT, see `one-monokai.LICENSE`),
   vendored verbatim so it can be re-imported wholesale. Terminal-readability
   deviations from it (currently: a brighter comment foreground) are applied at

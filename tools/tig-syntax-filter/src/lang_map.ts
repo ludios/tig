@@ -29,6 +29,10 @@ interface extra_association extends lang_association {
 	 * Unlike a first-line pattern such as `^#!.*\bawk\b`, it does not take
 	 * a directory or an argument of that name for the interpreter. */
 	interpreter?: RegExp,
+	/** Whether a file of the language is a template that makes a file in
+	 * another language, so that a shebang line in it belongs to the file
+	 * that it makes. */
+	template?: true,
 }
 
 /**
@@ -100,8 +104,11 @@ const extra_langs: readonly extra_association[] = [
 	{ lang: "svelte", extensions: [".svelte"] },
 	{ lang: "systemd", extensions: [".service", ".socket", ".timer"] },
 	{ lang: "tcl", extensions: [".tcl"], interpreter: /tclsh[0-9.]*/ },
-	// Template Toolkit (Perl); its grammar is vendored (see vendored_langs.ts).
-	{ lang: "template-toolkit", extensions: [".tt", ".tt3"] },
+	// Template Toolkit (Perl); its grammar is vendored (see
+	// vendored_langs.ts).  Unlike VS Code with its Template Toolkit
+	// extension, take a template of a script, such as Hydra's
+	// reproduce.tt, for a script.
+	{ lang: "template-toolkit", extensions: [".tt", ".tt3"], template: true },
 	{ lang: "terraform", extensions: [".tf"] },
 	{ lang: "toml", extensions: [".toml"], filenames: ["cargo.lock", "poetry.lock", "uv.lock"] },
 	{ lang: "tsv", extensions: [".tsv"] },
@@ -152,6 +159,9 @@ const by_interpreter = extra_langs.toReversed().flatMap(({ interpreter, lang }) 
 	return [{ regex: new RegExp(`^(?:${interpreter.source})$`), lang }];
 });
 
+/** The languages of extra_langs whose files are templates. */
+const template_langs: ReadonlySet<string | null> = new Set(extra_langs.filter(({ template }) => template).map(({ lang }) => lang));
+
 /** The language of a makefile.* file that nothing else decides. */
 const MAKE = "make";
 
@@ -162,12 +172,30 @@ export const detectable_langs: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * @param first_line  A file's first line, without a byte order mark.
+ * @returns           The language that the line decides: through the
+ *                    program that it runs as a shebang line (when
+ *                    extra_langs names that program as an interpreter),
+ *                    or through a pattern that matches its start.
+ *                    Undefined when it decides none.
+ */
+function first_line_lang(first_line: string): string | null | undefined {
+	const shown = first_line.slice(0, FIRST_LINE_LIMIT);
+	const program = shebang_program(shown);
+	const run_by = program === null ? undefined : by_interpreter.find(({ regex }) => regex.test(program));
+	if (run_by !== undefined) {
+		return run_by.lang;
+	}
+	return by_first_line.find(({ regex }) => regex.test(shown))?.lang;
+}
+
+/**
  * Pick a shiki language for a file.  In order of precedence: its whole
  * name, the longest pattern that matches its path, the longest extension
- * that its name ends with, the program that its first line runs as a
- * shebang line (when extra_langs names it as an interpreter), a pattern
- * that matches the start of its first line, and a name that starts with
- * "makefile.".
+ * that its name ends with, its first line (see first_line_lang()), and a
+ * name that starts with "makefile.".  But for a template (see
+ * extra_association.template) whose first line is a shebang line, the
+ * first line goes before the extension.
  *
  * @param path        The file's path, relative to its repository's top.
  * @param first_line  The file's first line without a byte order mark, or
@@ -198,21 +226,17 @@ export function detect_lang(path: string, first_line: string | null): string | n
 	for (let start = 0; start < basename.length; start++) {
 		const by_ending = by_extension.get(basename.slice(start));
 		if (by_ending !== undefined) {
+			if (template_langs.has(by_ending) && first_line?.startsWith("#!")) {
+				return first_line_lang(first_line) ?? by_ending;
+			}
 			return by_ending;
 		}
 	}
 
 	if (first_line !== null) {
-		const shown = first_line.slice(0, FIRST_LINE_LIMIT);
-		const program = shebang_program(shown);
-		const run_by = program === null ? undefined : by_interpreter.find(({ regex }) => regex.test(program));
-		if (run_by !== undefined) {
-			return run_by.lang;
-		}
-		for (const { regex, lang } of by_first_line) {
-			if (regex.test(shown)) {
-				return lang;
-			}
+		const by_line = first_line_lang(first_line);
+		if (by_line !== undefined) {
+			return by_line;
 		}
 	}
 

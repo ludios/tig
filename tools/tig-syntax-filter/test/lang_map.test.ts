@@ -121,9 +121,17 @@ describe("lang_map", () => {
 		expect(detect_lang("go.mod", "<?xml version=\"1.0\"?>")).toBe(null);
 	});
 
-	it("takes .tt files for Template Toolkit, as VS Code's Template Toolkit extension does", () => {
+	it("takes .tt and .tt3 files for Template Toolkit, as VS Code's Template Toolkit extension does", () => {
 		expect(detect_lang("root/build.tt", null)).toBe("template-toolkit");
 		expect(detect_lang("page.html.tt", null)).toBe("template-toolkit");
+		expect(detect_lang("page.tt3", "<!DOCTYPE html>")).toBe("template-toolkit");
+	});
+
+	it("takes a template whose shebang line decides a language for a file in that language, unlike VS Code", () => {
+		expect(detect_lang("root/reproduce.tt", "#! /usr/bin/env bash")).toBe("shellscript");
+		expect(detect_lang("bin/run.tt", "#!/usr/bin/env fish")).toBe("fish");
+		expect(detect_lang("bin/run.tt", "#!/opt/unknown")).toBe("template-toolkit");
+		expect(detect_lang("x.tt", "[%# #!/bin/sh %]")).toBe("template-toolkit");
 	});
 
 	it("lets an association that does not come with VS Code replace VS Code's for the same ending", () => {
