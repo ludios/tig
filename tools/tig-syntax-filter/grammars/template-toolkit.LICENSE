@@ -26,11 +26,15 @@ JSON with Python's plistlib.  That extension has this license:
 	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 	SOFTWARE.
 
-Its grammars came from TextMate's Template Toolkit bundle
-(https://github.com/textmate/perl-template-toolkit.tmbundle), whose
-README gives this license:
+The extension's two plist files are byte for byte those of the
+Template Toolkit project's TextMate bundle, version 0.02
+(https://template-toolkit.org/download/Textmate-TT-0.02.tar.gz, SHA-256
+fd9cb2df11036e8dbb3547418a69841a0473437bb0df43d7f541fa3e5857f3c3).
+That archive has no license statement of its own.  The footer of
+template-toolkit.org's pages says:
 
-	Permission to copy, use, modify, sell and distribute this
-	software is granted. This software is provided "as is" without
-	express or implied warranty, and with no claim as to its
-	suitability for any purpose.
+	Copyright © 1996-2020 Andy Wardley. All Rights Reserved.
+
+	The Template Toolkit is Open Source software. You can redistribute
+	and/or modify it under the terms of the GNU Public Licence or the
+	Perl Artistic Licence.
