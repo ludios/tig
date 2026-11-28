@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { A } from "ayy";
 import { init_highlighter, ensure_lang } from "../src/highlight.ts";
-import { vendored_langs } from "../src/vendored_langs.ts";
+import { read_vendored_langs } from "../src/vendored_langs.ts";
 import { highlight_prefix } from "./highlight_prefix.ts";
 
 /**
@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 describe("vendored_langs", () => {
 	it("all load", async () => {
-		for (const lang of vendored_langs.keys()) {
+		for (const lang of (await read_vendored_langs()).keys()) {
 			expect(await ensure_lang(lang), lang).toBe(true);
 		}
 	});

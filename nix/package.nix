@@ -169,9 +169,10 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   # A syntax daemon that cannot start (say, because of a language table
-  # that glob_regex() refuses, or a theme or grammar engine that fails to
-  # load) leaves tig showing plain diffs, without an error.  The daemon
-  # makes its socket only when it has loaded all of these.
+  # that glob_regex() refuses, or a theme, vendored grammar or grammar
+  # engine that fails to load) leaves tig showing plain diffs, without an
+  # error.  The daemon makes its socket only when it has loaded all of
+  # these.
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck

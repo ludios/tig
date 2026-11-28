@@ -1,13 +1,11 @@
 /**
  * Languages whose grammars shiki does not bundle: grammars of VS Code
  * extensions, vendored in ../grammars as JSON (licenses beside them).
- * This module reads them when it loads, so that a daemon installed
- * without them fails to start, instead of leaving their files plain.
  */
 
 import { readFile } from "node:fs/promises";
 import { A } from "ayy";
-import type { LanguageRegistration } from "shiki";
+import type { BundledLanguage, LanguageRegistration } from "shiki";
 
 /** The directory of the vendored grammars. */
 const GRAMMARS = new URL("../grammars/", import.meta.url);
@@ -22,25 +20,28 @@ const GRAMMARS = new URL("../grammars/", import.meta.url);
  * @returns               The grammar, as shiki's loadLanguage() takes it.
  */
 async function read_grammar(file: string, scope_name: string, name: string, embedded_langs: string[]): Promise<LanguageRegistration> {
-	const grammar = JSON.parse(await readFile(new URL(file, GRAMMARS), "utf8"));
+	const text = await readFile(new URL(file, GRAMMARS), "utf8");
+	const grammar = JSON.parse(text);
 	A.eq(grammar.scopeName, scope_name, `the scope name of ${file}`);
 	return { ...grammar, name, embeddedLangs: embedded_langs };
 }
 
+/** What to give shiki's loadLanguage() for a language: the ids of the
+ * bundled languages whose grammars its grammar includes, then the
+ * vendored grammars, each after the grammars that it includes. */
+export type lang_inputs = readonly (BundledLanguage | LanguageRegistration)[];
+
 /**
- * Language id -> what to give shiki's loadLanguage() for it: the ids of
- * the bundled languages whose grammars its grammar includes, then the
- * vendored grammars, each after the grammars that it includes.
+ * Read the vendored grammars.
+ *
+ * @returns  Language id -> what to give shiki's loadLanguage() for it.
  */
-export const vendored_langs: ReadonlyMap<string, readonly (string | LanguageRegistration)[]> = new Map([
+export async function read_vendored_langs(): Promise<ReadonlyMap<string, lang_inputs>> {
 	// From the Template Toolkit extension (samosad.tt), which VS Code
 	// users install for .tt files.  Of the extension's four grammars,
 	// VS Code gives .tt files the one that the extension registers last:
 	// HTML+TT2, which colors TT2 directives with the TT2 grammar.
-	["template-toolkit", [
-		"css",
-		"javascript",
-		await read_grammar("TT2.tmLanguage.json", "source.tt2", "template-toolkit-directives", []),
-		await read_grammar("HTML+TT2.tmLanguage.json", "text.html.tt2", "template-toolkit", ["template-toolkit-directives", "css", "javascript"]),
-	]],
-]);
+	const tt2 = await read_grammar("TT2.tmLanguage.json", "source.tt2", "template-toolkit-directives", []);
+	const html_tt2 = await read_grammar("HTML+TT2.tmLanguage.json", "text.html.tt2", "template-toolkit", ["template-toolkit-directives", "css", "javascript"]);
+	return new Map([["template-toolkit", ["css", "javascript", tt2, html_tt2]]]);
+}

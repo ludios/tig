@@ -304,7 +304,12 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	await init_highlighter();
+	try {
+		await init_highlighter();
+	} catch (err) {
+		logger.error("cannot load the theme or a grammar: {err}", () => ({ err: String(err) }));
+		process.exit(1);
+	}
 
 	let active_connections = 0;
 	let idle_timer: ReturnType<typeof setTimeout>;

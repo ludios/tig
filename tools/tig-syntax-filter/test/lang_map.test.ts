@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { bundledLanguagesInfo } from "shiki";
 import { detect_lang, detectable_langs } from "../src/lang_map.ts";
-import { vendored_langs } from "../src/vendored_langs.ts";
+import { read_vendored_langs } from "../src/vendored_langs.ts";
+
+const vendored_langs = await read_vendored_langs();
 
 describe("lang_map", () => {
 	it("returns only languages that shiki bundles, under shiki's own ids, or that vendored_langs has", () => {

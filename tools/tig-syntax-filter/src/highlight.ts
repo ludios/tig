@@ -9,11 +9,11 @@
  */
 
 import { setImmediate } from "node:timers/promises";
-import { createHighlighter, type Highlighter } from "shiki";
+import { createHighlighter, type BundledLanguage, type Highlighter } from "shiki";
 import { INITIAL, EncodedTokenMetadata, type StateStack } from "shiki/textmate";
 import { config } from "./config.ts";
 import { ByteLRU } from "./lru.ts";
-import { vendored_langs } from "./vendored_langs.ts";
+import { read_vendored_langs, type lang_inputs } from "./vendored_langs.ts";
 import type { aligned_run } from "./diff_parser.ts";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { readFile } from "node:fs/promises";
@@ -146,10 +146,16 @@ function apply_token_color_overrides(theme: { tokenColors?: unknown }): void {
 	}
 }
 
+/** The languages of read_vendored_langs(), once init_highlighter() has
+ * read them. */
+let vendored_langs: ReadonlyMap<string, lang_inputs> = new Map();
+
 /**
  * Initialize the shiki highlighter with the One Monokai theme and an
  * explicitly-instantiated Oniguruma WASM engine (shiki also offers a
- * JavaScript regex engine, which would break engine-lineage fidelity).
+ * JavaScript regex engine, which would break engine-lineage fidelity),
+ * and read the vendored grammars, so that a missing file of the theme
+ * or of a grammar fails here, at startup.
  * The engine gets the WASM file's bytes: shiki's "shiki/wasm" module
  * instead decodes a base64 copy of it and gunzips that on every start.
  */
@@ -157,6 +163,7 @@ export async function init_highlighter(): Promise<void> {
 	A(highlighter === null, "init_highlighter called twice");
 	const theme_path = join(dirname(fileURLToPath(import.meta.url)), "..", "themes", "one-monokai.json");
 	const theme = JSON.parse(await readFile(theme_path, "utf8"));
+	vendored_langs = await read_vendored_langs();
 	theme.name = theme_name;
 	apply_token_color_overrides(theme);
 	highlighter = await createHighlighter({
@@ -176,8 +183,8 @@ const loaded_langs = new Set<string>();
 const failed_langs = new Set<string>();
 const loading_langs = new Map<string, Promise<boolean>>();
 
-/** Whether `lang` has a grammar, in shiki's bundle or in vendored_langs,
- * loading it on demand.
+/** Whether the grammar of `lang` (an id of shiki's bundled languages or
+ * of vendored_langs) loaded, loading it on demand.
  * Load failures are remembered (a grammarless language stays grammarless)
  * and concurrent loads of one language coalesce into a single attempt. */
 export async function ensure_lang(lang: string): Promise<boolean> {
@@ -194,7 +201,7 @@ export async function ensure_lang(lang: string): Promise<boolean> {
 	}
 	const attempt = (async () => {
 		try {
-			await highlighter.loadLanguage(...(vendored_langs.get(lang) ?? [lang]) as never[]);
+			await highlighter.loadLanguage(...(vendored_langs.get(lang) ?? [lang as BundledLanguage]));
 			loaded_langs.add(lang);
 			return true;
 		} catch (err) {
